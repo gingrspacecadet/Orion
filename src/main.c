@@ -4,6 +4,7 @@
 
 #include "ops.h"
 #include "machine.h"
+#include "debug.h"
 
 void (*ops[256])(Machine* m) = {
     [0x01] = ADD,
@@ -13,6 +14,7 @@ void (*ops[256])(Machine* m) = {
     [0x05] = MOD,
 
     [0x10] = LDI,
+    [0x13] = MOV,
 
     [0x20] = CMP,
     [0x21] = JMP,
@@ -31,32 +33,6 @@ void step(Machine* m) {
     uint8_t op = fetch8(m);
     ops[op](m);
 }
-
-/* DEBUG START */
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-#include <stdio.h>
-
-void draw_debug(Machine* m, SDL_Renderer* renderer, TTF_Font* font) {
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer); 
-
-    char buf[64];
-    SDL_Color white = {255, 255, 255, 255};
-    for (int i = 0; i < 8; i++) {
-        snprintf(buf, sizeof(buf), "R%d = %02X", i, m->cpu.reg[i]);
-        SDL_Surface* surf = TTF_RenderText_Solid(font, buf, white);
-        SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
-        SDL_Rect dst = {20, 20 + i*20, surf->w, surf->h};
-        SDL_RenderCopy(renderer, tex, NULL, &dst);
-        SDL_FreeSurface(surf);
-        SDL_DestroyTexture(tex);
-    }
-
-    SDL_RenderPresent(renderer);
-}
-
-/* DEBUG END */
 
 int main(int argc, char** argv) {
     Machine m = {0};
@@ -77,14 +53,50 @@ int main(int argc, char** argv) {
 
     SDL_Init(SDL_INIT_VIDEO);
     TTF_Init();
-    SDL_Window* win = SDL_CreateWindow("Emu debug", 100, 100, 300, 300, 0);
+    SDL_Window* win = SDL_CreateWindow("Emu debug",
+                                   SDL_WINDOWPOS_CENTERED,
+                                   SDL_WINDOWPOS_CENTERED,
+                                   1280, 720,
+                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_FULLSCREEN);
     SDL_Renderer* ren = SDL_CreateRenderer(win, -1, 0);
     TTF_Font* font = TTF_OpenFont("/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf", 16);
 
-    while (m.cpu.running) {
-        step(&m);
+    SDL_Event e;
+    int running = 1;
+    int autorun = 0;           /* 0 = step-by-step, 1 = automatic */
+    const Uint32 AUTODELAY = 0; /* ms between automatic steps */
+
+    while (m.cpu.running && running) {
         draw_debug(&m, ren, font);
-        SDL_Delay(500);
+
+        if (autorun) {
+            /* In autorun mode: poll events without blocking, step periodically */
+            while (SDL_PollEvent(&e)) {
+                if (e.type == SDL_QUIT) { running = 0; break; }
+                if (e.type == SDL_KEYDOWN) {
+                    if (e.key.keysym.sym == SDLK_ESCAPE) { running = 0; break; }
+                    if (e.key.keysym.sym == SDLK_SPACE) { autorun = !autorun; break; }
+                }
+            }
+            if (!running) break;
+
+            step(&m);
+            draw_debug(&m, ren, font);
+            SDL_Delay(AUTODELAY);
+        } else {
+            /* Step-by-step: block until an event arrives */
+            while (SDL_WaitEvent(&e)) {
+                if (e.type == SDL_QUIT) { running = 0; break; }
+                if (e.type == SDL_KEYDOWN) {
+                    if (e.key.keysym.sym == SDLK_ESCAPE) { running = 0; break; }
+                    if (e.key.keysym.sym == SDLK_SPACE) { autorun = !autorun; break; }
+                    /* any other key advances one step */
+                    step(&m);
+                    draw_debug(&m, ren, font);
+                    break;
+                }
+            }
+        }
     }
 
     SDL_Quit();

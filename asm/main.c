@@ -22,22 +22,28 @@ typedef struct {
 /* Unsorted table */
 static OpEntry table[] = {
     {0x00, "NOP", 1, 0, {OP_NONE, OP_NONE}},
+
     {0x01, "ADD", 3, 2, {OP_REG, OP_REG}},
     {0x02, "SUB", 3, 2, {OP_REG, OP_REG}},
     {0x03, "MUL", 3, 2, {OP_REG, OP_REG}},
     {0x04, "DIV", 3, 2, {OP_REG, OP_REG}},
     {0x05, "MOD", 3, 2, {OP_REG, OP_REG}},
+
     {0x10, "LDI", 3, 2, {OP_REG, OP_LIT}},
     {0x11, "LDR", 3, 2, {OP_REG, OP_ADDR}},
     {0x12, "STR", 3, 2, {OP_ADDR, OP_REG}},
+    {0x13, "MOV", 3, 2, {OP_REG, OP_REG}},
+
     {0x20, "CMP", 3, 2, {OP_REG, OP_REG}},
     {0x21, "JMP", 2, 1, {OP_ADDR, OP_NONE}},
     {0x22, "JZ",  2, 1, {OP_ADDR, OP_NONE}},
     {0x23, "JNZ", 2, 1, {OP_ADDR, OP_NONE}},
+
     {0x30, "PUSH",2, 1, {OP_REG, OP_NONE}},
     {0x31, "POP", 2, 1, {OP_REG, OP_NONE}},
     {0x32, "CALL",2, 1, {OP_ADDR, OP_NONE}},
     {0x33, "RET", 1, 0, {OP_NONE, OP_NONE}},
+
     {0xFF, "HLT", 1, 0, {OP_NONE, OP_NONE}}
 };
 static size_t table_len = sizeof(table) / sizeof(table[0]);
@@ -108,6 +114,11 @@ int parse(char *line, uint8_t *out, size_t outcap) {
     /* split mnemonic and rest */
     char *mn = strtok(tmp, " \t");
     if (!mn) return 0;
+
+    /* make it uppercase */
+    for (char *p = mn; *p; ++p) {
+        *p = (char) toupper((unsigned char) *p);
+    }
 
     OpEntry key = { .name = mn };
     OpEntry *found = bsearch(&key, table, table_len, sizeof(table[0]), cmp_op);

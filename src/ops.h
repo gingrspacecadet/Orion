@@ -18,5 +18,6 @@ OP(PUSH);
 OP(POP);
 OP(CALL);
 OP(RET);
+OP(MOV);
 
 #endif

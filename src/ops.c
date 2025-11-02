@@ -81,3 +81,9 @@ OP(CALL) {
 OP(RET) {
 
 }
+
+OP(MOV) {
+    uint8_t reg1 = fetch8(m);
+    uint8_t reg2 = fetch8(m);
+    m->cpu.reg[reg1 & 7] = m->cpu.reg[reg2 & 7];
+}
