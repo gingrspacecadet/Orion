@@ -146,6 +146,7 @@ int main(int argc, char** argv) {
     m.cpu.flags.I = false;
     m.cpu.flags.IE = true;
     m.cpu.running = true;
+    m.cpu.cycle = 0;
 
     SDL_Init(SDL_INIT_VIDEO);
     TTF_Init();
@@ -162,7 +163,6 @@ int main(int argc, char** argv) {
     int autorun = 0;           /* 0 = step-by-step, 1 = automatic */
     const Uint32 AUTODELAY = 0; /* ms between automatic steps */
 
-    int i = 0;
     while (m.cpu.running && running) {
         draw_debug(&m, ren, font);
 
@@ -177,6 +177,10 @@ int main(int argc, char** argv) {
             }
             if (!running) break;
 
+            if (m.cpu.cycle++ % 5 == 0) {
+                m.cpu.flags.I = true;
+                m.cpu.interrupt = 0;
+            }
             step(&m);
             draw_debug(&m, ren, font);
             SDL_Delay(AUTODELAY);
@@ -188,7 +192,7 @@ int main(int argc, char** argv) {
                     if (e.key.keysym.sym == SDLK_ESCAPE) { running = 0; break; }
                     if (e.key.keysym.sym == SDLK_SPACE) { autorun = !autorun; break; }
                     /* any other key advances one step */
-                    if (i++ % 5 == 0) {
+                    if (m.cpu.cycle++ % 5 == 0) {
                         m.cpu.flags.I = true;
                         m.cpu.interrupt = 0;
                     }
