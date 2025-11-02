@@ -40,3 +40,26 @@ OP(MOD) {
     uint8_t reg2 = fetch8(m);
     m->cpu.reg[reg1 & 7] = getreg(m, reg1) % getreg(m, reg2);
 }
+
+OP(CMP) {
+    uint8_t reg1 = fetch8(m);
+    uint8_t reg2 = fetch8(m);
+    int8_t result = getreg(m, reg1) - getreg(m, reg2);
+    m->cpu.flags.Z = result == 0;
+}
+
+OP(JZ) {
+    if (m->cpu.flags.Z == true) {
+        m->cpu.pc = fetch8(m);
+    }
+}
+
+OP(JNZ) {
+    if (m->cpu.flags.Z != true) {
+        m->cpu.pc = fetch8(m);
+    }
+}
+
+OP(JMP) {
+    m->cpu.pc = fetch8(m);
+}

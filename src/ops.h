@@ -10,5 +10,9 @@ OP(SUB);
 OP(MUL);
 OP(DIV);
 OP(MOD);
+OP(CMP);
+OP(JZ);
+OP(JNZ);
+OP(JMP);
 
 #endif

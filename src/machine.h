@@ -2,6 +2,7 @@
 #define MACHINE_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define fetch8(machine) machine->mem[machine->cpu.pc++];
 #define OP(name) void name(Machine* m)
@@ -15,7 +16,7 @@ typedef struct {
         uint8_t N:1;
         uint8_t C:1;
         uint8_t V:1;
-    } flag;
+    } flags;
     bool running;
 } CPU;
 

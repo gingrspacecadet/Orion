@@ -10,7 +10,7 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 TARGET = build/orion
 
-.PHONY: all clean run crun
+.PHONY: all clean run crun asm
 
 all: $(TARGET)
 
@@ -23,6 +23,9 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+asm:
+	$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
 
 clean:
 	rm -rf $(BUILD_DIR)

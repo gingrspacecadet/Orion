@@ -11,7 +11,14 @@ void (*ops[256])(Machine* m) = {
     [0x03] = MUL,
     [0x04] = DIV,
     [0x05] = MOD,
+
     [0x10] = LDI,
+
+    [0x20] = CMP,
+    [0x21] = JMP,
+    [0x22] = JZ,
+    [0x23] = JNZ,
+
     [0xFF] = HLT
 };
 
@@ -46,15 +53,18 @@ void draw_debug(Machine* m, SDL_Renderer* renderer, TTF_Font* font) {
 
 /* DEBUG END */
 
-int main(void) {
+int main(int argc, char** argv) {
     Machine m = {0};
-    uint8_t program[] = {
-        0x10, 0x01, 0x08,   // LDI R1, 8
-        0x10, 0x02, 0x04,   // LDI R2, 4
-        0x01, 0x01, 0x02,   // ADD R1, R2
-        0x02, 0x01, 0x02,   // SUB R1, R2
-        0xFF                // HLT
-    };
+    
+    if (argc < 2) {
+        fprintf(stderr, "Missing target program\n");
+        return 1;
+    }
+
+    FILE* target = fopen(argv[1], "rb");
+    uint8_t program[1024];
+    fread(program, sizeof(program), 1, target);
+    
     for (size_t i = 0; i < sizeof(program); i++) { m.mem[i] = program[i]; }
     m.cpu.pc = 0;
     m.cpu.running = true;
