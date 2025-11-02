@@ -23,6 +23,7 @@ typedef struct {
         uint8_t I:1;
         uint8_t IE:1;
     } flags;
+    size_t cycle;
     bool running;
 } CPU;
 
