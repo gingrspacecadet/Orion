@@ -19,5 +19,7 @@ OP(POP);
 OP(CALL);
 OP(RET);
 OP(MOV);
+OP(NOP);
+OP(IRET);
 
 #endif

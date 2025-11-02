@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra 
+CFLAGS = -Wall -Wextra -g
 LDFLAGS = $(shell pkg-config --cflags --libs sdl2 SDL2_ttf)
 
 BUILD_DIR = build
@@ -10,9 +10,9 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 TARGET = build/orion
 
-.PHONY: all clean run crun asm
+.PHONY: all clean run crun asm ints
 
-all: $(TARGET)
+all: $(TARGET) ints
 
 $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -35,3 +35,9 @@ run: all
 	@./$(TARGET) a.out
 
 crun: clean run
+
+ints: asm
+	@mkdir -p build/ints
+	@find ints -type f -print0 | while IFS= read -r -d '' f; do \
+		./build/asm "$$f" "build/$$f"; \
+	done

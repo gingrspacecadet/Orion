@@ -87,3 +87,12 @@ OP(MOV) {
     uint8_t reg2 = fetch8(m);
     m->cpu.reg[reg1 & 7] = m->cpu.reg[reg2 & 7];
 }
+
+OP(IRET) {
+    m->cpu.pc = m->mem[m->cpu.sp];
+    m->cpu.sp += sizeof(uint8_t);
+}
+
+OP(NOP) {
+    return;
+}

@@ -1,5 +1,0 @@
-LDI R3, #1
-PUSH R3
-LDI R3, #5
-POP R3
-HLT

@@ -44,7 +44,9 @@ static OpEntry table[] = {
     {0x32, "CALL",2, 1, {OP_ADDR, OP_NONE}},
     {0x33, "RET", 1, 0, {OP_NONE, OP_NONE}},
 
-    {0xFF, "HLT", 1, 0, {OP_NONE, OP_NONE}}
+    {0x40, "IRET", 1, 0, {OP_NONE, OP_NONE}},
+
+    {0xFF, "HLT", 1, 0, {OP_NONE, OP_NONE}},
 };
 static size_t table_len = sizeof(table) / sizeof(table[0]);
 
@@ -210,10 +212,10 @@ int parse(char *line, uint8_t *out, size_t outcap) {
     return (int)write_i;
 }
 
-/* Small demo assembler: reads lines, writes bytes to a.out */
+/* Small demo assembler: reads lines, writes bytes to argv[2] */
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s source.asm\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s source.asm a.out\n", argv[0]);
         return 1;
     }
 
@@ -224,9 +226,9 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Failed to open source file %s\n", argv[1]);
         return 1;
     }
-    FILE* outf = fopen("a.out", "wb");
+    FILE* outf = fopen(argv[2], "wb");
     if (!outf) {
-        fprintf(stderr, "Failed to open output file a.out\n");
+        fprintf(stderr, "Failed to open output file %s\n", argv[2]);
         fclose(src);
         return 1;
     }
