@@ -21,5 +21,7 @@ OP(RET);
 OP(MOV);
 OP(NOP);
 OP(IRET);
+OP(STI);
+OP(CLI);
 
 #endif

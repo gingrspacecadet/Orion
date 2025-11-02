@@ -45,6 +45,8 @@ static OpEntry table[] = {
     {0x33, "RET", 1, 0, {OP_NONE, OP_NONE}},
 
     {0x40, "IRET", 1, 0, {OP_NONE, OP_NONE}},
+    {0x41, "STI", 1, 0, {OP_NONE, OP_NONE}},
+    {0x42, "CLI", 1, 0, {OP_NONE, OP_NONE}},
 
     {0xFF, "HLT", 1, 0, {OP_NONE, OP_NONE}},
 };

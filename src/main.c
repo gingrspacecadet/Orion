@@ -30,6 +30,8 @@ void (*ops[256])(Machine* m) = {
     [0x33] = RET,
 
     [0x40] = IRET,
+    [0x41] = STI,
+    [0x42] = CLI,
 
     [0xFF] = HLT
 };
@@ -51,7 +53,7 @@ uint16_t pop16(Machine* m) {
 }
 
 void step(Machine* m) {
-    if (m->cpu.flags.IE) {
+    if (m->cpu.flags.I && m->cpu.flags.IE) {
         /* validate interrupt number and vector table bounds */
         if (m->cpu.interrupt >= 256) { fprintf(stderr, "Invalid interrupt %u\n", m->cpu.interrupt); m->cpu.running = false; return; }
         size_t vec_addr = INT_MEM + (size_t)m->cpu.interrupt * 2; /* assume vector table is 2 bytes per entry */
@@ -61,7 +63,7 @@ void step(Machine* m) {
         push16(m, m->cpu.pc);
         uint16_t new_pc = (uint16_t)m->mem[vec_addr] | ((uint16_t)m->mem[vec_addr + 1] << 8);
         m->cpu.pc = new_pc;
-        m->cpu.flags.IE = false;
+        m->cpu.flags.I = false;
     } else {
         uint8_t op = fetch8(m);
         if (ops[op]) ops[op](m);
@@ -141,7 +143,8 @@ int main(int argc, char** argv) {
 
     m.cpu.pc = 0;
     m.cpu.sp = MEM_SIZE;
-    m.cpu.flags.IE = false;
+    m.cpu.flags.I = false;
+    m.cpu.flags.IE = true;
     m.cpu.running = true;
 
     SDL_Init(SDL_INIT_VIDEO);
@@ -186,7 +189,7 @@ int main(int argc, char** argv) {
                     if (e.key.keysym.sym == SDLK_SPACE) { autorun = !autorun; break; }
                     /* any other key advances one step */
                     if (i++ % 5 == 0) {
-                        m.cpu.flags.IE = true;
+                        m.cpu.flags.I = true;
                         m.cpu.interrupt = 0;
                     }
                     step(&m);

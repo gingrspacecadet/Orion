@@ -96,3 +96,11 @@ OP(IRET) {
 OP(NOP) {
     return;
 }
+
+OP(STI) {
+    m->cpu.flags.IE = true;
+}
+
+OP(CLI) {
+    m->cpu.flags.IE = false;
+}

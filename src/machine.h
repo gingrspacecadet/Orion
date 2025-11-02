@@ -20,6 +20,7 @@ typedef struct {
         uint8_t N:1;
         uint8_t C:1;
         uint8_t V:1;
+        uint8_t I:1;
         uint8_t IE:1;
     } flags;
     bool running;
