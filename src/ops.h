@@ -14,5 +14,9 @@ OP(CMP);
 OP(JZ);
 OP(JNZ);
 OP(JMP);
+OP(PUSH);
+OP(POP);
+OP(CALL);
+OP(RET);
 
 #endif

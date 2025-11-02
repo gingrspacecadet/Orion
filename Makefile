@@ -32,6 +32,6 @@ clean:
 	rm -f $(TARGET)
 
 run: all
-	@./$(TARGET)
+	@./$(TARGET) a.out
 
 crun: clean run

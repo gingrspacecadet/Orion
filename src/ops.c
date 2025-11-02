@@ -63,3 +63,21 @@ OP(JNZ) {
 OP(JMP) {
     m->cpu.pc = fetch8(m);
 }
+
+OP(PUSH) {
+    m->cpu.sp -= sizeof(uint8_t);
+    m->mem[m->cpu.sp] = m->cpu.reg[fetch8(m) & 7];
+}
+
+OP(POP) {
+    m->cpu.reg[fetch8(m) & 7] = m->mem[m->cpu.sp];
+    m->cpu.sp += sizeof(uint8_t);
+}
+
+OP(CALL) {
+
+}
+
+OP(RET) {
+
+}

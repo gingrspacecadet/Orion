@@ -19,6 +19,11 @@ void (*ops[256])(Machine* m) = {
     [0x22] = JZ,
     [0x23] = JNZ,
 
+    [0x30] = PUSH,
+    [0x31] = POP,
+    [0x32] = CALL,
+    [0x33] = RET,
+
     [0xFF] = HLT
 };
 
@@ -67,6 +72,7 @@ int main(int argc, char** argv) {
     
     for (size_t i = 0; i < sizeof(program); i++) { m.mem[i] = program[i]; }
     m.cpu.pc = 0;
+    m.cpu.sp = MEM_SIZE;
     m.cpu.running = true;
 
     SDL_Init(SDL_INIT_VIDEO);

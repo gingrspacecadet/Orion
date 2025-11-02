@@ -4,13 +4,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define fetch8(machine) machine->mem[machine->cpu.pc++];
+#define fetch8(machine) machine->mem[machine->cpu.pc++]
 #define OP(name) void name(Machine* m)
 #define getreg(machine, register) machine->cpu.reg[register & 7]
+
+#define MEM_SIZE 0x10000
 
 typedef struct {
     uint8_t reg[8];
     uint16_t pc;
+    uint16_t sp;
     struct {
         uint8_t Z:1;
         uint8_t N:1;
@@ -22,7 +25,7 @@ typedef struct {
 
 typedef struct {
     CPU cpu;
-    uint8_t mem[0x10000]; // 64kb
+    uint8_t mem[MEM_SIZE]; // 64kb
 } Machine;
 
 
