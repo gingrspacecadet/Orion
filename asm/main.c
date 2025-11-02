@@ -88,7 +88,7 @@ static int parse_literal(const char *tok, uint8_t *out) {
 
 /* parse address token (numeric only) */
 static int parse_addr_token(const char *tok, uint8_t *out) {
-    return parse_number(tok, out);
+    return parse_literal(tok, out);
 }
 
 /* trim leading/trailing whitespace from a string in-place */

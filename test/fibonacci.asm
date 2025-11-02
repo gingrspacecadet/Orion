@@ -13,6 +13,6 @@ mov R2, R3        ; shift: R2 <- R3 (new current)
 ldi R6, #1        ; constant 1
 add R5, R6        ; loop counter++
 cmp R4, R5        ; compare target with counter
-jnz 12            ; jump back to the instruction whose first token is at index 12
+jnz #0xC            ; jump back to the instruction whose first token is at index 12
 
 hlt               ; done
