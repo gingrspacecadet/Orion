@@ -1,14 +1,22 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "ops.h"
 #include "machine.h"
 #include "debug.h"
 
-#define INT_MEM 0x100
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
-void (*ops[256])(Machine* m) = {
+#define INT_MEM 0x100
+#define MAX_INTERRUPTS 128  /* tune as needed */
+
+/* opcode table */
+void (*ops_table[256])(Machine* m) = {
     [0x00] = NOP,
     [0x01] = ADD,
     [0x02] = SUB,
@@ -17,6 +25,8 @@ void (*ops[256])(Machine* m) = {
     [0x05] = MOD,
 
     [0x10] = LDI,
+    [0x11] = LDR,
+    [0x12] = STR,
     [0x13] = MOV,
 
     [0x20] = CMP,
@@ -36,111 +46,192 @@ void (*ops[256])(Machine* m) = {
     [0xFF] = HLT
 };
 
-/* assume MEM_SIZE and Machine definition use uint16_t PC and uint16_t sp */
+/* keep track of how many interrupts we've added */
+static size_t num_ints = 0;
+
+/* push/pop 16-bit values to stack (stack grows down). Assumes sp is an index into m->mem and MEM_SIZE is available */
 void push16(Machine* m, uint16_t value) {
-    if (m->cpu.sp < 2) { fprintf(stderr, "Stack overflow\n"); m->cpu.running = false; return; }
+    if (m->cpu.sp < 2) {
+        fprintf(stderr, "Stack overflow (sp=%u)\n", (unsigned)m->cpu.sp);
+        m->cpu.running = false;
+        return;
+    }
     m->cpu.sp -= 2;
+    /* little-endian store: low byte then high byte */
     m->mem[m->cpu.sp    ] = (uint8_t)(value & 0xFF);
     m->mem[m->cpu.sp + 1] = (uint8_t)((value >> 8) & 0xFF);
 }
 
 uint16_t pop16(Machine* m) {
-    if (m->cpu.sp > MEM_SIZE - 2) { fprintf(stderr, "Stack underflow\n"); m->cpu.running = false; return 0; }
+    if (m->cpu.sp > MEM_SIZE - 2) {
+        fprintf(stderr, "Stack underflow (sp=%u)\n", (unsigned)m->cpu.sp);
+        m->cpu.running = false;
+        return 0;
+    }
     uint16_t lo = m->mem[m->cpu.sp];
     uint16_t hi = m->mem[m->cpu.sp + 1];
     m->cpu.sp += 2;
     return (uint16_t)((hi << 8) | lo);
 }
 
+/* single CPU step: either handle interrupt or fetch/execute one opcode */
 void step(Machine* m) {
     if (m->cpu.flags.I && m->cpu.flags.IE) {
         /* validate interrupt number and vector table bounds */
-        if (m->cpu.interrupt >= 256) { fprintf(stderr, "Invalid interrupt %u\n", m->cpu.interrupt); m->cpu.running = false; return; }
-        size_t vec_addr = INT_MEM + (size_t)m->cpu.interrupt * 2; /* assume vector table is 2 bytes per entry */
-        if (vec_addr + 1 >= MEM_SIZE) { fprintf(stderr, "Interrupt vector out of range\n"); m->cpu.running = false; return; }
+        if (m->cpu.interrupt >= 256) {
+            fprintf(stderr, "Invalid interrupt number %u\n", (unsigned)m->cpu.interrupt);
+            m->cpu.running = false;
+            return;
+        }
+        size_t vec_addr = INT_MEM + (size_t)m->cpu.interrupt * 2; /* 2 bytes per vector (little-endian) */
+        if (vec_addr + 1 >= MEM_SIZE) {
+            fprintf(stderr, "Interrupt vector out of range (vec_addr=0x%zx)\n", vec_addr);
+            m->cpu.running = false;
+            return;
+        }
 
-        /* push full PC, switch PC to vector (little-endian) */
+        /* push PC and jump to vector */
         push16(m, m->cpu.pc);
         uint16_t new_pc = (uint16_t)m->mem[vec_addr] | ((uint16_t)m->mem[vec_addr + 1] << 8);
         m->cpu.pc = new_pc;
         m->cpu.flags.I = false;
+        return;
+    }
+
+    uint8_t op = fetch8(m);
+    void (*handler)(Machine*) = ops_table[op];
+    if (handler) {
+        handler(m);
     } else {
-        uint8_t op = fetch8(m);
-        if (ops[op]) ops[op](m);
-        else { fprintf(stderr, "Illegal opcode 0x%02X at PC=0x%04X\n", op, m->cpu.pc); m->cpu.running = false; }
+        fprintf(stderr, "Illegal opcode 0x%02X at PC=0x%04X\n", op, m->cpu.pc);
+        m->cpu.running = false;
     }
 }
 
-int num_ints = 0;
-
-void add_int(Machine* m, uint16_t addr) {
-    m->mem[INT_MEM + num_ints] = (uint8_t)((addr & 0xFF00) >> 8);
-    m->mem[INT_MEM + num_ints + 1] = (uint8_t)(addr & 0x00FF);
-    num_ints++;
+/* store a little-endian 16-bit interrupt vector at INT_MEM + 2 * index.
+   Returns 0 on success, -1 on error. */
+int add_int_vector(Machine* m, size_t index, uint16_t addr) {
+    if (index >= MAX_INTERRUPTS) {
+        fprintf(stderr, "Exceeded maximum interrupt entries (%zu)\n", (size_t)MAX_INTERRUPTS);
+        return -1;
+    }
+    size_t base = INT_MEM + index * 2;
+    if (base + 1 >= MEM_SIZE) {
+        fprintf(stderr, "Interrupt table write out of bounds (base=0x%zx)\n", base);
+        return -1;
+    }
+    /* little-endian: low byte first */
+    m->mem[base    ] = (uint8_t)(addr & 0xFF);
+    m->mem[base + 1] = (uint8_t)((addr >> 8) & 0xFF);
+    return 0;
 }
 
-
-void int_code(Machine *m, const char *file, uint16_t addr) {
-    FILE *src = fopen(file, "rb");
-    if (!src) {
-        fprintf(stderr, "Failed to open int source file %s\n", file);
-        exit(EXIT_FAILURE);
+/* load binary file into memory at addr. Returns number of bytes loaded, or (size_t)-1 on error */
+size_t load_file_to_mem(Machine* m, const char* file, uint16_t addr) {
+    FILE* f = fopen(file, "rb");
+    if (!f) {
+        fprintf(stderr, "Failed to open file %s\n", file);
+        return (size_t)-1;
     }
 
     if (addr >= MEM_SIZE) {
         fprintf(stderr, "Start address 0x%04x out of bounds\n", addr);
-        fclose(src);
-        exit(EXIT_FAILURE);
+        fclose(f);
+        return (size_t)-1;
     }
 
     size_t remaining = MEM_SIZE - addr;
-    size_t got = fread(&m->mem[addr], 1, remaining, src);
-    if (got == 0 && ferror(src)) {
-        fprintf(stderr, "Error reading from %s\n", file);
-        fclose(src);
-        exit(EXIT_FAILURE);
+    size_t total = 0;
+    while (total < remaining) {
+        size_t want = remaining - total;
+        if (want > 4096) want = 4096;
+        size_t got = fread(&m->mem[addr + total], 1, want, f);
+        if (got == 0) {
+            if (ferror(f)) {
+                fprintf(stderr, "Error reading from %s\n", file);
+                fclose(f);
+                return (size_t)-1;
+            }
+            break; /* EOF */
+        }
+        total += got;
     }
 
-    if (!feof(src) && got == remaining) {
-        fprintf(stderr, "Warning: input file %s truncated to %zu bytes at addr 0x%04x\n", file, remaining, addr);
+    if (!feof(f) && total == remaining) {
+        fprintf(stderr, "Warning: input file %s truncated to %zu bytes at addr 0x%04x\n", file, total, addr);
     }
 
-    fclose(src);
+    fclose(f);
+    return total;
 }
 
-typedef struct { uint16_t addr; char* file } Int;
+/* convenience to register and load multiple interrupts */
+typedef struct { uint16_t addr; const char* file; } IntDef;
+int add_ints(Machine* m, const IntDef defs[], size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        if (num_ints >= MAX_INTERRUPTS) {
+            fprintf(stderr, "Cannot add interrupt %zu: table full\n", i);
+            return -1;
+        }
+        if (INT_MEM + num_ints * 2 + 1 >= MEM_SIZE) {
+            fprintf(stderr, "Interrupt table overflow at index %zu\n", num_ints);
+            return -1;
+        }
+        if (add_int_vector(m, num_ints, defs[i].addr) != 0) return -1;
 
-void add_ints(Machine* m, Int interrupt[], size_t num) {
-    for (int i = 0; i < num; i++) {
-        add_int(m, interrupt[i].addr);
-        int_code(m, interrupt[i].file, interrupt[i].addr);
+        if (defs[i].file) {
+            size_t got = load_file_to_mem(m, defs[i].file, defs[i].addr);
+            if (got == (size_t)-1) return -1;
+        }
+        num_ints++;
     }
+    return 0;
 }
 
 int main(int argc, char** argv) {
-    Machine m = {0};
-    
+    Machine m;
+    memset(&m, 0, sizeof(m));
+
     if (argc < 2) {
-        fprintf(stderr, "Missing target program\n");
-        return 1;
+        fprintf(stderr, "Usage: %s <program.bin>\n", argv[0]);
+        return EXIT_FAILURE;
     }
 
+    /* load target program */
     FILE* target = fopen(argv[1], "rb");
-    uint8_t program[1024];
-    fread(program, sizeof(program), 1, target);
-    
-    for (size_t i = 0; i < sizeof(program); i++) { m.mem[i] = program[i]; }
+    if (!target) {
+        fprintf(stderr, "Failed to open target program %s\n", argv[1]);
+        return EXIT_FAILURE;
+    }
 
-    add_ints(&m, (Int[])
-    {
-        {
-            (uint16_t)0x6969,
-            "build/ints/timer"
+    /* read entire file into memory (up to MEM_SIZE) */
+    size_t loaded = 0;
+    while (loaded < MEM_SIZE) {
+        size_t want = MEM_SIZE - loaded;
+        if (want > 4096) want = 4096;
+        size_t got = fread(&m.mem[loaded], 1, want, target);
+        if (got == 0) {
+            if (ferror(target)) {
+                fprintf(stderr, "Error reading target program %s\n", argv[1]);
+                fclose(target);
+                return EXIT_FAILURE;
+            }
+            break;
         }
-    }, 1);
-    // add_int(&m, 0x6969);
-    // int_code(&m, "build/ints/test.int", 0x6969);
+        loaded += got;
+    }
+    fclose(target);
 
+    /* example interrupt(s) to add */
+    IntDef ints[] = {
+        { .addr = 0x6969, .file = "build/ints/timer" }
+    };
+    if (add_ints(&m, ints, sizeof(ints) / sizeof(*ints)) != 0) {
+        fprintf(stderr, "Failed to register interrupts\n");
+        return EXIT_FAILURE;
+    }
+
+    /* initialize CPU */
     m.cpu.pc = 0;
     m.cpu.sp = MEM_SIZE;
     m.cpu.flags.I = false;
@@ -148,15 +239,47 @@ int main(int argc, char** argv) {
     m.cpu.running = true;
     m.cpu.cycle = 0;
 
-    SDL_Init(SDL_INIT_VIDEO);
-    TTF_Init();
+    /* SDL/TTF init with error checks */
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+    if (TTF_Init() != 0) {
+        fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+
     SDL_Window* win = SDL_CreateWindow("Emu debug",
-                                   SDL_WINDOWPOS_CENTERED,
-                                   SDL_WINDOWPOS_CENTERED,
-                                   1280, 720,
-                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_FULLSCREEN);
-    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, 0);
+                                       SDL_WINDOWPOS_CENTERED,
+                                       SDL_WINDOWPOS_CENTERED,
+                                       1280, 720,
+                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    if (!win) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        TTF_Quit();
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+
+    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!ren) {
+        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(win);
+        TTF_Quit();
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+
     TTF_Font* font = TTF_OpenFont("/usr/share/fonts/TTF/JetBrainsMonoNerdFontMono-Regular.ttf", 16);
+    if (!font) {
+        fprintf(stderr, "Failed to open font\n");
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        TTF_Quit();
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
 
     SDL_Event e;
     int running = 1;
@@ -167,7 +290,6 @@ int main(int argc, char** argv) {
         draw_debug(&m, ren, font);
 
         if (autorun) {
-            /* In autorun mode: poll events without blocking, step periodically */
             while (SDL_PollEvent(&e)) {
                 if (e.type == SDL_QUIT) { running = 0; break; }
                 if (e.type == SDL_KEYDOWN) {
@@ -177,22 +299,21 @@ int main(int argc, char** argv) {
             }
             if (!running) break;
 
-            if (m.cpu.cycle++ % 1000 == 0) {
+            if ((m.cpu.cycle++ % 1000) == 0) {
                 m.cpu.flags.I = true;
                 m.cpu.interrupt = 0;
             }
             step(&m);
             draw_debug(&m, ren, font);
-            SDL_Delay(AUTODELAY);
+            if (AUTODELAY) SDL_Delay(AUTODELAY);
         } else {
-            /* Step-by-step: block until an event arrives */
             while (SDL_WaitEvent(&e)) {
                 if (e.type == SDL_QUIT) { running = 0; break; }
                 if (e.type == SDL_KEYDOWN) {
                     if (e.key.keysym.sym == SDLK_ESCAPE) { running = 0; break; }
                     if (e.key.keysym.sym == SDLK_SPACE) { autorun = !autorun; break; }
                     /* any other key advances one step */
-                    if (m.cpu.cycle++ % 1000 == 0) {
+                    if ((m.cpu.cycle++ % 1000) == 0) {
                         m.cpu.flags.I = true;
                         m.cpu.interrupt = 0;
                     }
@@ -204,6 +325,11 @@ int main(int argc, char** argv) {
         }
     }
 
+    TTF_CloseFont(font);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    TTF_Quit();
     SDL_Quit();
-    return 0;
+
+    return m.cpu.running ? EXIT_SUCCESS : EXIT_FAILURE;
 }

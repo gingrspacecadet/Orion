@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #define fetch8(machine) machine->mem[machine->cpu.pc++]
 #define OP(name) void name(Machine* m)

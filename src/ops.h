@@ -23,5 +23,7 @@ OP(NOP);
 OP(IRET);
 OP(STI);
 OP(CLI);
+OP(LDR);
+OP(STR);
 
 #endif
