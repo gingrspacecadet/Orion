@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
             }
             if (!running) break;
 
-            if (m.cpu.cycle++ % 5 == 0) {
+            if (m.cpu.cycle++ % 1000 == 0) {
                 m.cpu.flags.I = true;
                 m.cpu.interrupt = 0;
             }
@@ -192,7 +192,7 @@ int main(int argc, char** argv) {
                     if (e.key.keysym.sym == SDLK_ESCAPE) { running = 0; break; }
                     if (e.key.keysym.sym == SDLK_SPACE) { autorun = !autorun; break; }
                     /* any other key advances one step */
-                    if (m.cpu.cycle++ % 5 == 0) {
+                    if (m.cpu.cycle++ % 1000 == 0) {
                         m.cpu.flags.I = true;
                         m.cpu.interrupt = 0;
                     }
