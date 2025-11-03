@@ -75,11 +75,14 @@ OP(POP) {
 }
 
 OP(CALL) {
-
+    m->cpu.sp -= sizeof(uint16_t);
+    m->mem = m->cpu.pc;
+    m->cpu.pc = fetch8(m);
 }
 
 OP(RET) {
-
+    m->cpu.pc = m->mem[m->cpu.sp];
+    m->cpu.sp += sizeof(uint16_t);
 }
 
 OP(MOV) {
