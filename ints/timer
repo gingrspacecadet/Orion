@@ -1,0 +1,9 @@
+push R0
+push R1
+ldi R0, 1
+ldr R1, #0xFF
+add R1, R0
+str #0xFF, R1
+pop R1
+pop R0
+iret
