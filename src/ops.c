@@ -107,3 +107,15 @@ OP(STI) {
 OP(CLI) {
     m->cpu.flags.IE = false;
 }
+
+OP(LDR) {
+    uint8_t reg = fetch8();
+    uint8_t addr = fetch8();
+    m->cpu.reg[reg & 7] = m->mem[(uint16_t)addr];
+}
+
+OP(STR) {
+    uint8_t addr = fetch8();
+    uint8_t reg = fetch8();
+    m->mem[(uint16_t)addr] = getreg(m, reg);
+}
