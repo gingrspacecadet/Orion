@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     {
         {
             (uint16_t)0x6969,
-            "build/ints/test.int"
+            "build/ints/timer"
         }
     }, 1);
     // add_int(&m, 0x6969);
