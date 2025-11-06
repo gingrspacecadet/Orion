@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS += -Wall -Wextra -g -DDEBUG
-LDFLAGS = $(shell pkg-config --cflags --libs sdl2 SDL2_ttf)
+# LDFLAGS = $(shell pkg-config --cflags --libs sdl2 SDL2_ttf)
 
 BUILD_DIR = build
 SRC_DIR = emu
