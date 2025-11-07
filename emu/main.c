@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #define FLAG_ZERO 0
 #define FLAG_CARRY 1
@@ -34,7 +35,7 @@ static inline uint8_t getbyte(uint32_t target, uint16_t start) {
 
 static inline uint32_t extend(uint16_t target) {
     if (getbit(target, (sizeof((target) * 2) - 1)) == 1) { 
-        for (int i = 0; i < (31 - (sizeof((target) * 2) - 1)); i++) { 
+        for (size_t i = 0; i < (31 - (sizeof((target) * 2) - 1)); i++) { 
             target |= 1 << i; 
         }
     }
@@ -60,18 +61,19 @@ OP(MOV) {
     }
 }
 
-void (*ops[64])(Machine* machine, uint32_t op) = {
+OP(HALT) {
+    (void)op;
+    machine->cpu.running = false;
+}
+
+void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00000000] = NOP,
     [0b00000100] = MOV,
+    [0b01011100] = HALT,
 };
 
 void step(Machine* machine) {
     uint32_t op = fetch(machine);
-    // TEMPORARY!!!
-    if (op == (uint32_t)NULL) {
-        machine->cpu.running = false;
-        return;
-    }
     uint8_t opcode = getbyte(op, 32);
     if (ops[opcode]) return ops[opcode](machine, op);
 
@@ -95,12 +97,21 @@ void print_cpu_state(const Machine* machine) {
 
 #endif
 
-int main(void) {
+int main(int argc, char** argv) {
     #ifdef DEBUG
     puts("\n\n\n");
     #endif
 
-    uint32_t program[] = { 0b00000100100000001000000000000001, (uint32_t)NULL};
+    if (argc < 2) {
+        printf("Missing input file");
+        return 1;
+    }
+
+    // uint32_t program[] = { 0b00000100100000001000000000000001, 0b01011100000000000000000000000000, (uint32_t)NULL};
+    FILE* src = fopen(argv[1], "rb");
+    uint32_t* program = malloc(sizeof(uint32_t) * 1024);
+    fread(program, sizeof(uint32_t), 1024, src);
+    fclose(src);
     
     // Initialize the machine
     static Machine machine = {0};

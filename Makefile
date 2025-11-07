@@ -12,7 +12,7 @@ TARGET = build/orion
 
 .PHONY: all clean run crun asm ints
 
-all: $(TARGET)
+all: $(TARGET) asm
 
 $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
