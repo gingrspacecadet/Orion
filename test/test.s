@@ -1,2 +1,2 @@
-mov r2, #8192
+mov r2, #2
 halt

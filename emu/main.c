@@ -1,87 +1,52 @@
-#include <stdint.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdlib.h>
+#include <stdio.h>
 
-#define FLAG_ZERO 0
-#define FLAG_CARRY 1
-#define FLAG_NEGATIVE 2
-#define FLAG_OVERFLOW 3
+#include "machine.h"
+#include "ops.h"
 
-typedef struct {
-    uint32_t pc;
-    uint32_t sp;
-    uint32_t registers[16];
-    uint8_t flags;
-    bool running;
-} CPU;
-
-typedef struct {
-    CPU cpu;
-    uint32_t memory[0xFFFF];
-} Machine;
-
-#define fetch(machine) (machine->memory[machine->cpu.pc++])
-#define getbit(target, bit) ((target & (1 << bit)) >> bit)
-#define OP(name) void name(Machine* machine, uint32_t op)
-
-static inline uint8_t getbyte(uint32_t target, uint16_t start) {
-    uint8_t _val = 0;
-    for (int i = 0; i < start; i++) {
-        _val |= getbit(target, (start - i)) << (8 - i);
-    };
-    return _val;
-}
-
-static inline uint32_t extend(uint16_t target) {
-    if (getbit(target, (sizeof((target) * 2) - 1)) == 1) { 
-        for (size_t i = 0; i < (31 - (sizeof((target) * 2) - 1)); i++) { 
-            target |= 1 << i; 
-        }
-    }
-    return target;
-}
-
-OP(NOP) {
-    (void)machine; (void)op;
-    return;
-}
-
-OP(MOV) {
-    if (getbit(op, 0) == 0) { // R-type
-        uint8_t reg1 = getbyte(op, 32 - 6);
-        uint8_t reg2 = reg1 ^ ((reg1 >> 4) << 4);
-        reg1 = reg1 >> 4;
-        machine->cpu.registers[reg1] = machine->cpu.registers[reg2];
-    } else { // I-type
-        uint8_t reg = getbyte(op, 32 - 6) >> 4;
-        uint32_t imm = (getbyte(op, 32 - (6 + 4 + 4)) << 8) | getbyte(op, 32 - (6 + 4 + 8));
-        extend(imm);
-        machine->cpu.registers[reg] = imm;
-    }
-}
-
-OP(HALT) {
-    (void)op;
-    machine->cpu.running = false;
-}
 
 void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00000000] = NOP,
     [0b00000100] = MOV,
+    [0b00001000] = ADD,
+    // [0b00001100] = SUB,
+    // [0b00010000] = AND,
+    // [0b00010100] = OR,
+    // [0b00011000] = XOR,
+    // [0b00011100] = LSL,
+    // [0b00100000] = LSR,
+    // [0b00100100] = ASR,
+    // [0b00101000] = LDR,
+    // [0b00101100] = STR,
+    // [0b00110000] = CMP,
+    // [0b00110100] = B,
+    // [0b00111000] = BL,
+    // [0b00111100] = BEQ,
+    // [0b01000000] = BNE,
+    // [0b01000100] = BCS,
+    // [0b01001000] = BCC,
+    // [0b01001100] = BGT,
+    // [0b01010000] = BLT,
+    // [0b01010100] = PUSH,
+    // [0b01011000] = POP,
     [0b01011100] = HALT,
+    // [0b01100000] = ADR,
+    // [0b01100100] = CMPU,
+    // [0b01101000] = MUL,
+    // [0b01101100] = DIV,
+    // [0b01110000] = LDRB,
+    // [0b01110100] = STRB,
+    // [0b01111000] = TEST,
+    // [0b01111100] = SVC
 };
 
 void step(Machine* machine) {
     uint32_t op = fetch(machine);
     uint8_t opcode = getbyte(op, 32);
     if (ops[opcode]) return ops[opcode](machine, op);
-
-    return;
+    else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
 }
-
-#ifdef DEBUG
-#include <stdio.h>
 
 void print_cpu_state(const Machine* machine) {
     printf("PC: %08X SP: %08X\n", machine->cpu.pc, machine->cpu.sp);
@@ -94,8 +59,6 @@ void print_cpu_state(const Machine* machine) {
            getbit(machine->cpu.flags, 2),
            getbit(machine->cpu.flags, 3));
 }
-
-#endif
 
 int main(int argc, char** argv) {
     #ifdef DEBUG

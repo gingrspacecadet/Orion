@@ -25,7 +25,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 asm:
-	$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
+	@$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
 
 clean:
 	rm -rf $(BUILD_DIR)
