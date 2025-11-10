@@ -44,4 +44,9 @@ OP(ADD) {
     }
 }
 
+OP(B) {
+    int32_t addr = extend((getbyte(op, 32 - 6) << 16) | (getbyte(op, 32 - 6 - 8) << 8) | (getbyte(op, 32 - 6 - 16)));
+    machine->cpu.pc = (int32_t)machine->cpu.pc + addr;
+}
+
 #endif

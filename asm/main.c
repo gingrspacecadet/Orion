@@ -108,23 +108,31 @@ void parse(char* line, uint32_t** out) {
     switch(opcodes[index].type) {
     case I: break;
     case R:
-        if (opcodes[index].num_operands > 0 && parse_reg(arg1) != 0) {
-            puts(error);
-            exit(1);
-        }
-
-        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
-        **out = ((uint32_t)opcodes[index].opcode << (24));
-
         if (opcodes[index].num_operands > 0) {
-            **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
-            **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
+            if (parse_reg(arg1) != 0) {
+                puts(error);
+                exit(1);
+            } else if (parse_reg(arg2) != 0) {
+                puts(error);
+                exit(1);
+            }
+            
+            printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
+            **out = ((uint32_t)opcodes[index].opcode << (24));
+    
+            if (opcodes[index].num_operands > 0) {
+                **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
+                **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
+            }
+    
+            printf("OUT: 0b%032b\n", **out);
         }
 
-        printf("OUT: 0b%032b\n", **out);
 
         break;
-    case M: break;
+    case M:
+        
+        break;
     case RI:
 
         printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
