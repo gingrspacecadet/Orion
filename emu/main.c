@@ -1,11 +1,11 @@
 #include <stdbool.h>
-#include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 
 #include "machine.h"
 #include "ops.h"
+#include "debug.h"
 
 void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00000000] = NOP,
@@ -21,7 +21,7 @@ void (*ops[])(Machine* machine, uint32_t op) = {
     // [0b00101000] = LDR,
     // [0b00101100] = STR,
     // [0b00110000] = CMP,
-    // [0b00110100] = B,
+    [0b00110100] = B,
     // [0b00111000] = BL,
     // [0b00111100] = BEQ,
     // [0b01000000] = BNE,
@@ -47,74 +47,6 @@ void step(Machine* machine) {
     uint8_t opcode = getbyte(op, 32);
     if (ops[opcode]) return ops[opcode](machine, op);
     else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
-}
-
-/* ANSI color helpers for nicer debug output */
-#define ANSI_RESET   "\x1b[0m"
-#define ANSI_BOLD    "\x1b[1m"
-#define ANSI_DIM     "\x1b[2m"
-#define ANSI_RED     "\x1b[31m"
-#define ANSI_GREEN   "\x1b[32m"
-#define ANSI_YELLOW  "\x1b[33m"
-#define ANSI_CYAN    "\x1b[36m"
-#define ANSI_BG_GREY "\x1b[100m"
-#define ANSI_CLEAR_SCREEN "\x1b[2J\x1b[H"
-
-/* Print a single flag with color if set */
-static void print_flag(const char *name, bool set) {
-    if (set) printf(ANSI_BOLD ANSI_GREEN "%s " ANSI_RESET, name);
-    else      printf(ANSI_DIM ANSI_RED "%s " ANSI_RESET, name);
-}
-
-/* Print CPU state with optional previous state to highlight changes */
-void print_cpu_state(const Machine* machine, const Machine* prev) {
-    /* Header: PC, SP, current instruction word at PC */
-    uint32_t pc = machine->cpu.pc;
-    uint32_t sp = machine->cpu.sp;
-    uint32_t instr = machine->memory[pc];
-
-    printf(ANSI_CLEAR_SCREEN);
-    printf(ANSI_BOLD "\nCPU STATE\n" ANSI_RESET);
-    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X\n", pc, sp);
-    printf(ANSI_YELLOW "INST@PC: " ANSI_RESET "0x%08X\n\n", instr);
-
-    /* Registers printed in two rows of 8 for compactness */
-    printf(ANSI_BOLD "Registers\n" ANSI_RESET);
-    for (int row = 0; row < 2; row++) {
-        for (int col = 0; col < 8; col++) {
-            int i = row * 8 + col;
-            uint32_t val = machine->cpu.registers[i];
-            bool changed = false;
-            if (prev) changed = (prev->cpu.registers[i] != val);
-
-            /* highlight changed registers */
-            if (changed) {
-                printf(ANSI_BG_GREY ANSI_BOLD "R%-2d: 0x%08X" ANSI_RESET, i, val);
-            } else {
-                printf("R%-2d: 0x%08X", i, val);
-            }
-
-            if (col < 7) printf("   ");
-        }
-        printf("\n");
-    }
-
-    /* Flags */
-    bool z = getbit(machine->cpu.flags, 0);
-    bool c = getbit(machine->cpu.flags, 1);
-    bool n = getbit(machine->cpu.flags, 2);
-    bool o = getbit(machine->cpu.flags, 3);
-
-    printf("\n" ANSI_BOLD "Flags: " ANSI_RESET);
-    print_flag("Z", z);
-    print_flag("C", c);
-    print_flag("N", n);
-    print_flag("O", o);
-    printf("\n");
-
-    /* Footer with small legend */
-    printf("\n" ANSI_DIM "Changed registers are highlighted.\n" ANSI_RESET);
-    fflush(stdout);
 }
 
 int main(int argc, char** argv) {
@@ -157,14 +89,75 @@ int main(int argc, char** argv) {
     Machine prev = {0};
     memcpy(&prev, &machine, sizeof(Machine));
 
-    while (machine.cpu.running) {
-        step(&machine);
+    #ifdef DEBUG
+    /* step_mode: when true, do not auto-step; only step on Enter.
+       Space toggles step_mode at any time. Start enabled. */
+    bool step_mode = true;
+    tty_enable_raw();
+    atexit(tty_restore);
+    #endif
 
+    while (machine.cpu.running) {
         #ifdef DEBUG
-        print_cpu_state(&machine, &prev);
-        /* update prev to current for next iteration (visual only) */
-        memcpy(&prev, &machine, sizeof(Machine));
-        /* small sleep could be added here for readability if desired */
+        /* Poll stdin: if space pressed toggle step_mode immediately.
+           If in step_mode, wait for Enter to proceed; otherwise proceed immediately. */
+
+        /* Non-blocking poll for space toggle before stepping */
+        if (stdin_has_data()) {
+            int c = getchar();
+            if (c == ' ') {
+                step_mode = !step_mode;
+                /* show current mode change in footer by printing once */
+                print_cpu_state(&machine, &prev);
+                printf(ANSI_DIM "Step-by-step mode %s. Press Enter to advance, Space to toggle.\n" ANSI_RESET,
+                       step_mode ? "ENABLED" : "DISABLED");
+                fflush(stdout);
+                /* consume any extra pending input */
+                while (stdin_has_data()) (void)getchar();
+                /* If we turned off step_mode, continue to step below immediately */
+            } else {
+                /* if other keys were pressed, ignore them (they may be leftover) */
+            }
+        }
+
+        if (step_mode) {
+            /* in step mode: print state and wait for Enter to step.
+               Space while waiting toggles mode; Enter proceeds one step. */
+            print_cpu_state(&machine, &prev);
+            printf(ANSI_DIM "Step-by-step mode ENABLED. Press Enter to advance, Space to toggle.\n" ANSI_RESET);
+            fflush(stdout);
+
+            for (;;) {
+                int c = getchar(); /* blocking read; terminal is raw so this returns one char */
+                if (c == '\r' || c == '\n') {
+                    break; /* advance one step */
+                } else if (c == ' ') {
+                    step_mode = false;
+                    /* show that mode was toggled off and continue without waiting further */
+                    print_cpu_state(&machine, &prev);
+                    printf(ANSI_DIM "Step-by-step mode DISABLED. Running...\n" ANSI_RESET);
+                    fflush(stdout);
+                    break;
+                } else {
+                    /* ignore other keys */ ;
+                }
+            }
+
+            /* finally perform a single step */
+            step(&machine);
+            /* update prev to current for next iteration (visual only) */
+            memcpy(&prev, &machine, sizeof(Machine));
+            continue; /* loop back to handle potential immediate toggles */
+        } else {
+            /* not in step mode: normal execution, but still show state after each step */
+            step(&machine);
+            print_cpu_state(&machine, &prev);
+            memcpy(&prev, &machine, sizeof(Machine));
+            /* small sleep could be added here for readability if desired */
+        }
+
+        #else
+        step(&machine);
         #endif
     }
 

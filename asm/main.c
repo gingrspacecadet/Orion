@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <strings.h>
 
+#include "ops.h"
+
 typedef struct {
     char* name;
     uint32_t offset;
@@ -16,23 +18,7 @@ static Label labels[64] = {0};
 static size_t num_labels = 0;
 static uint32_t offset = 0;
 
-typedef struct {
-    char* name;
-    enum {
-        I,
-        R,
-        RI,
-        M,
-    } type;
-    uint8_t opcode;
-    size_t num_operands;
-} Opcode;
 
-static Opcode opcodes[64] = {
-    { .name = "NOP", .type = R,  .opcode = (uint8_t)0b00000000, .num_operands = 0},
-    { .name = "MOV", .type = RI, .opcode = (uint8_t)0b00000100, .num_operands = 2},
-    { .name = "HALT", .type = R, .opcode = (uint8_t)0b01011100, .num_operands = 0}
-};
 
 char* error;
 
@@ -99,11 +85,6 @@ void parse(char* line, uint32_t** out) {
     uint8_t index = parse_opcode(word1);
     char* arg1 = strtok(NULL, " ");
     char* arg2 = strtok(NULL, " ");
-    
-    if (opcodes[index].num_operands > 0 && parse_reg(arg1) != 0) {
-        puts(error);
-        exit(1);
-    }
 
     switch(opcodes[index].type) {
     case I: break;
@@ -116,28 +97,41 @@ void parse(char* line, uint32_t** out) {
                 puts(error);
                 exit(1);
             }
-            
-            printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
-            **out = ((uint32_t)opcodes[index].opcode << (24));
-    
-            if (opcodes[index].num_operands > 0) {
-                **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
-                **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
-            }
-    
-            printf("OUT: 0b%032b\n", **out);
         }
-
-
-        break;
+        
+        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
+        **out = ((uint32_t)opcodes[index].opcode << (24));
+        
+        if (opcodes[index].num_operands > 0) {
+            **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
+            **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
+        }
+        
+        printf("OUT: 0b%032b\n", **out);
+    break;
     case M:
+        if (opcodes[index].num_operands > 0) {
+            if (parse_imm(arg1) != 0) {
+                puts(error);
+                exit(1);
+            }
+        }
+        
+        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
+        **out = ((uint32_t)opcodes[index].opcode << (24));
+
+        if (opcodes[index].num_operands > 0) {
+            **out |= (uint32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 24);
+        }
+        
+        printf("OUT: 0b%032b\n", **out);
         
         break;
-    case RI:
-
+        case RI:
+        
         printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
         uint32_t out_tmp = ((uint32_t)opcodes[index].opcode << (24));
-
+        
         out_tmp |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
         if (parse_reg(arg2) == 0) {
             out_tmp |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
@@ -148,10 +142,10 @@ void parse(char* line, uint32_t** out) {
             puts(error);
             exit(1);
         }
-
+        
         printf("OUT: 0b%032b\n", out_tmp);
         **out = out_tmp;
-
+        
         break;
     default:
     }

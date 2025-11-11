@@ -1,2 +1,4 @@
-mov r2, #0x2000
+mov r2, #0x200
+mov r3, r2
+b #0x0
 halt
