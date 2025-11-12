@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef struct {
     uint32_t pc;
@@ -27,15 +28,17 @@ static inline uint8_t getbyte(uint32_t target, uint16_t start) {
     return _val;
 }
 
+static inline uint32_t get_bits(uint32_t v, int hi, int lo) {
+    uint32_t mask = ((1u << (hi - lo + 1)) - 1u);
+    return (v >> lo) & mask;
+}
+
 #define fetch(machine) (machine->memory[machine->cpu.pc++])
 
-static inline uint32_t extend(uint16_t target) {
-    if (getbit(target, (sizeof((target) * 2) - 1)) == 1) { 
-        for (size_t i = 0; i < (31 - (sizeof((target) * 2) - 1)); i++) { 
-            target |= 1 << i; 
-        }
-    }
-    return target;
+static inline int32_t sign_extend(uint32_t value, unsigned bits) {
+    if (bits == 0 || bits >= 32) return (int32_t)value;
+    uint32_t shift = 32 - bits;
+    return (int32_t)(value << shift) >> shift;
 }
 
 

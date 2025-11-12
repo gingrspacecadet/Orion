@@ -18,8 +18,6 @@ static Label labels[64] = {0};
 static size_t num_labels = 0;
 static uint32_t offset = 0;
 
-
-
 char* error;
 
 int parse_reg(char* str) {
@@ -35,20 +33,23 @@ int parse_reg(char* str) {
 }
 
 int parse_imm(char* str) {
-    char* error = malloc(sizeof(char*) * 1024);
     if (*str != '#') {
         strcpy(error, "Literals begin with '#'.");
         return 1;
     }
+    bool negative = false;
+    if (str[1] == '-') {
+        negative = true;
+    }
     if (toupper(str[2]) == 'X') {
-        for (size_t i = 3; i < strlen(str + 3); i++) {
+        for (size_t i = 3 + negative; i < strlen(str + 3 + negative); i++) {
             if (!isxdigit(str[i])) {
                 strcpy(error, "Not a valid hex digit.");
                 return 1;
             }
         }
     } else {
-        for (size_t i = 1; i < strlen(str + 1); i++) {
+        for (size_t i = 1 + negative; i < strlen(str + 1 + negative); i++) {
             if (!isxdigit(str[i])) {
                 strcpy(error, "Not a valid decimal digit.");
                 return 1;
@@ -57,6 +58,25 @@ int parse_imm(char* str) {
     }
 
     return 0;
+}
+
+Label* parse_label(char* str) {
+    if (*str != '$') {
+        strcpy(error, "Labels must start with a '$'");
+        return NULL;
+    }
+    Label* label = NULL;
+    for (int i = 0; i < num_labels; i++) {
+        if (strcmp(labels[i].name, str+1) == 0) {
+            label = &labels[i];
+        }
+    }
+    if (!label) {
+        strcpy(error, "Label does not exist");
+        return NULL;
+    }
+
+    return label;
 }
 
 uint8_t parse_opcode(char* str) {
@@ -78,7 +98,7 @@ void parse(char* line, uint32_t** out) {
     char* colon = strchr(word1, ':');
     if (colon != NULL) {    // LABEL
         *colon = '\0';
-        labels[num_labels++] = (Label){ .name = strdup(word1), .offset = offset};
+        labels[num_labels++] = (Label){ .name = strdup(word1), .offset = offset--};
         return;
     }
     // NOT A LABEL
@@ -108,26 +128,30 @@ void parse(char* line, uint32_t** out) {
         }
         
         printf("OUT: 0b%032b\n", **out);
-    break;
+        break;
     case M:
+        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
         if (opcodes[index].num_operands > 0) {
-            if (parse_imm(arg1) != 0) {
+            **out = ((uint32_t)opcodes[index].opcode << (24));
+            if (parse_imm(arg1) == 0) {
+                if (opcodes[index].num_operands > 0) {
+                    **out |= ((int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 24) & 0b11111111111111111111111111);
+                }
+            } else if (parse_label(arg1) != NULL) {        
+                if (opcodes[index].num_operands > 0) {
+                    **out |= ((parse_label(arg1)->offset - offset) >> (32 - 24) << 2) - 1;
+                }
+            } else {
                 puts(error);
                 exit(1);
             }
         }
         
-        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
-        **out = ((uint32_t)opcodes[index].opcode << (24));
-
-        if (opcodes[index].num_operands > 0) {
-            **out |= (uint32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 24);
-        }
         
         printf("OUT: 0b%032b\n", **out);
         
         break;
-        case RI:
+    case RI:
         
         printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
         uint32_t out_tmp = ((uint32_t)opcodes[index].opcode << (24));
@@ -136,7 +160,7 @@ void parse(char* line, uint32_t** out) {
         if (parse_reg(arg2) == 0) {
             out_tmp |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
         } else if (parse_imm(arg2) == 0) {
-            out_tmp |= (uint32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16);
+            out_tmp |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16);
             out_tmp |= 1;
         } else {
             puts(error);
@@ -170,8 +194,9 @@ int main(int argc, char** argv) {
     while(fgets(buf, 1024, src)) {
         if (*buf == '\n') continue;
         if (strchr(buf, '\n')) *strchr(buf, '\n') = '\0';
+        int tmp = num_labels;
         parse(buf, &out);
-        out++;
+        if (num_labels == tmp) out++;
     }
 
     fwrite(base_out, sizeof(uint32_t), 1024, dest);

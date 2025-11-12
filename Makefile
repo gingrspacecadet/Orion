@@ -10,7 +10,7 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 TARGET = build/orion
 
-.PHONY: all clean run crun asm ints
+.PHONY: all clean run crun asm ints test
 
 all: $(TARGET) asm
 
@@ -35,6 +35,11 @@ run: all
 	@./$(TARGET) a.out
 
 crun: clean run
+
+test:
+	@$(MAKE) -B
+	@./build/asm test/test.s a.out
+	@./build/orion a.out
 
 ints: asm
 	@mkdir -p build/ints

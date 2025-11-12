@@ -49,7 +49,7 @@ OP(MOV) {
     } else { // I-type
         uint8_t reg = getbyte(op, 32 - 6) >> 4;
         uint32_t imm = (getbyte(op, 32 - (6 + 4 + 4)) << 8) | getbyte(op, 32 - (6 + 4 + 12));
-        extend(imm);
+        sign_extend(imm, 16);
         machine->cpu.registers[reg] = imm;
     }
 }
@@ -69,14 +69,16 @@ OP(ADD) {
     } else { // I-type
         uint8_t reg = getbyte(op, 32 - 6) >> 4;
         uint32_t imm = (getbyte(op, 32 - (6 + 4 + 4)) << 8) | getbyte(op, 32 - (6 + 4 + 8));
-        extend(imm);
+        sign_extend(imm, 16);
         machine->cpu.registers[reg] = imm;
     }
 }
 
-OP(B) {
-    int32_t addr = extend((getbyte(op, 32 - 6) << 16) | (getbyte(op, 32 - 6 - 8) << 8) | (getbyte(op, 32 - 6 - 16)));
-    machine->cpu.pc = (int32_t)machine->cpu.pc + addr;
+OP(JMP) {
+    int32_t addr = sign_extend(get_bits(op, 32 - 6, 32 - 6 - 24), 24);
+
+    int64_t tmp = (int64_t)(int32_t)machine->cpu.pc + (int64_t)addr - 1;
+    machine->cpu.pc = (uint32_t)tmp;
 }
 
 #endif

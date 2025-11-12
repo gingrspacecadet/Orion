@@ -28,27 +28,16 @@ static inline uint8_t instr_opcode(uint32_t instr) {
    - For M (branch): immediate offset occupies lower 23 bits (as assembler shifted by (32-6-23))
    These choices reproduce the assembler packing used earlier.
 */
-static inline uint32_t get_bits(uint32_t v, int hi, int lo) {
-    uint32_t mask = ((1u << (hi - lo + 1)) - 1u);
-    return (v >> lo) & mask;
-}
-
-/* sign-extend `value` which is `bits` wide into a 32-bit signed int */
-static inline int32_t sign_extend(uint32_t value, unsigned bits) {
-    if (bits == 0 || bits >= 32) return (int32_t)value;
-    uint32_t shift = 32 - bits;
-    return (int32_t)(value << shift) >> shift;
-}
 
 /* Disassemble a single 32-bit instruction into human readable text */
 static void disasm(uint32_t instr, char *out, size_t outlen, uint32_t pc) {
     if (!out || outlen == 0) return;
     out[0] = '\0';
 
-    uint8_t opc = instr_opcode(instr);
+    uint8_t opc = (instr_opcode(instr) >> 2) << 2;
     const Opcode *entry = dlookup(opc);
     if (!entry) {
-        snprintf(out, outlen, "db 0x%02X", opc);
+        snprintf(out, outlen, "db 0x%08B", opc);
         return;
     }
 
