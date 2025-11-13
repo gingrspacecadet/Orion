@@ -4,8 +4,8 @@
 #include <string.h>
 
 #include "machine.h"
-#include "ops.h"
 #include "debug.h"
+#include "ops.h"
 
 void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00000000] = NOP,
@@ -39,7 +39,9 @@ void (*ops[])(Machine* machine, uint32_t op) = {
     // [0b00011100] = LDRB,
     // [0b00011101] = STRB,
     // [0b00011110] = TEST,
-    // [0b00011111] = SVC
+    // [0b00011111] = SVC,
+    [0b00100000] = CALL,
+    [0b00100001] = RET,
 };
 
 void step(Machine* machine) {

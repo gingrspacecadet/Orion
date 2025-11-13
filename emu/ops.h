@@ -1,28 +1,7 @@
-#ifndef OPS_H
-#define OPS_H
-
 #include "machine.h"
+#include "../asm/ops.h"
 
 #define OP(name) void name(Machine* machine, uint32_t op)
-
-typedef struct {
-    char* name;
-    enum {
-        I,
-        R,
-        RI,
-        M,
-    } type;
-    uint8_t opcode;
-    size_t num_operands;
-} Opcode;
-
-static Opcode opcodes[64] = {
-    { .name = "NOP", .type = R,  .opcode = (uint8_t)0b00000000, .num_operands = 0},
-    { .name = "MOV", .type = RI, .opcode = (uint8_t)0b00000100, .num_operands = 2},
-    { .name = "HALT",.type = R,  .opcode = (uint8_t)0b01011100, .num_operands = 0},
-    { .name = "B",   .type = M,  .opcode = (uint8_t)0b00110100, .num_operands = 1}
-};
 
 uint8_t get_opcode_name(uint8_t byte) {
     uint8_t index = 0xFF;
@@ -81,4 +60,11 @@ OP(JMP) {
     machine->cpu.pc = (uint32_t)tmp;
 }
 
-#endif
+OP(CALL) {
+    machine->memory[machine->cpu.sp--] = machine->cpu.pc;
+    JMP(machine, op);
+}
+
+OP(RET) {
+    machine->cpu.pc = machine->memory[++machine->cpu.sp];
+}

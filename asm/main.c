@@ -208,7 +208,10 @@ int main(int argc, char** argv) {
         out++;
     }
 
-    fwrite(base_out, sizeof(uint32_t), 1024, dest);
+    size_t out_size;
+    for (out_size = 0; base_out[out_size] != NULL; out_size++);
+
+    fwrite(base_out, sizeof(uint32_t), out_size, dest);
 
     for (size_t i = 0; i < num_labels; i++) {
         printf("Found label %s with offset 0x%04X\n", labels[i].name, labels[i].offset);
