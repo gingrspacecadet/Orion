@@ -15,9 +15,16 @@ typedef struct {
 
 typedef struct {
     CPU cpu;
-    uint32_t memory[0xFFFF];
+    uint32_t ram[0xFFFF];
+    uint32_t rom[0xFFFF];
+    enum {
+        BIOS,
+        KERNEL,
+        USER,
+    } mode;
 } Machine;
 
+#define fetch(machine) (machine->mode != BIOS ? machine->ram[machine->cpu.pc++] : machine->rom[machine->cpu.pc++])
 #define getbit(target, bit) ((target & (1 << bit)) >> bit)
 
 static inline uint8_t getbyte(uint32_t target, uint16_t start) {
@@ -33,7 +40,6 @@ static inline uint32_t getbits(uint32_t v, int hi, int lo) {
     return (v >> lo) & mask;
 }
 
-#define fetch(machine) (machine->memory[machine->cpu.pc++])
 
 static inline int32_t sign_extend(uint32_t value, unsigned bits) {
     if (bits == 0 || bits >= 32) return (int32_t)value;

@@ -61,10 +61,19 @@ OP(JMP) {
 }
 
 OP(CALL) {
-    machine->memory[machine->cpu.sp--] = machine->cpu.pc;
+    machine->ram[machine->cpu.sp--] = machine->cpu.pc;
     JMP(machine, op);
 }
 
 OP(RET) {
-    machine->cpu.pc = machine->memory[++machine->cpu.sp];
+    machine->cpu.pc = machine->ram[++machine->cpu.sp];
+}
+
+OP(INT) {
+    if (machine->mode == BIOS) {
+        machine->mode = KERNEL;
+        machine->cpu.pc = 0;
+    } else {
+        // TODO
+    }
 }

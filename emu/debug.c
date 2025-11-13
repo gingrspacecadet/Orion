@@ -119,14 +119,14 @@ void print_cpu_state(const Machine* machine, const Machine* prev) {
     /* Header: PC, SP, current instruction word at PC and disasm */
     uint32_t pc = machine->cpu.pc;
     uint32_t sp = machine->cpu.sp;
-    uint32_t instr = machine->memory[pc];
+    uint32_t instr = (machine->mode == BIOS ? machine->rom[pc] : machine->ram[pc]);
 
     char dis[128];
     disasm(instr, dis, sizeof(dis), pc);
 
     printf(ANSI_CLEAR_SCREEN);
     printf(ANSI_BOLD "\nCPU STATE\n" ANSI_RESET);
-    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X\n", pc, sp);
+    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s\n", pc, sp, (machine->mode == BIOS ? "BIOS" : "KERNEL"));
     printf(ANSI_YELLOW "INST@PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "%-40s\n\n", instr, dis);
 
     /* Registers printed in two rows of 8 for compactness */

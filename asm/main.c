@@ -112,7 +112,23 @@ void parse(char* line, uint32_t** out) {
     char* arg3 = strtok(NULL, " ");
 
     switch(opcodes[index].type) {
-    case I: break;
+    case I:
+        printf("Writing opcode %s with operands '%s', '%s' and '%s'\n", word1, arg1, arg2, arg3);
+        **out = ((uint32_t)opcodes[index].opcode << (24));
+        
+        **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
+        if (parse_imm(arg1) == 0) {
+            **out |= (int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16);
+            **out |= 1;
+        } else {
+            puts(error);
+            exit(1);
+        }
+        
+        printf("OUT: 0b%032b\n", **out);
+        **out = **out;
+        
+        break;
     case R:
         if (opcodes[index].num_operands > 0) {
             if (parse_reg(arg1) != 0) {
@@ -158,31 +174,28 @@ void parse(char* line, uint32_t** out) {
         
         break;
     case RI:
-        
         printf("Writing opcode %s with operands '%s', '%s' and '%s'\n", word1, arg1, arg2, arg3);
-        uint32_t out_tmp = ((uint32_t)opcodes[index].opcode << (24));
+        **out = ((uint32_t)opcodes[index].opcode << (24));
         
-        out_tmp |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
+        **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
         if (parse_reg(arg2) == 0) {
-            out_tmp |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
+            **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
             if (opcodes[index].num_operands > 2 && parse_reg(arg3) == 0) {
-                out_tmp |= (uint32_t)atoi(arg3 + 1) << (32 - 6 - 4 - 4 - 4);
+                **out |= (uint32_t)atoi(arg3 + 1) << (32 - 6 - 4 - 4 - 4);
             } else if (opcodes[index].num_operands > 2 && parse_imm(arg3) == 0) {
-                out_tmp |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 15 );
-                // 0b00001000000001000000000000001001
-                // 0b00001000000001000000000000000101
-                out_tmp |= 1;
+                **out |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 15 );
+                **out |= 1;
             }
         } else if (parse_imm(arg2) == 0) {
-            out_tmp |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16);
-            out_tmp |= 1;
+            **out |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16);
+            **out |= 1;
         } else {
             puts(error);
             exit(1);
         }
         
-        printf("OUT: 0b%032b\n", out_tmp);
-        **out = out_tmp;
+        printf("OUT: 0b%032b\n", **out);
+        **out = **out;
         
         break;
     default:

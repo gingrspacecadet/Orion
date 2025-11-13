@@ -39,7 +39,7 @@ void (*ops[])(Machine* machine, uint32_t op) = {
     // [0b00011100] = LDRB,
     // [0b00011101] = STRB,
     // [0b00011110] = TEST,
-    // [0b00011111] = SVC,
+    [0b00011111] = INT,
     [0b00100000] = CALL,
     [0b00100001] = RET,
 };
@@ -67,25 +67,36 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    uint32_t* program = malloc(sizeof(uint32_t) * 1024);
-    if (!program) {
-        perror("malloc");
-        fclose(src);
-        return 1;
-    }
-    size_t read = fread(program, sizeof(uint32_t), 1024, src);
-    (void)read;
+    uint32_t program[1024];
+    fread(program, sizeof(uint32_t), 1024, src);
     fclose(src);
 
     static Machine machine = {0};
     for (size_t i = 0; program[i] != (uint32_t)NULL; i++) {
-        machine.memory[i] = program[i];
+        machine.ram[i] = program[i];
     }
-    free(program);
-
+    
     machine.cpu.running = true;
     machine.cpu.pc = 0;
+    machine.mode = KERNEL;
     machine.cpu.sp = 0xFFFF;
+    const char *bios_path = (argc >= 3) ? argv[2] : NULL;
+    if (bios_path) {
+        FILE *b = fopen(bios_path, "rb");
+        if (!b) {
+            perror("fopen bios");
+            return 1;
+        }
+        uint32_t bios_buf[0xFFFF];
+        size_t r = fread(bios_buf, sizeof(uint32_t), 0xFFFF, b);
+        fclose(b);
+
+        for (size_t i = 0; i < r; ++i) {
+            machine.rom[i] = bios_buf[i];
+        }
+        machine.mode = BIOS;
+    }
+    
 
     /* Keep a copy of previous machine state only for visual diffs */
     Machine prev = {0};
