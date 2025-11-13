@@ -37,46 +37,66 @@ static void disasm(uint32_t instr, char *out, size_t outlen, uint32_t pc) {
     uint8_t opc = (instr_opcode(instr) >> 2) << 2;
     const Opcode *entry = dlookup(opc);
     if (!entry) {
-        snprintf(out, outlen, "db 0x%08B", opc);
+        snprintf(out, outlen, "db 0x%02X", opc);
         return;
     }
 
     switch (entry->type) {
     case R: {
-        /* Corrected bit positions matching assembler:
-           dest = bits 25..22 (4 bits)
-           src  = bits 21..18 (4 bits) */
-        uint32_t dest = get_bits(instr, 25, 22);
-        uint32_t src  = get_bits(instr, 21, 18);
+        /* R-type: dest, src1, [src2] (each 4 bits). */
+        uint32_t dest = getbits(instr, 25, 22);
+        uint32_t src1 = getbits(instr, 21, 18);
+        uint32_t src2 = getbits(instr, 17, 14);
+
         if (entry->num_operands == 0) {
             snprintf(out, outlen, "%s", entry->name);
-        } else {
-            snprintf(out, outlen, "%s R%u, R%u", entry->name, dest, src);
+        } else if (entry->num_operands == 1) {
+            snprintf(out, outlen, "%s R%u", entry->name, dest);
+        } else if (entry->num_operands == 2) {
+            snprintf(out, outlen, "%s R%u, R%u", entry->name, dest, src1);
+        } else { /* 3 operands */
+            snprintf(out, outlen, "%s R%u, R%u, R%u", entry->name, dest, src1, src2);
         }
         break;
     }
     case RI: {
-        /* dest in bits 25..22. Detect immediate usage via low-bit marker. */
-        uint32_t dest = get_bits(instr, 25, 22);
+        /* RI-type: dest, src1 or imm, optional third register or imm.
+           Use LSB marker (bit 0) to indicate immediate presence.
+           When imm_used == 1 the immediate occupies bits 17..2 (16 bits).
+           If num_operands == 3 and imm_used == 0, we read src2 from bits 17..14. */
+        uint32_t dest = getbits(instr, 25, 22);
         bool imm_used = (instr & 1u) != 0;
+
         if (!imm_used) {
-            uint32_t src = get_bits(instr, 21, 18);
-            snprintf(out, outlen, "%s R%u, R%u", entry->name, dest, src);
+            uint32_t src1 = getbits(instr, 21, 18);
+            if (entry->num_operands <= 1) {
+                snprintf(out, outlen, "%s R%u", entry->name, dest);
+            } else if (entry->num_operands == 2) {
+                snprintf(out, outlen, "%s R%u, R%u", entry->name, dest, src1);
+            } else { /* 3 operands, third register present in bits 17..14 */
+                uint32_t src2 = getbits(instr, 17, 14);
+                snprintf(out, outlen, "%s R%u, R%u, R%u", entry->name, dest, src1, src2);
+            }
         } else {
-            /* Immediate occupies bits 17..2 (16 bits) as in assembler */
-            uint32_t imm_field = get_bits(instr, 17, 2);
-            snprintf(out, outlen, "%s R%u, #%u", entry->name, dest, imm_field);
+            /* Immediate form: immediate in bits 17..2 (16 bits) */
+            uint32_t imm_field = getbits(instr, 17, 2);
+            if (entry->num_operands <= 1) {
+                snprintf(out, outlen, "%s R%u", entry->name, dest);
+            } else if (entry->num_operands == 2) {
+                snprintf(out, outlen, "%s R%u, #%u", entry->name, dest, imm_field);
+            } else { /* 3 operands: treat as dest, reg, imm where reg in bits 21..18 */
+                uint32_t src1 = getbits(instr, 21, 18);
+                snprintf(out, outlen, "%s R%u, R%u, #%u", entry->name, dest, src1, imm_field);
+            }
         }
         break;
     }
     case M: {
-        /* Branch field occupies bits 26..3 (24 bits) using left-to-right bit numbering 32..1.
-        Extract that 24-bit field, sign-extend it, then apply it as a PC-relative offset. */
         const unsigned hi = (32 - 6);
         const unsigned lo  = (32 - 6 - 24);
 
-        uint32_t field = get_bits(instr, hi, lo);   /* raw 24-bit field from bits 26..3 */
-        int32_t soff = sign_extend(field, 24);   /* signed 24-bit offset */
+        uint32_t field = getbits(instr, hi, lo);
+        int32_t soff = sign_extend(field, 24);
         uint32_t target = (uint32_t)((int32_t)pc + soff);
 
         snprintf(out, outlen, "%s 0x%08X  (%d)", entry->name, soff, target);
@@ -87,9 +107,6 @@ static void disasm(uint32_t instr, char *out, size_t outlen, uint32_t pc) {
         break;
     }
 }
-
-/* ANSI color helpers for nicer debug output */
-
 
 /* Print a single flag with color if set */
 static void print_flag(const char *name, bool set) {

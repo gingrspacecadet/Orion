@@ -28,7 +28,7 @@ static inline uint8_t getbyte(uint32_t target, uint16_t start) {
     return _val;
 }
 
-static inline uint32_t get_bits(uint32_t v, int hi, int lo) {
+static inline uint32_t getbits(uint32_t v, int hi, int lo) {
     uint32_t mask = ((1u << (hi - lo + 1)) - 1u);
     return (v >> lo) & mask;
 }

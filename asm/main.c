@@ -21,6 +21,7 @@ static uint32_t offset = 0;
 char* error;
 
 int parse_reg(char* str) {
+    if (!str) return 1;
     if (toupper(*str) != 'R') {
         strcpy(error, "Not a valid register. Registers start with [rR].");
         return 1;
@@ -33,6 +34,7 @@ int parse_reg(char* str) {
 }
 
 int parse_imm(char* str) {
+    if (!str) return 1;
     if (*str != '#') {
         strcpy(error, "Literals begin with '#'.");
         return 1;
@@ -61,6 +63,7 @@ int parse_imm(char* str) {
 }
 
 Label* parse_label(char* str) {
+    if (!str) return NULL;
     if (*str != '$') {
         strcpy(error, "Labels must start with a '$'");
         return NULL;
@@ -94,6 +97,8 @@ uint8_t parse_opcode(char* str) {
 }
 
 void parse(char* line, uint32_t** out) {
+    char* comment = strchr(line, ';');
+    if (comment) *comment = '\0';
     char* word1 = strtok(line, " ");
     char* colon = strchr(word1, ':');
     if (colon != NULL) {    // LABEL
@@ -104,6 +109,7 @@ void parse(char* line, uint32_t** out) {
     uint8_t index = parse_opcode(word1);
     char* arg1 = strtok(NULL, " ");
     char* arg2 = strtok(NULL, " ");
+    char* arg3 = strtok(NULL, " ");
 
     switch(opcodes[index].type) {
     case I: break;
@@ -153,12 +159,20 @@ void parse(char* line, uint32_t** out) {
         break;
     case RI:
         
-        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
+        printf("Writing opcode %s with operands '%s', '%s' and '%s'\n", word1, arg1, arg2, arg3);
         uint32_t out_tmp = ((uint32_t)opcodes[index].opcode << (24));
         
         out_tmp |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
         if (parse_reg(arg2) == 0) {
             out_tmp |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
+            if (opcodes[index].num_operands > 2 && parse_reg(arg3) == 0) {
+                out_tmp |= (uint32_t)atoi(arg3 + 1) << (32 - 6 - 4 - 4 - 4);
+            } else if (opcodes[index].num_operands > 2 && parse_imm(arg3) == 0) {
+                out_tmp |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 15 );
+                // 0b00001000000001000000000000001001
+                // 0b00001000000001000000000000000101
+                out_tmp |= 1;
+            }
         } else if (parse_imm(arg2) == 0) {
             out_tmp |= (int32_t)strtol(arg2 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16);
             out_tmp |= 1;
@@ -208,10 +222,7 @@ int main(int argc, char** argv) {
         out++;
     }
 
-    size_t out_size;
-    for (out_size = 0; base_out[out_size] != NULL; out_size++);
-
-    fwrite(base_out, sizeof(uint32_t), out_size, dest);
+    fwrite(base_out, sizeof(uint32_t), offset, dest);
 
     for (size_t i = 0; i < num_labels; i++) {
         printf("Found label %s with offset 0x%04X\n", labels[i].name, labels[i].offset);
