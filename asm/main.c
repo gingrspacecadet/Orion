@@ -66,7 +66,7 @@ Label* parse_label(char* str) {
         return NULL;
     }
     Label* label = NULL;
-    for (int i = 0; i < num_labels; i++) {
+    for (size_t i = 0; i < num_labels; i++) {
         if (strcmp(labels[i].name, str+1) == 0) {
             label = &labels[i];
         }
@@ -97,8 +97,7 @@ void parse(char* line, uint32_t** out) {
     char* word1 = strtok(line, " ");
     char* colon = strchr(word1, ':');
     if (colon != NULL) {    // LABEL
-        *colon = '\0';
-        labels[num_labels++] = (Label){ .name = strdup(word1), .offset = offset--};
+        --*out;
         return;
     }
     // NOT A LABEL
@@ -137,9 +136,10 @@ void parse(char* line, uint32_t** out) {
                 if (opcodes[index].num_operands > 0) {
                     **out |= ((int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 24) & 0b11111111111111111111111111);
                 }
-            } else if (parse_label(arg1) != NULL) {        
+            } else if (parse_label(arg1) != NULL) {    
+                printf("%s (%d) - %d = %032B\n", parse_label(arg1)->name, parse_label(arg1)->offset, offset, (parse_label(arg1)->offset - offset) & 0b00000011111111111111111111111100);
                 if (opcodes[index].num_operands > 0) {
-                    **out |= ((parse_label(arg1)->offset - offset) >> (32 - 24) << 2) - 1;
+                    **out |= ((parse_label(arg1)->offset - offset) << 2 & 0b00000011111111111111111111111100);
                 }
             } else {
                 puts(error);
@@ -192,16 +192,26 @@ int main(int argc, char** argv) {
     
     char buf[1024];
     while(fgets(buf, 1024, src)) {
+        char* word1 = strtok(buf, " ");
+        char* colon = strchr(word1, ':');
+        if (colon != NULL) {    // LABEL
+            *colon = '\0';
+            labels[num_labels++] = (Label){ .name = strdup(word1), .offset = offset};
+        } else offset++;
+    }
+    rewind(src);
+    offset = 0;
+    while(fgets(buf, 1024, src)) {
         if (*buf == '\n') continue;
         if (strchr(buf, '\n')) *strchr(buf, '\n') = '\0';
-        int tmp = num_labels;
         parse(buf, &out);
-        if (num_labels == tmp) out++;
+        out++;
     }
 
     fwrite(base_out, sizeof(uint32_t), 1024, dest);
 
     for (size_t i = 0; i < num_labels; i++) {
+        printf("Found label %s with offset 0x%04X\n", labels[i].name, labels[i].offset);
         free(labels[i].name);
     }
 
