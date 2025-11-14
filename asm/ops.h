@@ -17,11 +17,15 @@ typedef struct {
 
 static Opcode opcodes[64] = {
     { .name = "NOP", .type = R,  .opcode = 0b00000000, .num_operands = 0},
+    { .name = "MOV", .type = RI, .opcode = 0b00000100, .num_operands = 2},
     { .name = "ADD", .type = RI, .opcode = 0b00001000, .num_operands = 3},
     { .name = "SUB", .type = RI, .opcode = 0b00001100, .num_operands = 3},
-    { .name = "MOV", .type = RI, .opcode = 0b00000100, .num_operands = 2},
-    { .name = "HLT", .type = R,  .opcode = 0b01011100, .num_operands = 0},
+    { .name = "LDR", .type = I,  .opcode = 0b00101000, .num_operands = 3},
+    { .name = "STR", .type = I,  .opcode = 0b00101100, .num_operands = 3},
     { .name = "JMP", .type = M,  .opcode = 0b00110100, .num_operands = 1},
+    { .name = "PUSH",.type = I,  .opcode = 0b01010100, .num_operands = 1},
+    { .name = "POP", .type = I,  .opcode = 0b01011000, .num_operands = 1},
+    { .name = "HLT", .type = R,  .opcode = 0b01011100, .num_operands = 0},
     { .name = "INT", .type = I,  .opcode = 0b01111100, .num_operands = 1},
     { .name = "CALL",.type = M,  .opcode = 0b10000000, .num_operands = 1},
     { .name = "RET", .type = R,  .opcode = 0b10000100, .num_operands = 0},

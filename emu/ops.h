@@ -74,6 +74,34 @@ OP(INT) {
         machine->mode = KERNEL;
         machine->cpu.pc = 0;
     } else {
-        // TODO
+        int32_t imm = sign_extend(getbits(op, 17, 2), 16);
+        machine->cpu.pc = machine->ram[0x1234 + imm];
+        machine->mode = BIOS;
     }
+}
+
+OP(LDR) {
+    uint8_t dest    = (uint8_t)getbits(op, 25, 22);
+    uint8_t base    = (uint8_t)getbits(op, 21, 18);
+    int32_t imm     = sign_extend((int32_t)getbits(op, 17, 2), 16);
+
+    uint32_t addr_index = (uint32_t)((int32_t)machine->cpu.registers[base] + imm);
+
+    /* optional: bounds check (adjust RAM_SIZE to your machine) */
+    // if (addr_index >= RAM_SIZE) { /* handle fault */ }
+
+    machine->cpu.registers[dest] = machine->ram[addr_index];
+}
+
+OP(STR) {
+    uint8_t src_reg = (uint8_t)getbits(op, 25, 22); /* register containing the value to store */
+    uint8_t base    = (uint8_t)getbits(op, 21, 18);
+    int32_t imm     = sign_extend((int32_t)getbits(op, 17, 2), 16);
+
+    uint32_t addr_index = (uint32_t)((int32_t)machine->cpu.registers[base] + imm);
+
+    /* optional: bounds check (adjust RAM_SIZE to your machine) */
+    // if (addr_index >= RAM_SIZE) { /* handle fault */ }
+
+    machine->ram[addr_index] = machine->cpu.registers[src_reg];
 }

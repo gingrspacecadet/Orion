@@ -18,8 +18,8 @@ void (*ops[])(Machine* machine, uint32_t op) = {
     // [0b00000111] = LSL,
     // [0b00001000] = LSR,
     // [0b00001001] = ASR,
-    // [0b00001010] = LDR,
-    // [0b00001011] = STR,
+    [0b00001010] = LDR,
+    [0b00001011] = STR,
     // [0b00001100] = CMP,
     [0b00001101] = JMP,
     // [0b00001110] = CALL,
@@ -45,6 +45,7 @@ void (*ops[])(Machine* machine, uint32_t op) = {
 };
 
 void step(Machine* machine) {
+    machine->cpu.cycle++;
     uint32_t op = fetch(machine);
     uint8_t opcode = getbyte(op, 32) >> 2;
     if (ops[opcode]) return ops[opcode](machine, op);
@@ -80,6 +81,7 @@ int main(int argc, char** argv) {
     machine.cpu.pc = 0;
     machine.mode = KERNEL;
     machine.cpu.sp = 0xFFFF;
+    machine.cpu.cycle = 0;
     const char *bios_path = (argc >= 3) ? argv[2] : NULL;
     if (bios_path) {
         FILE *b = fopen(bios_path, "rb");

@@ -10,18 +10,19 @@ typedef struct {
     uint32_t sp;
     uint32_t registers[16];
     uint8_t flags;
+    size_t cycle;
     bool running;
 } CPU;
 
 typedef struct {
     CPU cpu;
-    uint32_t ram[0xFFFF];
-    uint32_t rom[0xFFFF];
     enum {
         BIOS,
         KERNEL,
         USER,
     } mode;
+    uint32_t ram[0xFFFF];
+    uint32_t rom[0xFFFF];
 } Machine;
 
 #define fetch(machine) (machine->mode != BIOS ? machine->ram[machine->cpu.pc++] : machine->rom[machine->cpu.pc++])

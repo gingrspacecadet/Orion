@@ -10,9 +10,9 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 TARGET = build/orion
 
-.PHONY: all clean run crun asm ints test
+.PHONY: all clean run crun asm ints bios kernel
 
-all: $(TARGET) asm
+all: bios kernel $(TARGET)
 
 $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -24,22 +24,23 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-asm:
+asm: $(BUILD_DIR)
 	@$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
+
+bios: asm
+	@./build/asm bios/main.s bios.out
+
+kernel: asm
+	@./build/asm kernel/main.s kernel.out
 
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(TARGET)
 
 run: all
-	@./$(TARGET) a.out
+	@./$(TARGET) kernel.out bios.out
 
 crun: clean run
-
-test:
-	@$(MAKE) -B
-	@./build/asm test/test.s a.out
-	@./build/orion a.out
 
 ints: asm
 	@mkdir -p build/ints

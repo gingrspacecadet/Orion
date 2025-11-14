@@ -34,16 +34,16 @@ static void disasm(uint32_t instr, char *out, size_t outlen, uint32_t pc) {
     if (!out || outlen == 0) return;
     out[0] = '\0';
 
+    /* Normalise opcode: assembler put opcode in the top byte (we clear lower 2 bits) */
     uint8_t opc = (instr_opcode(instr) >> 2) << 2;
     const Opcode *entry = dlookup(opc);
     if (!entry) {
-        snprintf(out, outlen, "db 0x%02X", opc);
+        snprintf(out, outlen, "db 0x%02X", (uint32_t)opc);
         return;
     }
 
     switch (entry->type) {
     case R: {
-        /* R-type: dest, src1, [src2] (each 4 bits). */
         uint32_t dest = getbits(instr, 25, 22);
         uint32_t src1 = getbits(instr, 21, 18);
         uint32_t src2 = getbits(instr, 17, 14);
@@ -54,16 +54,39 @@ static void disasm(uint32_t instr, char *out, size_t outlen, uint32_t pc) {
             snprintf(out, outlen, "%s R%u", entry->name, dest);
         } else if (entry->num_operands == 2) {
             snprintf(out, outlen, "%s R%u, R%u", entry->name, dest, src1);
-        } else { /* 3 operands */
+        } else {
             snprintf(out, outlen, "%s R%u, R%u, R%u", entry->name, dest, src1, src2);
         }
         break;
     }
+
+    case I: {
+        /* I-type: rd (bits 25..22), rn (bits 21..18), imm16 (bits 17..2) */
+        uint32_t rd = getbits(instr, 25, 22);
+        uint32_t rn = getbits(instr, 21, 18);
+        uint32_t imm_field = getbits(instr, 17, 2);
+        int32_t imm_signed = sign_extend((int32_t)imm_field, 16);
+
+        /* format immediate as hex + signed decimal for readability */
+        char immbuf[32];
+        if (imm_signed < 0) snprintf(immbuf, sizeof immbuf, "-0x%X (%d)", (uint32_t)(-imm_signed), imm_signed);
+        else               snprintf(immbuf, sizeof immbuf, "0x%X (%d)", (uint32_t)imm_signed, imm_signed);
+
+        if (entry->num_operands == 0) {
+            snprintf(out, outlen, "%s", entry->name);
+        } else if (entry->num_operands == 1) {
+            snprintf(out, outlen, "%s R%u", entry->name, rd);
+        } else if (entry->num_operands == 2) {
+            /* unlikely for pure I-type, but handle defensively */
+            snprintf(out, outlen, "%s R%u, R%u", entry->name, rd, rn);
+        } else { /* 3 operands: rd, rn, imm16 */
+            snprintf(out, outlen, "%s R%u, R%u, #%s", entry->name, rd, rn, immbuf);
+        }
+        break;
+    }
+
     case RI: {
-        /* RI-type: dest, src1 or imm, optional third register or imm.
-           Use LSB marker (bit 0) to indicate immediate presence.
-           When imm_used == 1 the immediate occupies bits 17..2 (16 bits).
-           If num_operands == 3 and imm_used == 0, we read src2 from bits 17..14. */
+        /* RI-type: supports both register and immediate forms via LSB marker (instr & 1) */
         uint32_t dest = getbits(instr, 25, 22);
         bool imm_used = (instr & 1u) != 0;
 
@@ -73,35 +96,41 @@ static void disasm(uint32_t instr, char *out, size_t outlen, uint32_t pc) {
                 snprintf(out, outlen, "%s R%u", entry->name, dest);
             } else if (entry->num_operands == 2) {
                 snprintf(out, outlen, "%s R%u, R%u", entry->name, dest, src1);
-            } else { /* 3 operands, third register present in bits 17..14 */
+            } else {
                 uint32_t src2 = getbits(instr, 17, 14);
                 snprintf(out, outlen, "%s R%u, R%u, R%u", entry->name, dest, src1, src2);
             }
         } else {
-            /* Immediate form: immediate in bits 17..2 (16 bits) */
             uint32_t imm_field = getbits(instr, 17, 2);
+            int32_t imm_signed = sign_extend((int32_t)imm_field, 16);
+            char immbuf[32];
+            if (imm_signed < 0) snprintf(immbuf, sizeof immbuf, "-0x%X (%d)", (uint32_t)(-imm_signed), imm_signed);
+            else               snprintf(immbuf, sizeof immbuf, "0x%X (%d)", (uint32_t)imm_signed, imm_signed);
+
             if (entry->num_operands <= 1) {
                 snprintf(out, outlen, "%s R%u", entry->name, dest);
             } else if (entry->num_operands == 2) {
-                snprintf(out, outlen, "%s R%u, #%u", entry->name, dest, imm_field);
-            } else { /* 3 operands: treat as dest, reg, imm where reg in bits 21..18 */
+                snprintf(out, outlen, "%s R%u, #%s", entry->name, dest, immbuf);
+            } else {
                 uint32_t src1 = getbits(instr, 21, 18);
-                snprintf(out, outlen, "%s R%u, R%u, #%u", entry->name, dest, src1, imm_field);
+                snprintf(out, outlen, "%s R%u, R%u, #%s", entry->name, dest, src1, immbuf);
             }
         }
         break;
     }
+
     case M: {
         const unsigned hi = (32 - 6);
         const unsigned lo  = (32 - 6 - 24);
 
         uint32_t field = getbits(instr, hi, lo);
-        int32_t soff = sign_extend(field, 24);
+        int32_t soff = sign_extend((int32_t)field, 24);
         uint32_t target = (uint32_t)((int32_t)pc + soff);
 
-        snprintf(out, outlen, "%s 0x%08X  (%d)", entry->name, soff, target);
+        snprintf(out, outlen, "%s 0x%08X  (%d)", entry->name, (uint32_t)soff, target);
         break;
     }
+
     default:
         snprintf(out, outlen, "%s", entry->name);
         break;
@@ -126,7 +155,7 @@ void print_cpu_state(const Machine* machine, const Machine* prev) {
 
     printf(ANSI_CLEAR_SCREEN);
     printf(ANSI_BOLD "\nCPU STATE\n" ANSI_RESET);
-    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s\n", pc, sp, (machine->mode == BIOS ? "BIOS" : "KERNEL"));
+    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s    " ANSI_CYAN "CYCLE: " ANSI_RESET "%d\n", pc, sp, (machine->mode == BIOS ? "BIOS" : "KERNEL"), machine->cpu.cycle);
     printf(ANSI_YELLOW "INST@PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "%-40s\n\n", instr, dis);
 
     /* Registers printed in two rows of 8 for compactness */
