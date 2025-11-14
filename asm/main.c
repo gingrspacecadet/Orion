@@ -275,13 +275,13 @@ void parse(char* line, uint32_t** out) {
         printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
         if (opcodes[index].num_operands > 0) {
             **out = ((uint32_t)opcodes[index].opcode << (24));
-            if (parse_imm(arg1) == 0) {
-                if (opcodes[index].num_operands > 0) {
-                    **out |= ((int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 24) & 0b11111111111111111111111111);
-                }
-            } else if (parse_label(arg1) != NULL) {    
+            if (parse_label(arg1) != NULL) {    
                 if (opcodes[index].num_operands > 0) {
                     **out |= ((parse_label(arg1)->offset - offset) << 2 & 0b00000011111111111111111111111100);
+                }
+            } else if (parse_imm(arg1) == 0) {
+                if (opcodes[index].num_operands > 0) {
+                    **out |= ((int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 24) & 0b11111111111111111111111111);
                 }
             } else {
                 puts(error);

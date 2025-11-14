@@ -46,10 +46,22 @@ void (*ops[])(Machine* machine, uint32_t op) = {
 
 void step(Machine* machine) {
     machine->cpu.cycle++;
-    uint32_t op = fetch(machine);
-    uint8_t opcode = getbyte(op, 32) >> 2;
-    if (ops[opcode]) return ops[opcode](machine, op);
-    else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
+    if (machine->cpu.cycle % 1000 == 0) {
+        printf("INTERRUPT TRIGGERERD");
+        F_SET(machine->cpu, F_INT);
+        machine->cpu.interrupt = 0;
+    }
+    if (F_CHECK(machine->cpu, F_INT) && F_CHECK(machine->cpu, F_INT_ENABLED)) {
+        uint32_t op = 0b01111100000000000000000000000000;
+        op |= machine->cpu.interrupt << 2;
+        F_CLEAR(machine->cpu, F_INT);
+        INT(machine, op);
+    } else {
+        uint32_t op = fetch(machine);
+        uint8_t opcode = getbyte(op, 32) >> 2;
+        if (ops[opcode]) return ops[opcode](machine, op);
+        else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
+    }
 }
 
 int main(int argc, char** argv) {
@@ -82,6 +94,7 @@ int main(int argc, char** argv) {
     machine.mode = KERNEL;
     machine.cpu.sp = 0xFFFF;
     machine.cpu.cycle = 0;
+    F_SET(machine.cpu, F_INT_ENABLED);
     const char *bios_path = (argc >= 3) ? argv[2] : NULL;
     if (bios_path) {
         FILE *b = fopen(bios_path, "rb");

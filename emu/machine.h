@@ -5,12 +5,26 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#define F_ZERO          0b00000001
+#define F_CARRY         0b00000010
+#define F_OVERFLOW      0b00000100
+#define F_NEGATIVE      0b00001000
+#define F_INT_ENABLED   0b00010000
+#define F_INT           0b00100000
+// #define F_
+// #define F_
+
+#define F_SET(cpu, flag)    (cpu.flags |= flag)
+#define F_CLEAR(cpu, flag)  (cpu.flags &= ~flag)
+#define F_CHECK(cpu, flag)  (cpu.flags & flag)
+
 typedef struct {
+    size_t cycle;
     uint32_t pc;
     uint32_t sp;
     uint32_t registers[16];
+    uint16_t interrupt;
     uint8_t flags;
-    size_t cycle;
     bool running;
 } CPU;
 
