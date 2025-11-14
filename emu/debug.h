@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+
 
 /* Terminal helpers to read single chars and toggle noncanonical mode */
 static struct termios orig_term;
@@ -48,6 +50,10 @@ static int stdin_has_data(void) {
 #define ANSI_CLEAR_SCREEN "\x1b[2J\x1b[H"
 
 void print_cpu_state(const Machine* machine, const Machine* prev);
+
+void dump_machine_state(Machine* machine);
+void handle_signal(int sig);
+
 #endif
 
 #endif

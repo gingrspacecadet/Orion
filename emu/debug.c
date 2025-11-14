@@ -196,3 +196,49 @@ void print_cpu_state(const Machine* machine, const Machine* prev) {
     printf("\n" ANSI_DIM "Changed registers are highlighted.\n" ANSI_RESET);
     fflush(stdout);
 }
+
+void dump_machine_state(Machine* machine) {
+    FILE* ram_file = fopen("ram.dump", "w");
+    FILE* rom_file = fopen("rom.dump", "w");
+    FILE* cpu_file = fopen("cpu.dump", "w");
+
+    if (ram_file) {
+        for (size_t i = 0; i < 0x10000; i++) {
+            fprintf(ram_file, "RAM[%04X] = 0x%08X\n", (unsigned int)i, machine->ram[i]);
+        }
+        fclose(ram_file);
+    }
+
+    if (rom_file) {
+        for (size_t i = 0; i < 0x10000; i++) {
+            fprintf(rom_file, "ROM[%04X] = 0x%08X\n", (unsigned int)i, machine->rom[i]);
+        }
+        fclose(rom_file);
+    }
+
+    if (cpu_file) {
+        fprintf(cpu_file, "PC: 0x%08X\n", machine->cpu.pc);
+        fprintf(cpu_file, "SP: 0x%08X\n", machine->cpu.sp);
+        fprintf(cpu_file, "Cycle: %zu\n", machine->cpu.cycle);
+        fprintf(cpu_file, "Running: %s\n", machine->cpu.running ? "true" : "false");
+        fprintf(cpu_file, "Mode: %s\n", machine->mode == BIOS ? "BIOS" :
+                                        machine->mode == KERNEL ? "KERNEL" : "USER");
+        fprintf(cpu_file, "Flags: 0x%02X\n", machine->cpu.flags);
+        for (int i = 0; i < 16; i++) {
+            fprintf(cpu_file, "R[%d] = 0x%08X\n", i, machine->cpu.registers[i]);
+        }
+        fclose(cpu_file);
+    }
+
+    fprintf(stderr, "\nMachine state dumped to ram.dump, rom.dump, and cpu.dump\n");
+}
+
+extern Machine* global_machine;
+
+void handle_signal(int sig) {
+    if (global_machine) {
+        dump_machine_state(global_machine);
+    }
+    fprintf(stderr, "Received signal %d, exiting...\n", sig);
+    exit(1);
+}

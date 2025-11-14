@@ -7,6 +7,8 @@
 #include "debug.h"
 #include "ops.h"
 
+Machine* global_machine = NULL;
+
 void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00000000] = NOP,
     [0b00000001] = MOV,
@@ -84,7 +86,7 @@ int main(int argc, char** argv) {
     fread(program, sizeof(uint32_t), 1024, src);
     fclose(src);
 
-    static Machine machine = {0};
+    Machine machine = {0};
     for (size_t i = 0; program[i] != (uint32_t)NULL; i++) {
         machine.ram[i] = program[i];
     }
@@ -123,6 +125,11 @@ int main(int argc, char** argv) {
     bool step_mode = true;
     tty_enable_raw();
     atexit(tty_restore);
+    global_machine = &machine;
+    signal(SIGINT, handle_signal);   // Ctrl+C
+    signal(SIGTERM, handle_signal);  // kill
+    signal(SIGABRT, handle_signal);  // abort
+    signal(SIGSEGV, handle_signal);  // segmentation fault
     #endif
 
     while (machine.cpu.running) {
