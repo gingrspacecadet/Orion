@@ -60,13 +60,16 @@ OP(JMP) {
     machine->cpu.pc = (uint32_t)tmp;
 }
 
+#define push(value) (machine->ram[machine->cpu.sp--] = value)
+#define pop(dest) (dest = machine->ram[++machine->cpu.sp])
+
 OP(CALL) {
-    machine->ram[machine->cpu.sp--] = machine->cpu.pc;
+    push(machine->cpu.pc);
     JMP(machine, op);
 }
 
 OP(RET) {
-    machine->cpu.pc = machine->ram[++machine->cpu.sp];
+    pop(machine->cpu.pc);
 }
 
 OP(INT) {
@@ -87,9 +90,6 @@ OP(LDR) {
 
     uint32_t addr_index = (uint32_t)((int32_t)machine->cpu.registers[base] + imm);
 
-    /* optional: bounds check (adjust RAM_SIZE to your machine) */
-    // if (addr_index >= RAM_SIZE) { /* handle fault */ }
-
     machine->cpu.registers[dest] = machine->ram[addr_index];
 }
 
@@ -100,8 +100,25 @@ OP(STR) {
 
     uint32_t addr_index = (uint32_t)((int32_t)machine->cpu.registers[base] + imm);
 
-    /* optional: bounds check (adjust RAM_SIZE to your machine) */
-    // if (addr_index >= RAM_SIZE) { /* handle fault */ }
-
     machine->ram[addr_index] = machine->cpu.registers[src_reg];
+}
+
+OP(PUSH) {
+    uint8_t reg = (uint8_t)getbits(op, 25, 22);
+    uint16_t mask     = (uint16_t)getbits(op, 17, 2);
+    for (int i = 0; i < sizeof(uint16_t) * 2; i++) {
+        if (getbit(mask, i) == 1) {
+            push(machine->cpu.registers[i]);
+        }
+    }
+}
+
+OP(POP) {
+    uint8_t reg = (uint8_t)getbits(op, 25, 22);
+    uint16_t mask     = (uint16_t)getbits(op, 17, 2);
+    for (int i = 0; i < sizeof(uint16_t) * 2; i++) {
+        if (getbit(mask, i) == 1) {
+            pop(machine->cpu.registers[i]);
+        }
+    }
 }

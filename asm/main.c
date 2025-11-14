@@ -242,6 +242,8 @@ void parse(char* line, uint32_t** out) {
                 **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
                 **out |= (int32_t)strtol(arg3 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16); 
             }
+        } if (parse_imm(arg1) == 0) {
+            **out |= (int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16); 
         }
         
         printf("OUT: 0b%032b\n", **out);
