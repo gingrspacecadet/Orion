@@ -175,18 +175,23 @@ int parse_imm(char *str) {
     return 0;
 }
 
-uint8_t parse_opcode(char* str) {
-    uint8_t index = 0xFF;
-    for (int i = 0; i < 64; i++) {
+
+int parse_opcode(const char *str) {
+    if (str == NULL) {
+        printf("Invalid opcode (null)\n");
+        return -1;
+    }
+
+    size_t n = sizeof(opcodes) / sizeof(opcodes[0]);
+    for (size_t i = 0; i < n; ++i) {
+        if (opcodes[i].name == NULL) continue;
         if (strcasecmp(opcodes[i].name, str) == 0) {
-            index = i;
-            break;
+            return (int)i;
         }
     }
-    if (index == 0xFF) {
-        printf("Invalid opcode %s", str);
-    }
-    return index;
+
+    printf("Invalid opcode %s\n", str);
+    return -1;
 }
 
 char *trimwhitespace(char *str) {
@@ -222,7 +227,8 @@ void parse(char* line, uint32_t** out) {
         return;
     }
     // NOT A LABEL
-    uint8_t index = parse_opcode(word1);
+    int index = parse_opcode(word1);
+    if (index < 0) exit(1);
     char* arg1 = strtok(NULL, " ");
     char* arg2 = strtok(NULL, " ");
     char* arg3 = strtok(NULL, " ");

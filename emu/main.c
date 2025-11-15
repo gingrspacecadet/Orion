@@ -16,10 +16,10 @@ void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00000010] = ADD,
     // [0b00000011] = SUB,
     // [0b00000100] = AND,
-    // [0b00000101] = OR,
+    [0b00000101] = OR,
     // [0b00000110] = XOR,
-    // [0b00000111] = LSL,
-    // [0b00001000] = LSR,
+    [0b00000111] = SHL,
+    // [0b00001000] = SHR,
     // [0b00001001] = ASR,
     [0b00001010] = LDR,
     [0b00001011] = STR,
@@ -86,6 +86,8 @@ int main(int argc, char** argv) {
     }
 
     Machine machine = {0};
+    machine.ram = malloc(sizeof(uint32_t) * RAM_SIZE);
+    machine.rom = malloc(sizeof(uint32_t) * ROM_SIZE);
     uint32_t program[1024];
     {
         size_t r = fread(program, sizeof(uint32_t), 1024, src);
@@ -119,8 +121,7 @@ int main(int argc, char** argv) {
             machine.rom[i] = bios_buf[i];
         }
         machine.mode = BIOS;
-    }
-    
+    }    
 
     /* Keep a copy of previous machine state only for visual diffs */
     Machine prev = {0};
@@ -203,6 +204,9 @@ int main(int argc, char** argv) {
         #endif
     }
 
+
+    free(machine.ram);
+    free(machine.rom);
     fb_destroy(fb);
     return 0;
 }

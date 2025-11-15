@@ -1,10 +1,12 @@
-#ifndef FB_H
-#define FB_H
+#ifndef FBC_H
+#define FBC_H
 
 #include <SDL2/SDL.h>
 
 #define FB_W    512
 #define FB_H    360
+
+#define FB_BASE 0xB8000
 
 typedef struct {
     SDL_Window* window;

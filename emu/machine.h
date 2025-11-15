@@ -18,6 +18,9 @@
 #define F_CLEAR(cpu, flag)  (cpu.flags &= ~flag)
 #define F_CHECK(cpu, flag)  (cpu.flags & flag)
 
+#define RAM_SIZE 0xFFFFFF
+#define ROM_SIZE 0xFFFF
+
 typedef struct {
     size_t cycle;
     uint32_t pc;
@@ -35,8 +38,8 @@ typedef struct {
         KERNEL,
         USER,
     } mode;
-    uint32_t ram[0xB8000];
-    uint32_t rom[0xFFFF];
+    uint32_t* ram;
+    uint32_t* rom;
 } Machine;
 
 #define fetch(machine) (machine->mode != BIOS ? machine->ram[machine->cpu.pc++] : machine->rom[machine->cpu.pc++])

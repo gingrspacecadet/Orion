@@ -203,14 +203,15 @@ void dump_machine_state(Machine* machine) {
     FILE* cpu_file = fopen("cpu.dump", "w");
 
     if (ram_file) {
-        for (size_t i = 0; i < 0x10000; i++) {
+        for (size_t i = 0; i < RAM_SIZE; i++) {
+            if (!machine->ram[i]) continue;
             fprintf(ram_file, "RAM[%04X] = 0x%08X\n", (unsigned int)i, machine->ram[i]);
         }
         fclose(ram_file);
     }
 
     if (rom_file) {
-        for (size_t i = 0; i < 0x10000; i++) {
+        for (size_t i = 0; i < ROM_SIZE; i++) {
             fprintf(rom_file, "ROM[%04X] = 0x%08X\n", (unsigned int)i, machine->rom[i]);
         }
         fclose(rom_file);

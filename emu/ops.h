@@ -70,6 +70,7 @@ OP(CALL) {
 }
 
 OP(RET) {
+    (void)op;
     pop(machine->cpu.pc);
 }
 
@@ -104,13 +105,12 @@ OP(STR) {
     machine->ram[addr_index] = machine->cpu.registers[src_reg];
 
     extern fb_State* fb;
-    fb_render(fb, &machine->ram[0xB800]);
+    fb_render(fb, &machine->ram[FB_BASE]);
 }
 
 OP(PUSH) {
-    uint8_t reg = (uint8_t)getbits(op, 25, 22);
     uint16_t mask     = (uint16_t)getbits(op, 17, 2);
-    for (int i = 0; i < sizeof(uint16_t) * 2; i++) {
+    for (size_t i = 0; i < sizeof(uint16_t) * 2; i++) {
         if (getbit(mask, i) == 1) {
             push(machine->cpu.registers[i]);
         }
@@ -118,11 +118,40 @@ OP(PUSH) {
 }
 
 OP(POP) {
-    uint8_t reg = (uint8_t)getbits(op, 25, 22);
     uint16_t mask     = (uint16_t)getbits(op, 17, 2);
-    for (int i = 0; i < sizeof(uint16_t) * 2; i++) {
+    for (size_t i = 0; i < sizeof(uint16_t) * 2; i++) {
         if (getbit(mask, i) == 1) {
             pop(machine->cpu.registers[i]);
         }
+    }
+}
+
+OP(SHL) {
+    bool I_type = (getbit(op, 0) != 0);
+    uint8_t dest = getbits(op, 25, 22);
+    uint8_t src1 = getbits(op, 21, 18);
+
+    if (!I_type) { // R-type
+        uint8_t src2 = getbits(op, 17, 14);
+        machine->cpu.registers[dest] = machine->cpu.registers[src1] << (machine->cpu.registers[src2] & 31);
+    } else { // I-type
+        uint32_t imm = getbits(op, 17, 2);
+
+        machine->cpu.registers[dest] = machine->cpu.registers[src1] << (imm & 31);
+    }
+}
+
+OP(OR) {
+    bool I_type = (getbit(op, 0) != 0);
+    uint8_t dest = getbits(op, 25, 22);
+    uint8_t src1 = getbits(op, 21, 18);
+
+    if (!I_type) { // R-type
+        uint8_t src2 = getbits(op, 17, 14);
+        machine->cpu.registers[dest] = machine->cpu.registers[src1] | machine->cpu.registers[src2];
+    } else { // I-type
+        int32_t imm = getbits(op, 17, 2);
+
+        machine->cpu.registers[dest] = machine->cpu.registers[src1] | (uint32_t)imm;
     }
 }

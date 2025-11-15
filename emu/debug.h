@@ -12,7 +12,6 @@
 #include <string.h>
 #include <signal.h>
 
-
 /* Terminal helpers to read single chars and toggle noncanonical mode */
 static struct termios orig_term;
 
