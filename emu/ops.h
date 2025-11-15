@@ -1,5 +1,6 @@
 #include "machine.h"
 #include "../asm/ops.h"
+#include "fb.h"
 
 #define OP(name) void name(Machine* machine, uint32_t op)
 
@@ -101,6 +102,9 @@ OP(STR) {
     uint32_t addr_index = (uint32_t)((int32_t)machine->cpu.registers[base] + imm);
 
     machine->ram[addr_index] = machine->cpu.registers[src_reg];
+
+    extern fb_State* fb;
+    fb_render(fb, &machine->ram[0xB800]);
 }
 
 OP(PUSH) {

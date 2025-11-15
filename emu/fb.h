@@ -3,6 +3,9 @@
 
 #include <SDL2/SDL.h>
 
+#define FB_W    512
+#define FB_H    360
+
 typedef struct {
     SDL_Window* window;
     SDL_Surface* surface;
@@ -11,7 +14,7 @@ typedef struct {
 } fb_State;
 
 fb_State* fb_init(char* title, size_t width, size_t height);
-void fb_render(fb_State* fb, uint32_t** data, size_t width, size_t height);
+void fb_render(fb_State* fb, uint32_t* data);
 void fb_destroy(fb_State* fb);
 
 #endif

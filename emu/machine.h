@@ -35,7 +35,7 @@ typedef struct {
         KERNEL,
         USER,
     } mode;
-    uint32_t ram[0xFFFF];
+    uint32_t ram[0xB8000];
     uint32_t rom[0xFFFF];
 } Machine;
 
