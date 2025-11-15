@@ -10,7 +10,7 @@
 
 Machine* global_machine = NULL;
 
-void (*ops[])(Machine* machine, uint32_t op) = {
+void (*ops[])(Machine* m, uint32_t op) = {
     [0b00000000] = NOP,
     [0b00000001] = MOV,
     [0b00000010] = ADD,
@@ -45,24 +45,24 @@ void (*ops[])(Machine* machine, uint32_t op) = {
     [0b00011111] = INT,
     [0b00100000] = CALL,
     [0b00100001] = RET,
+    [0b00100010] = IRET,
 };
 
-void step(Machine* machine) {
-    machine->cpu.cycle++;
-    if (machine->cpu.cycle % 1000 == 0) {
-        printf("INTERRUPT TRIGGERERD");
-        F_SET(machine->cpu, F_INT);
-        machine->cpu.interrupt = 0;
+void step(Machine* m) {
+    m->cpu.cycle++;
+    if (m->cpu.cycle % 1000 == 0) {
+        F_SET(m->cpu, F_INT);
+        m->cpu.interrupt = 0;
     }
-    if (F_CHECK(machine->cpu, F_INT) && F_CHECK(machine->cpu, F_INT_ENABLED)) {
+    if (F_CHECK(m->cpu, F_INT) && F_CHECK(m->cpu, F_INT_ENABLED)) {
         uint32_t op = 0b01111100000000000000000000000000;
-        op |= machine->cpu.interrupt << 2;
-        F_CLEAR(machine->cpu, F_INT);
-        INT(machine, op);
+        op |= m->cpu.interrupt << 2;
+        F_CLEAR(m->cpu, F_INT);
+        INT(m, op);
     } else {
-        uint32_t op = fetch(machine);
+        uint32_t op = fetch(m);
         uint8_t opcode = getbyte(op, 32) >> 2;
-        if (ops[opcode]) return ops[opcode](machine, op);
+        if (ops[opcode]) return ops[opcode](m, op);
         else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
     }
 }
@@ -85,14 +85,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Machine machine = {0};
-    machine.ram = malloc(sizeof(uint32_t) * RAM_SIZE);
-    machine.rom = malloc(sizeof(uint32_t) * ROM_SIZE);
+    Machine m = {0};
+    m.ram = malloc(sizeof(uint32_t) * RAM_SIZE);
+    m.rom = malloc(sizeof(uint32_t) * ROM_SIZE);
     uint32_t program[1024];
     {
         size_t r = fread(program, sizeof(uint32_t), 1024, src);
         for (size_t i = 0; i < r; i++) {
-            machine.ram[i] = program[i];
+            m.ram[i] = program[i];
         }
         fclose(src);
     }
@@ -100,12 +100,12 @@ int main(int argc, char** argv) {
     
     fb = fb_init("Orion", FB_W, FB_H);
 
-    machine.cpu.running = true;
-    machine.cpu.pc = 0;
-    machine.mode = KERNEL;
-    machine.cpu.sp = 0xFFFF;
-    machine.cpu.cycle = 0;
-    F_SET(machine.cpu, F_INT_ENABLED);
+    m.cpu.running = true;
+    m.cpu.pc = 0;
+    m.mode = KERNEL;
+    m.cpu.sp = RAM_SIZE;
+    m.cpu.cycle = 0;
+    F_SET(m.cpu, F_INT_ENABLED);
     const char *bios_path = (argc >= 3) ? argv[2] : NULL;
     if (bios_path) {
         FILE *b = fopen(bios_path, "rb");
@@ -118,14 +118,14 @@ int main(int argc, char** argv) {
         fclose(b);
 
         for (size_t i = 0; i < r; ++i) {
-            machine.rom[i] = bios_buf[i];
+            m.rom[i] = bios_buf[i];
         }
-        machine.mode = BIOS;
+        m.mode = BIOS;
     }    
 
-    /* Keep a copy of previous machine state only for visual diffs */
+    /* Keep a copy of previous m state only for visual diffs */
     Machine prev = {0};
-    memcpy(&prev, &machine, sizeof(Machine));
+    memcpy(&prev, &m, sizeof(Machine));
 
     #ifdef DEBUG
     /* step_mode: when true, do not auto-step; only step on Enter.
@@ -133,14 +133,14 @@ int main(int argc, char** argv) {
     bool step_mode = true;
     tty_enable_raw();
     atexit(tty_restore);
-    global_machine = &machine;
+    global_machine = &m;
     signal(SIGINT, handle_signal);   // Ctrl+C
     signal(SIGTERM, handle_signal);  // kill
     signal(SIGABRT, handle_signal);  // abort
     signal(SIGSEGV, handle_signal);  // segmentation fault
     #endif
 
-    while (machine.cpu.running) {
+    while (m.cpu.running) {
         #ifdef DEBUG
         /* Poll stdin: if space pressed toggle step_mode immediately.
            If in step_mode, wait for Enter to proceed; otherwise proceed immediately. */
@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
             if (c == ' ') {
                 step_mode = !step_mode;
                 /* show current mode change in footer by printing once */
-                print_cpu_state(&machine, &prev);
+                print_cpu_state(&m, &prev);
                 printf(ANSI_DIM "Step-by-step mode %s. Press Enter to advance, Space to toggle.\n" ANSI_RESET,
                        step_mode ? "ENABLED" : "DISABLED");
                 fflush(stdout);
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
         if (step_mode) {
             /* in step mode: print state and wait for Enter to step.
                Space while waiting toggles mode; Enter proceeds one step. */
-            print_cpu_state(&machine, &prev);
+            print_cpu_state(&m, &prev);
             printf(ANSI_DIM "Step-by-step mode ENABLED. Press Enter to advance, Space to toggle.\n" ANSI_RESET);
             fflush(stdout);
 
@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
                 } else if (c == ' ') {
                     step_mode = false;
                     /* show that mode was toggled off and continue without waiting further */
-                    print_cpu_state(&machine, &prev);
+                    print_cpu_state(&m, &prev);
                     printf(ANSI_DIM "Step-by-step mode DISABLED. Running...\n" ANSI_RESET);
                     fflush(stdout);
                     break;
@@ -187,26 +187,26 @@ int main(int argc, char** argv) {
             }
 
             /* finally perform a single step */
-            step(&machine);
+            step(&m);
             /* update prev to current for next iteration (visual only) */
-            memcpy(&prev, &machine, sizeof(Machine));
+            memcpy(&prev, &m, sizeof(Machine));
             continue; /* loop back to handle potential immediate toggles */
         } else {
             /* not in step mode: normal execution, but still show state after each step */
-            step(&machine);
-            print_cpu_state(&machine, &prev);
-            memcpy(&prev, &machine, sizeof(Machine));
+            step(&m);
+            print_cpu_state(&m, &prev);
+            memcpy(&prev, &m, sizeof(Machine));
             /* small sleep could be added here for readability if desired */
         }
 
         #else
-        step(&machine);
+        step(&m);
         #endif
     }
 
 
-    free(machine.ram);
-    free(machine.rom);
+    free(m.ram);
+    free(m.rom);
     fb_destroy(fb);
     return 0;
 }

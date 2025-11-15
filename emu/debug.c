@@ -1,3 +1,5 @@
+#ifdef DEBUG
+
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -243,3 +245,5 @@ void handle_signal(int sig) {
     fprintf(stderr, "Received signal %d, exiting...\n", sig);
     exit(1);
 }
+
+#endif

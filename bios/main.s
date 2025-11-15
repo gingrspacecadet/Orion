@@ -33,7 +33,7 @@ TIMER_HANDLER:
     STR   R5, R4, #0             ; mem[0x00002000] = R5
 
     POP   #0x000F                ; restore R0-R3
-    INT   #0x0001                ; IRET (emulator restores user context)
+    IRET                         ; IRET (emulator restores user context)
     HLT
 
 ; -------------------------

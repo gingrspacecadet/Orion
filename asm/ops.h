@@ -2,6 +2,7 @@
 #define OPS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
     char* name;
@@ -31,6 +32,7 @@ static Opcode opcodes[64] = {
     { "INT",  I,  0b01111100, 1},
     { "CALL", M,  0b10000000, 1},
     { "RET",  R,  0b10000100, 0},
+    { "IRET", R,  0b10001000, 0},
 };
 
 #endif
