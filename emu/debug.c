@@ -214,6 +214,7 @@ void dump_machine_state(Machine* machine) {
 
     if (rom_file) {
         for (size_t i = 0; i < ROM_SIZE; i++) {
+            if (!machine->rom[i]) continue;
             fprintf(rom_file, "ROM[%04X] = 0x%08X\n", (unsigned int)i, machine->rom[i]);
         }
         fclose(rom_file);

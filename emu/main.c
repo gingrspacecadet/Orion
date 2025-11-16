@@ -8,7 +8,7 @@
 #include "ops.h"
 #include "fb.h"
 
-Machine* global_machine = NULL;
+Machine* global_machine;
 
 void (*ops[])(Machine* m, uint32_t op) = {
     [0b00000000] = NOP,
