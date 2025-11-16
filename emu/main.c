@@ -23,11 +23,11 @@ void (*ops[])(Machine* m, uint32_t op) = {
     // [0b00001001] = ASR,
     [0b00001010] = LDR,
     [0b00001011] = STR,
-    // [0b00001100] = CMP,
+    [0b00001100] = CMP,
     [0b00001101] = JMP,
-    // [0b00001110] = CALL,
-    // [0b00001111] = JE,
-    // [0b00010000] = JNE,
+    // [0b00001110] = JL,
+    [0b00001111] = JE,
+    [0b00010000] = JNE,
     // [0b00010001] = JC,
     // [0b00010010] = JNC,
     // [0b00010011] = JG,
@@ -99,6 +99,7 @@ int main(int argc, char** argv) {
 
     
     fb = fb_init("Orion", FB_W, FB_H);
+    fb_render(fb, &m.ram[0xB8000]);
 
     m.cpu.running = true;
     m.cpu.pc = 0;

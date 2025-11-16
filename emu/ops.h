@@ -174,3 +174,29 @@ OP(IRET) {
     m->mode = ~m->mode;
     m->cpu.pc = pop(m);
 }
+
+OP(CMP) {
+    bool I_type = (getbit(op, 0) != 0);
+    uint8_t a = getbits(op, 25, 22);
+    uint32_t b;
+    
+    if (!I_type) { // R-type
+        b = getbits(op, 21, 18);
+    } else { // I-type
+        b = getbits(op, 17, 2);
+    }
+    if (m->cpu.registers[a] - b == 0)
+        F_SET(m->cpu, F_ZERO);
+}
+
+OP(JE) {
+    if (F_CHECK(m->cpu, F_ZERO)) {
+        JMP(m, op);
+    }
+}
+
+OP(JNE) {
+    if (!F_CHECK(m->cpu, F_ZERO)) {
+        JMP(m, op);
+    }
+}
