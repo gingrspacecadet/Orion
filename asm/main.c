@@ -234,6 +234,7 @@ void parse(char* line, uint32_t** out) {
             if (!str) return;
 
             size_t len = strlen(str);
+            str[len + 1] = '\0';
             uint32_t *p = *out;
             uint32_t cur = 0;
             int byte_count = 0;

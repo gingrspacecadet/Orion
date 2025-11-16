@@ -39,6 +39,7 @@ kernel: asm
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(TARGET)
+	rm -f *.dump *.out
 
 run: all
 	@./$(TARGET) kernel.out bios.out
