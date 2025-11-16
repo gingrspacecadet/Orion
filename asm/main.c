@@ -215,17 +215,50 @@ char *trimwhitespace(char *str) {
 
 void parse(char* line, uint32_t** out) {
     line = trimwhitespace(line);
-    // puts(line);
     char* comment = strchr(line, ';');
+
     if (line == comment) { (*out)--; offset--; return; }
     if (*line == '\n') { (*out)--; offset--; return; }
     if (comment) *comment = '\0';
+
     char* word1 = strtok(line, " ");
     char* colon = strchr(word1, ':');
     if (colon != NULL) {    // LABEL
         --*out;
         return;
     }
+
+    if (*line == '.') { // DIRECTIVE
+        if (strcmp(line, ".str") == 0) {
+            char *str = line + 5;
+            if (!str) return;
+
+            size_t len = strlen(str);
+            uint32_t *p = *out;
+            uint32_t cur = 0;
+            int byte_count = 0;
+
+            for (size_t i = 0; i < len; ++i) {
+                cur |= (uint32_t)(uint8_t)str[i] << (8 * byte_count);
+                ++byte_count;
+                
+                if (byte_count == 4) {
+                    *p++ = cur;
+                    cur = 0;
+                    byte_count = 0;
+                }
+            }
+            
+            if (byte_count > 0) {
+                *p++ = cur;
+            }
+
+            *out = p;
+            offset += (len + 3) / 4;
+        }
+        return;
+    }
+
     // NOT A LABEL
     int index = parse_opcode(word1);
     if (index < 0) exit(1);

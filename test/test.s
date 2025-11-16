@@ -1,13 +1,31 @@
-mov R1, #0
-mov R2, #1
+start:
+    mov r1, #0x000B     ;
+    shl r1, r1, #16     ;   VGA address
+    or r1, r1, #0x8000  ;
+    jmp $main
 
-loop:
-    mov R3, #0
-    add R3, R1, R2
+str:
+.str Hello
 
-    mov R1, R2
-    mov R2, R3
+printchar:
+    shl r0, r0, #16 ; align
+    str r0, r1, #0  ; store
+    add r1, r1, #1  ; increment
+    ret
 
-    jmp $loop
-
-hlt
+main:
+    mov r2, #0
+    ldr r0, r2, $str
+    call $printchar
+    add r2, r2, #1
+    ldr r0, r2, $str
+    call $printchar
+    add r2, r2, #1
+    ldr r0, r2, $str
+    call $printchar
+    add r2, r2, #1
+    ldr r0, r2, $str
+    call $printchar
+    add r2, r2, #1
+    ldr r0, r2, $str
+    call $printchar
