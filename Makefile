@@ -10,7 +10,7 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 TARGET = build/orion
 
-.PHONY: all clean run crun asm ints bios kernel
+.PHONY: all clean run crun asm ints bios kernel cc
 
 all: bios kernel $(TARGET)
 
@@ -26,6 +26,9 @@ $(BUILD_DIR):
 
 asm: $(BUILD_DIR)
 	@$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
+
+cc: $(BUILD_DIR)
+	@$(MAKE) --no-print-directory -s -C cc
 
 bios: asm
 	@./build/asm bios/main.s bios.out
