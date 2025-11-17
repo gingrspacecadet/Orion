@@ -84,7 +84,7 @@ void fb_drawchar(fb_State* fb, Font* c, int dst_x, int dst_y) {
 }
 
 Font* fb_getchar(char c) {
-    for(size_t i = 0; i < sizeof(font)/sizeof(font[0]); i++)
+    for(size_t i = 0; i < 128; i++)
         if(font[i].c == c) return &font[i];
     return NULL;
 }
