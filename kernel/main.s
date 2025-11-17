@@ -1,7 +1,7 @@
 start:
     mov r1, #0x000B
     shl r1, r1, #16
-    or r1, r1, #0x8000
+    or r1, r1, #0x837B
     jmp $main
 
 printchar:
@@ -39,4 +39,4 @@ done:
     jmp $done
 
 str:
-    .str A chair is a type of seat, typically designed for one person and consisting of one or more legs, a flat or slightly angled seat and a back-rest. It may be made of wood, metal, or synthetic materials, and may be padded or upholstered in various colors and fabrics. Chairs vary in design. An armchair has armrests fixed to the seat a recliner is upholstered and features a mechanism that lowers the chair's back and raises into place a footrest a rocking chair has legs fixed to two long curved slats and a wheelchair has wheels fixed to an axis under the seat.
+    .str Uh oh! Something went wrong :( Guess you gotta restart :3

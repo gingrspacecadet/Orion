@@ -1,5 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+void parse(char* line) {
+
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -20,7 +25,11 @@ int main(int argc, char** argv) {
 
     string[fsize] = 0;
 
-    printf(string);
+    char* line = strtok(string, "\n");
+    while (line) {
+        parse(line);
+        line = strtok(NULL, "\n");
+    }
 
     free(string);
 
