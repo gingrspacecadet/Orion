@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include "machine.h"
 #include "debug.h"
-#include "bus.h"
+#include "device.h"
 #include "../asm/ops.h"
 
 /* Find table entry by opcode byte; returns pointer or NULL */

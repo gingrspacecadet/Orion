@@ -4,7 +4,7 @@
 #include <string.h>
 #include "vga.h"
 #include "font.h"
-#include "bus.h"
+#include "device.h"
 
 vga_State* vga_init(char* title, size_t width, size_t height) {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) return NULL;

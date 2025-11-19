@@ -55,6 +55,7 @@ void step(Machine* m) {
         m->cpu.interrupt = 0;
     }
     if (F_CHECK(m->cpu, F_INT) && F_CHECK(m->cpu, F_INT_ENABLED)) {
+        printf("Recieved interrupt %d\n", m->cpu.interrupt);
         uint32_t op = 0b01111100000000000000000000000000;
         op |= m->cpu.interrupt << 2;
         F_CLEAR(m->cpu, F_INT);
@@ -100,6 +101,9 @@ int main(int argc, char** argv) {
     
     vga = vga_init("Orion", VGA_W, VGA_H);
     vga_render(vga, &m, VGA_BASE);
+
+    #include "devices/keyboard.h"
+    bus_register(&m, &kbd_device);
 
     m.cpu.running = true;
     m.cpu.pc = 0;
@@ -160,7 +164,9 @@ int main(int argc, char** argv) {
                 while (stdin_has_data()) (void)getchar();
                 /* If we turned off step_mode, continue to step below immediately */
             } else {
-                /* if other keys were pressed, ignore them (they may be leftover) */
+                kbd_push(&kbd_device, c);
+                m.cpu.interrupt = 1;
+                F_SET(m.cpu, F_INT);
             }
         }
 
@@ -183,7 +189,9 @@ int main(int argc, char** argv) {
                     fflush(stdout);
                     break;
                 } else {
-                    /* ignore other keys */ ;
+                    kbd_push(&kbd_device, c);
+                    m.cpu.interrupt = 1;
+                    F_SET(m.cpu, F_INT);
                 }
             }
 
