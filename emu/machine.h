@@ -42,7 +42,7 @@ typedef struct {
     uint32_t* rom;
 } Machine;
 
-#define fetch(machine) (machine->mode != BIOS ? machine->ram[machine->cpu.pc++] : machine->rom[machine->cpu.pc++])
+#define fetch(machine) (machine->mode != BIOS ? bus_read(m, machine->cpu.pc++) : machine->rom[machine->cpu.pc++])
 #define getbit(target, bit) ((target & (1 << bit)) >> bit)
 
 static inline uint32_t getbits(uint32_t v, int hi, int lo) {

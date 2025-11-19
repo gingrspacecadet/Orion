@@ -1,6 +1,7 @@
 #include "machine.h"
 #include "../asm/ops.h"
-#include "fb.h"
+#include "vga.h"
+#include "bus.h"
 
 #define OP(name) void name(Machine* m, uint32_t op)
 
@@ -20,7 +21,7 @@ void push(Machine* m, uint32_t value) {
         printf("Stack overflow!");
         exit(1);
     }
-    m->ram[m->cpu.sp--] = value;
+    bus_write(m, m->cpu.sp--, value);
 }
 
 uint32_t pop(Machine* m) {
@@ -28,7 +29,7 @@ uint32_t pop(Machine* m) {
         printf("Stack underflow!");
         exit(1);
     }
-    return m->ram[++m->cpu.sp];
+    return bus_read(m, ++m->cpu.sp);
 }
 
 OP(NOP) {
@@ -94,7 +95,7 @@ OP(INT) {
     } else {
         int32_t imm = sign_extend(getbits(op, 17, 2), 16);
         push(m, m->cpu.pc);
-        m->cpu.pc = m->ram[0x1234 + imm];
+        m->cpu.pc = bus_read(m, 0x1234 + imm);
         m->mode = BIOS;
     }
 }
@@ -106,7 +107,7 @@ OP(LDR) {
 
     uint32_t addr_index = (uint32_t)((int32_t)m->cpu.registers[base] + imm);
 
-    m->cpu.registers[dest] = m->ram[addr_index];
+    m->cpu.registers[dest] = bus_read(m, addr_index);
 }
 
 OP(STR) {
@@ -116,10 +117,10 @@ OP(STR) {
 
     uint32_t addr_index = (uint32_t)((int32_t)m->cpu.registers[base] + imm);
 
-    m->ram[addr_index] = m->cpu.registers[src_reg];
+    bus_write(m, addr_index, m->cpu.registers[src_reg]);
 
-    extern fb_State* fb;
-    fb_render(fb, &m->ram[FB_BASE]);
+    extern vga_State* vga;
+    vga_render(vga, m, VGA_BASE);
 }
 
 OP(PUSH) {

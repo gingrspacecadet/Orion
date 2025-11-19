@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "machine.h"
 #include "debug.h"
+#include "bus.h"
 #include "../asm/ops.h"
 
 /* Find table entry by opcode byte; returns pointer or NULL */
@@ -146,18 +147,18 @@ static void print_flag(const char *name, bool set) {
 }
 
 /* Print CPU state with optional previous state to highlight changes */
-void print_cpu_state(const Machine* machine, const Machine* prev) {
+void print_cpu_state(const Machine* m, const Machine* prev) {
     /* Header: PC, SP, current instruction word at PC and disasm */
-    uint32_t pc = machine->cpu.pc;
-    uint32_t sp = machine->cpu.sp;
-    uint32_t instr = (machine->mode == BIOS ? machine->rom[pc] : machine->ram[pc]);
+    uint32_t pc = m->cpu.pc;
+    uint32_t sp = m->cpu.sp;
+    uint32_t instr = (m->mode == BIOS ? m->rom[pc] : bus_read(m, pc));
 
     char dis[128];
     disasm(instr, dis, sizeof(dis), pc);
 
     printf(ANSI_CLEAR_SCREEN);
     printf(ANSI_BOLD "\nCPU STATE\n" ANSI_RESET);
-    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s    " ANSI_CYAN "CYCLE: " ANSI_RESET "%d\n", pc, sp, (machine->mode == BIOS ? "BIOS" : "KERNEL"), machine->cpu.cycle);
+    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s    " ANSI_CYAN "CYCLE: " ANSI_RESET "%d\n", pc, sp, (m->mode == BIOS ? "BIOS" : "KERNEL"), m->cpu.cycle);
     printf(ANSI_YELLOW "INST@PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "%-40s\n\n", instr, dis);
 
     /* Registers printed in two rows of 8 for compactness */
@@ -165,7 +166,7 @@ void print_cpu_state(const Machine* machine, const Machine* prev) {
     for (int row = 0; row < 2; row++) {
         for (int col = 0; col < 8; col++) {
             int i = row * 8 + col;
-            uint32_t val = machine->cpu.registers[i];
+            uint32_t val = m->cpu.registers[i];
             bool changed = false;
             if (prev) changed = (prev->cpu.registers[i] != val);
 
@@ -182,10 +183,10 @@ void print_cpu_state(const Machine* machine, const Machine* prev) {
     }
 
     /* Flags */
-    bool z = getbit(machine->cpu.flags, 0);
-    bool c = getbit(machine->cpu.flags, 1);
-    bool n = getbit(machine->cpu.flags, 2);
-    bool o = getbit(machine->cpu.flags, 3);
+    bool z = getbit(m->cpu.flags, 0);
+    bool c = getbit(m->cpu.flags, 1);
+    bool n = getbit(m->cpu.flags, 2);
+    bool o = getbit(m->cpu.flags, 3);
 
     printf("\n" ANSI_BOLD "Flags: " ANSI_RESET);
     print_flag("Z", z);
@@ -199,37 +200,37 @@ void print_cpu_state(const Machine* machine, const Machine* prev) {
     fflush(stdout);
 }
 
-void dump_machine_state(Machine* machine) {
+void dump_machine_state(Machine* m) {
     FILE* ram_file = fopen("ram.dump", "w");
     FILE* rom_file = fopen("rom.dump", "w");
     FILE* cpu_file = fopen("cpu.dump", "w");
 
     if (ram_file) {
         for (size_t i = 0; i < RAM_SIZE; i++) {
-            if (!machine->ram[i]) continue;
-            fprintf(ram_file, "RAM[%04X] = 0x%08X\n", (unsigned int)i, machine->ram[i]);
+            if (!bus_read(m, i)) continue;
+            fprintf(ram_file, "RAM[%04X] = 0x%08X\n", (unsigned int)i, bus_read(m, i));
         }
         fclose(ram_file);
     }
 
     if (rom_file) {
         for (size_t i = 0; i < ROM_SIZE; i++) {
-            if (!machine->rom[i]) continue;
-            fprintf(rom_file, "ROM[%04X] = 0x%08X\n", (unsigned int)i, machine->rom[i]);
+            if (!m->rom[i]) continue;
+            fprintf(rom_file, "ROM[%04X] = 0x%08X\n", (unsigned int)i, m->rom[i]);
         }
         fclose(rom_file);
     }
 
     if (cpu_file) {
-        fprintf(cpu_file, "PC: 0x%08X\n", machine->cpu.pc);
-        fprintf(cpu_file, "SP: 0x%08X\n", machine->cpu.sp);
-        fprintf(cpu_file, "Cycle: %zu\n", machine->cpu.cycle);
-        fprintf(cpu_file, "Running: %s\n", machine->cpu.running ? "true" : "false");
-        fprintf(cpu_file, "Mode: %s\n", machine->mode == BIOS ? "BIOS" :
-                                        machine->mode == KERNEL ? "KERNEL" : "USER");
-        fprintf(cpu_file, "Flags: 0x%02X\n", machine->cpu.flags);
+        fprintf(cpu_file, "PC: 0x%08X\n", m->cpu.pc);
+        fprintf(cpu_file, "SP: 0x%08X\n", m->cpu.sp);
+        fprintf(cpu_file, "Cycle: %zu\n", m->cpu.cycle);
+        fprintf(cpu_file, "Running: %s\n", m->cpu.running ? "true" : "false");
+        fprintf(cpu_file, "Mode: %s\n", m->mode == BIOS ? "BIOS" :
+                                        m->mode == KERNEL ? "KERNEL" : "USER");
+        fprintf(cpu_file, "Flags: 0x%02X\n", m->cpu.flags);
         for (int i = 0; i < 16; i++) {
-            fprintf(cpu_file, "R[%d] = 0x%08X\n", i, machine->cpu.registers[i]);
+            fprintf(cpu_file, "R[%d] = 0x%08X\n", i, m->cpu.registers[i]);
         }
         fclose(cpu_file);
     }

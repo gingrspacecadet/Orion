@@ -1,4 +1,4 @@
-#include "fb.h"
+#include "vga.h"
 
 Font font[] = {
     {' ',   "........."

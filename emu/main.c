@@ -6,7 +6,7 @@
 #include "machine.h"
 #include "debug.h"
 #include "ops.h"
-#include "fb.h"
+#include "vga.h"
 
 Machine* global_machine;
 
@@ -67,7 +67,7 @@ void step(Machine* m) {
     }
 }
 
-fb_State* fb;
+vga_State* vga;
 
 int main(int argc, char** argv) {
     #ifdef DEBUG
@@ -92,14 +92,14 @@ int main(int argc, char** argv) {
     {
         size_t r = fread(program, sizeof(uint32_t), 1024, src);
         for (size_t i = 0; i < r; i++) {
-            m.ram[i] = program[i];
+            bus_write(&m, i, program[i]);
         }
         fclose(src);
     }
 
     
-    fb = fb_init("Orion", FB_W, FB_H);
-    fb_render(fb, &m.ram[0xB8000]);
+    vga = vga_init("Orion", VGA_W, VGA_H);
+    vga_render(vga, &m, VGA_BASE);
 
     m.cpu.running = true;
     m.cpu.pc = 0;
@@ -208,6 +208,6 @@ int main(int argc, char** argv) {
 
     free(m.ram);
     free(m.rom);
-    fb_destroy(fb);
+    vga_destroy(vga);
     return 0;
 }
