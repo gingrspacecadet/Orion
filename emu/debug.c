@@ -3,10 +3,82 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <time.h>
+#include <inttypes.h>
+#include <math.h>
 #include "machine.h"
 #include "debug.h"
 #include "device.h"
 #include "../asm/ops.h"
+
+/* EMA smoothing state for measured cycles/sec */
+static struct timespec last_ts = {0,0};
+static uint64_t last_cycles = 0;
+static double ema_cps = 0.0;
+static bool ema_initialized = false;
+
+/* Time constant in seconds for EMA smoothing (larger => smoother) */
+static const double EMA_TAU_SECONDS = 0.5; /* 0.5s time constant; tune as desired */
+
+/* Measure cycles/sec and return an exponential moving average (cycles/sec).
+   Uses variable time between calls and a time-constant based alpha:
+     alpha = 1 - exp(-dt / tau)
+*/
+static double measure_cycles_per_sec_avg(const Machine *m) {
+    struct timespec now;
+    if (clock_gettime(1, &now) != 0) {
+        return ema_cps;
+    }
+
+    uint64_t now_cycles = (uint64_t)m->cpu.cycle;
+
+    /* Initialize baseline on first call */
+    if (last_ts.tv_sec == 0 && last_ts.tv_nsec == 0) {
+        last_ts = now;
+        last_cycles = now_cycles;
+        ema_cps = 0.0;
+        ema_initialized = true;
+        return ema_cps;
+    }
+
+    double elapsed = (now.tv_sec - last_ts.tv_sec) + (now.tv_nsec - last_ts.tv_nsec) * 1e-9;
+    if (elapsed <= 0.0) {
+        return ema_cps;
+    }
+
+    uint64_t cycles_diff = now_cycles - last_cycles;
+
+    /* Compute instantaneous cycles/sec for this interval */
+    double inst_cps = (double)cycles_diff / elapsed;
+
+    /* Alpha derived from continuous-time exponential smoothing */
+    double alpha = 1.0 - exp(-elapsed / EMA_TAU_SECONDS);
+
+    if (!ema_initialized) {
+        ema_cps = inst_cps;
+        ema_initialized = true;
+    } else {
+        ema_cps += alpha * (inst_cps - ema_cps);
+    }
+
+    /* Update baseline */
+    last_ts = now;
+    last_cycles = now_cycles;
+
+    return ema_cps;
+}
+
+/* Format cycles/sec into a human-friendly string (Hz, KHz, MHz, GHz) */
+static void format_hz(double hz, char *out, size_t outlen) {
+    const char *unit = "Hz";
+    double val = hz;
+
+    if (hz >= 1e9) { val = hz / 1e9; unit = "GHz"; }
+    else if (hz >= 1e6) { val = hz / 1e6; unit = "MHz"; }
+    else if (hz >= 1e3) { val = hz / 1e3; unit = "KHz"; }
+
+    snprintf(out, outlen, "%.2f %s", val, unit);
+}
 
 /* Find table entry by opcode byte; returns pointer or NULL */
 static const Opcode* dlookup(uint8_t opcode) {
@@ -156,9 +228,15 @@ void print_cpu_state(const Machine* m, const Machine* prev) {
     char dis[128];
     disasm(instr, dis, sizeof(dis), pc);
 
+    /* compute EMA-averaged measured clock (cycles per second) and formatted string */
+    double cps_avg = measure_cycles_per_sec_avg(m);
+    char cps_str[32];
+    format_hz(cps_avg, cps_str, sizeof cps_str);
+
     printf(ANSI_CLEAR_SCREEN);
     printf(ANSI_BOLD "\nCPU STATE\n" ANSI_RESET);
-    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s    " ANSI_CYAN "CYCLE: " ANSI_RESET "%d\n", pc, sp, (m->mode == BIOS ? "BIOS" : "KERNEL"), m->cpu.cycle);
+    printf(ANSI_CYAN "PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "SP: " ANSI_RESET "0x%08X    " ANSI_CYAN "MODE: " ANSI_RESET "%s    " ANSI_CYAN "CYCLE: " ANSI_RESET "%zu    " ANSI_CYAN "CLK: " ANSI_RESET "%s\n",
+           pc, sp, (m->mode == BIOS ? "BIOS" : "KERNEL"), m->cpu.cycle, cps_str);
     printf(ANSI_YELLOW "INST@PC: " ANSI_RESET "0x%08X    " ANSI_CYAN "%-40s\n\n", instr, dis);
 
     /* Registers printed in two rows of 8 for compactness */

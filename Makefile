@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS += -Wall -Wextra -g -DDEBUG -Wno-unused-function -I emu
-LDFLAGS = $(shell pkg-config --cflags --libs sdl2 SDL2_ttf)
+LDFLAGS = $(shell pkg-config --cflags --libs sdl2 SDL2_ttf) -lm
 
 BUILD_DIR = build
 SRC_DIR = emu
