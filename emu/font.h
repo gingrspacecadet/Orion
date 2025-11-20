@@ -1,4 +1,4 @@
-#include "vga.h"
+#include "devices/vga.h"
 
 Font font[] = {
     {' ',   "........."

@@ -11,8 +11,10 @@ static DeviceManager mgr;
 
 uint32_t bus_read(Machine* m, uint32_t addr) {
     for (size_t i = 0; i < mgr.num; i++) {
-        if (addr >= mgr.devices[i]->base && addr <= mgr.devices[i]->base + mgr.devices[i]->size) {
-            return mgr.devices[i]->read(mgr.devices[i], addr - mgr.devices[i]->base);
+        Device* curr = mgr.devices[i];
+        if (addr >= curr->base && addr <= curr->base + curr->size) {
+            if (curr->read) 
+                return curr->read(curr, addr - curr->base);
         }
     }
     return m->ram[addr];
@@ -20,9 +22,10 @@ uint32_t bus_read(Machine* m, uint32_t addr) {
 
 void bus_write(Machine* m, uint32_t addr, uint32_t value) {
     for (size_t i = 0; i < mgr.num; i++) {
-        if (addr >= mgr.devices[i]->base && addr <= mgr.devices[i]->base + mgr.devices[i]->size) {
-            mgr.devices[i]->write(mgr.devices[i], addr, value);
-            return;
+        Device* curr = mgr.devices[i];
+        if (addr >= curr->base && addr <= curr->base + curr->size) {
+            if (curr->write)
+                return curr->write(curr, addr - curr->base, value);
         }
     }
     m->ram[addr] = value;
@@ -31,4 +34,5 @@ void bus_write(Machine* m, uint32_t addr, uint32_t value) {
 void bus_register(Machine* m, Device* dev) {
     if (mgr.num == MAX_DEVICES) return;
     mgr.devices[mgr.num++] = dev;
+    if (dev->init) dev->init(dev);
 }

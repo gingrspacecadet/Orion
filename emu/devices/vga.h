@@ -3,6 +3,7 @@
 
 #include <SDL2/SDL.h>
 #include "machine.h"
+#include "../device.h"
 
 #define CHAR_W  9
 #define CHAR_H  16
@@ -16,15 +17,21 @@ typedef struct {
     SDL_Surface* surface;
     int width;
     int height;
-} vga_State;
+    uint32_t* mem;
+    uint16_t addr;
+} VGA;
 
 typedef struct {
     char c;
     char* val;
 } Font;
 
-vga_State* vga_init(char* title, size_t width, size_t height);
-void vga_render(vga_State* vga, Machine* m, uint32_t addr);
-void vga_destroy(vga_State* vga);
+void vga_init(Device* self);
+void vga_render(VGA* vga);
+void vga_destroy(VGA* vga);
+
+extern VGA vga_state;
+
+extern Device vga_device;
 
 #endif

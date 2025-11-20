@@ -7,6 +7,7 @@
 typedef struct Device {
     uint32_t (*read)(struct Device* self, uint32_t addr);
     void (*write)(struct Device* self, uint32_t addr, uint32_t value);
+    void (*init)(struct Device* self);
     uint32_t base;
     size_t size;
     void* state;

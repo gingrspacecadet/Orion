@@ -1,6 +1,5 @@
 #include "machine.h"
 #include "../asm/ops.h"
-#include "vga.h"
 #include "device.h"
 
 #define OP(name) void name(Machine* m, uint32_t op)
@@ -118,9 +117,6 @@ OP(STR) {
     uint32_t addr_index = (uint32_t)((int32_t)m->cpu.registers[base] + imm);
 
     bus_write(m, addr_index, m->cpu.registers[src_reg]);
-
-    extern vga_State* vga;
-    vga_render(vga, m, VGA_BASE);
 }
 
 OP(PUSH) {
@@ -188,6 +184,8 @@ OP(CMP) {
     }
     if (m->cpu.registers[a] - b == 0)
         F_SET(m->cpu, F_ZERO);
+    else
+        F_CLEAR(m->cpu, F_ZERO);
 }
 
 OP(JE) {

@@ -6,7 +6,9 @@
 #include "machine.h"
 #include "debug.h"
 #include "ops.h"
-#include "vga.h"
+
+#include "devices/vga.h"
+#include "devices/keyboard.h"
 
 Machine* global_machine;
 
@@ -68,24 +70,22 @@ void step(Machine* m) {
     }
 }
 
-vga_State* vga;
-
 int main(int argc, char** argv) {
     #ifdef DEBUG
     puts("\n\n\n");
     #endif
-
+    
     if (argc < 2) {
         printf("Missing input file");
         return 1;
     }
-
+    
     FILE* src = fopen(argv[1], "rb");
     if (!src) {
         perror("fopen");
         return 1;
     }
-
+    
     Machine m = {0};
     m.ram = malloc(sizeof(uint32_t) * RAM_SIZE);
     m.rom = malloc(sizeof(uint32_t) * ROM_SIZE);
@@ -97,12 +97,10 @@ int main(int argc, char** argv) {
         }
         fclose(src);
     }
-
     
-    vga = vga_init("Orion", VGA_W, VGA_H);
-    vga_render(vga, &m, VGA_BASE);
-
-    #include "devices/keyboard.h"
+    
+    
+    bus_register(&m, &vga_device);
     bus_register(&m, &kbd_device);
 
     m.cpu.running = true;
@@ -216,6 +214,5 @@ int main(int argc, char** argv) {
 
     free(m.ram);
     free(m.rom);
-    vga_destroy(vga);
     return 0;
 }
