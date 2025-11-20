@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include "machine.h"
 
+#define PAGE_SIZE 4096
+#define WORDS_PER_PAGE (PAGE_SIZE / sizeof(uint32_t))
+
 typedef struct Page {
     uint32_t data[WORDS_PER_PAGE];
 } Page;
