@@ -2,11 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PAGE_SIZE 4096
-#define WORDS_PER_PAGE (PAGE_SIZE / sizeof(uint32_t))
-
-
-
 static Page* get_page(uint32_t addr, int create) {
     uint32_t page_num = addr / WORDS_PER_PAGE;
     Node *n = page_table;
