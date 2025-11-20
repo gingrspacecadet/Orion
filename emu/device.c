@@ -1,4 +1,5 @@
 #include "device.h"
+#include "ram.h"
 
 #define MAX_DEVICES 16
 
@@ -17,7 +18,7 @@ uint32_t bus_read(Machine* m, uint32_t addr) {
                 return curr->read(curr, addr - curr->base);
         }
     }
-    return m->ram[addr];
+    return ram_read(addr);
 }
 
 void bus_write(Machine* m, uint32_t addr, uint32_t value) {
@@ -28,7 +29,7 @@ void bus_write(Machine* m, uint32_t addr, uint32_t value) {
                 return curr->write(curr, addr - curr->base, value);
         }
     }
-    m->ram[addr] = value;
+    ram_write(addr, value);
 }
 
 void bus_register(Machine* m, Device* dev) {
