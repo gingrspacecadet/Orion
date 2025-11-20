@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     }
     
     Machine m = {0};
-    m.ram = malloc(sizeof(uint32_t) * RAM_SIZE);
+    ram_init(&m);
     m.rom = malloc(sizeof(uint32_t) * ROM_SIZE);
     uint32_t program[1024];
     {
