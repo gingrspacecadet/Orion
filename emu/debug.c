@@ -283,13 +283,17 @@ void dump_machine_state(Machine* m) {
     FILE* rom_file = fopen("rom.dump", "w");
     FILE* cpu_file = fopen("cpu.dump", "w");
 
-    if (ram_file) {
-        for (size_t i = 0; i < RAM_SIZE; i++) {
-            if (!bus_read(m, i)) continue;
-            fprintf(ram_file, "RAM[%04X] = 0x%08X\n", (unsigned int)i, bus_read(m, i));
+    Node *n = page_table;
+    while (n) {
+        for (size_t i = 0; i < WORDS_PER_PAGE; i++) {
+            uint32_t val = n->page->data[i];
+            if (!val) continue;
+            fprintf(ram_file, "RAM[%08X] = 0x%08X\n",
+                    n->page_num * WORDS_PER_PAGE + i, val);
         }
-        fclose(ram_file);
+        n = n->next:
     }
+
 
     if (rom_file) {
         for (size_t i = 0; i < ROM_SIZE; i++) {
