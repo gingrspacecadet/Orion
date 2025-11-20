@@ -5,17 +5,7 @@
 #define PAGE_SIZE 4096
 #define WORDS_PER_PAGE (PAGE_SIZE / sizeof(uint32_t))
 
-typedef struct Page {
-    uint32_t data[WORDS_PER_PAGE];
-} Page;
 
-typedef struct Node {
-    uint32_t page_num;
-    Page *page;
-    struct Node *next;
-} Node;
-
-static Node *page_table = NULL;
 
 static Page* get_page(uint32_t addr, int create) {
     uint32_t page_num = addr / WORDS_PER_PAGE;
