@@ -17,8 +17,6 @@ typedef struct Node {
     struct Node *next;
 } Node;
 
-Node* page_table = NULL;
-
 void ram_init(void);
 void ram_free(void);
 void ram_write(uint32_t addr, uint32_t value);

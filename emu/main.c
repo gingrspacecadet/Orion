@@ -6,6 +6,7 @@
 #include "machine.h"
 #include "debug.h"
 #include "ops.h"
+#include "ram.h"
 
 #include "devices/vga.h"
 #include "devices/keyboard.h"
@@ -87,7 +88,7 @@ int main(int argc, char** argv) {
     }
     
     Machine m = {0};
-    ram_init(&m);
+    ram_init();
     m.rom = malloc(sizeof(uint32_t) * ROM_SIZE);
     uint32_t program[1024];
     {

@@ -9,6 +9,7 @@
 #include "machine.h"
 #include "debug.h"
 #include "device.h"
+#include "ram.h"
 #include "../asm/ops.h"
 
 /* EMA smoothing state for measured cycles/sec */
@@ -283,6 +284,7 @@ void dump_machine_state(Machine* m) {
     FILE* rom_file = fopen("rom.dump", "w");
     FILE* cpu_file = fopen("cpu.dump", "w");
 
+    extern Node* page_table;
     Node *n = page_table;
     while (n) {
         for (size_t i = 0; i < WORDS_PER_PAGE; i++) {
@@ -291,7 +293,7 @@ void dump_machine_state(Machine* m) {
             fprintf(ram_file, "RAM[%08X] = 0x%08X\n",
                     n->page_num * WORDS_PER_PAGE + i, val);
         }
-        n = n->next:
+        n = n->next;
     }
 
 
