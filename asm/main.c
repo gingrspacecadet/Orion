@@ -217,7 +217,6 @@ void parse(char* line, uint32_t** out) {
     line = trimwhitespace(line);
     char* comment = strchr(line, ';');
 
-    if (line == comment) { (*out)--; offset--; return; }
     if (*line == '\n') { (*out)--; offset--; return; }
     if (comment) *comment = '\0';
 

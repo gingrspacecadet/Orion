@@ -10,6 +10,7 @@
 
 #include "devices/vga.h"
 #include "devices/keyboard.h"
+#include "devices/block.h"
 
 Machine* global_machine;
 
@@ -99,8 +100,10 @@ int main(int argc, char** argv) {
         fclose(src);
     }
     
-    
-    
+    block_state = block_init("orion.img");
+    block_device.state = block_state;
+
+    bus_register(&m, &block_device);
     bus_register(&m, &vga_device);
     bus_register(&m, &kbd_device);
 
