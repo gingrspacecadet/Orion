@@ -1,3 +1,5 @@
+jmp  $end
+
 start:
     mov r0, #0x00FE
     shl r0, r0, #16
@@ -24,3 +26,5 @@ start:
 
 .loop:
     jmp $.loop
+end:
+    Nop

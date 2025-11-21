@@ -2,7 +2,7 @@
 #include "../asm/ops.h"
 #include "device.h"
 
-#define OP(name) void name(Machine* m, uint32_t op)
+#define OP(name) void static inline name(Machine* m, uint32_t op)
 
 uint8_t get_opcode_name(uint8_t byte) {
     uint8_t index = 0xFF;

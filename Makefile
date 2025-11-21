@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS += -Wall -Wextra -g -DDEBUG -Wno-unused-function -I emu
+CFLAGS += -Wall -Wextra -g -DDEBUG -Wno-unused-function -Iemu -O3 -march=native -flto -funroll-loops
 LDFLAGS = $(shell pkg-config --cflags --libs sdl2 SDL2_ttf) -lm
 
 BUILD_DIR = build

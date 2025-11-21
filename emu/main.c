@@ -52,13 +52,16 @@ void (*ops[])(Machine* m, uint32_t op) = {
     [0b00100010] = IRET,
 };
 
+#define unlikely(cond)  __glibc_unlikely(cond)
+#define likely(cond)    __glibc_unlikely(cond)
+
 void step(Machine* m) {
     m->cpu.cycle++;
-    if (m->cpu.cycle % 1000 == 0) {
+    if (unlikely(m->cpu.cycle % 1000 == 0)) {
         F_SET(m->cpu, F_INT);
         m->cpu.interrupt = 0;
     }
-    if (F_CHECK(m->cpu, F_INT) && F_CHECK(m->cpu, F_INT_ENABLED)) {
+    if (unlikely(F_CHECK(m->cpu, F_INT) && F_CHECK(m->cpu, F_INT_ENABLED))) {
         printf("Recieved interrupt %d\n", m->cpu.interrupt);
         uint32_t op = 0b01111100000000000000000000000000;
         op |= m->cpu.interrupt << 2;
