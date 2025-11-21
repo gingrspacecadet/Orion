@@ -88,15 +88,15 @@ OP(RET) {
 }
 
 OP(INT) {
-    // if (m->mode == BIOS) {
-    //     m->mode = KERNEL;
-    //     m->cpu.pc = 0;
-    // } else {
+    if (m->mode == BIOS) {
+        m->mode = KERNEL;
+        m->cpu.pc = 0;
+    } else {
         int32_t imm = sign_extend(getbits(op, 17, 2), 16);
         push(m, m->cpu.pc);
         m->cpu.pc = bus_read(m, 0x1234 + imm);
         m->mode = BIOS;
-    // }
+    }
 }
 
 OP(LDR) {
