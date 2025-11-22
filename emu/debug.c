@@ -1,3 +1,11 @@
+#include "machine.h"
+#include "debug.h"
+#include "device.h"
+#include "ram.h"
+#include "../asm/ops.h"
+
+extern Machine* global_machine;
+
 #ifdef DEBUG
 
 #include <stdint.h>
@@ -6,11 +14,6 @@
 #include <time.h>
 #include <inttypes.h>
 #include <math.h>
-#include "machine.h"
-#include "debug.h"
-#include "device.h"
-#include "ram.h"
-#include "../asm/ops.h"
 
 /* EMA smoothing state for measured cycles/sec */
 static struct timespec last_ts = {0,0};
@@ -224,7 +227,7 @@ void print_cpu_state(const Machine* m, const Machine* prev) {
     /* Header: PC, SP, current instruction word at PC and disasm */
     uint32_t pc = m->cpu.pc;
     uint32_t sp = m->cpu.sp;
-    uint32_t instr = (m->mode == BIOS ? m->rom[pc] : bus_read(m, pc));
+    uint32_t instr = (m->mode == BIOS ? m->rom[pc] : bus_read(pc));
 
     char dis[128];
     disasm(instr, dis, sizeof(dis), pc);
@@ -290,7 +293,7 @@ void dump_machine_state(Machine* m) {
         for (size_t i = 0; i < WORDS_PER_PAGE; i++) {
             uint32_t val = n->page->data[i];
             if (!val) continue;
-            fprintf(ram_file, "RAM[%08X] = 0x%08X\n",
+            fprintf(ram_file, "RAM[%08lX] = 0x%08X\n",
                     n->page_num * WORDS_PER_PAGE + i, val);
         }
         n = n->next;
@@ -321,8 +324,6 @@ void dump_machine_state(Machine* m) {
 
     fprintf(stderr, "\nMachine state dumped to ram.dump, rom.dump, and cpu.dump\n");
 }
-
-extern Machine* global_machine;
 
 void handle_signal(int sig) {
     if (global_machine) {

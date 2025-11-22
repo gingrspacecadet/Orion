@@ -13,8 +13,8 @@ typedef struct Device {
     void* state;
 } Device;
 
-uint32_t bus_read(Machine* m, uint32_t addr);
-void bus_write(Machine* m, uint32_t addr, uint32_t value);
-void bus_register(Machine* m, Device* dev);
+uint32_t bus_read(uint32_t addr);
+void bus_write(uint32_t addr, uint32_t value);
+void bus_register(Device* dev);
 
 #endif

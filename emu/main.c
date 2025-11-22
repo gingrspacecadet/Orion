@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "machine.h"
 #include "debug.h"
@@ -66,7 +67,7 @@ void step(Machine* m) {
     } else {
         uint32_t op = fetch(m);
         uint8_t opcode = getbyte(op, 32) >> 2;
-        if (ops[opcode]) return ops[opcode](m, op);
+        if (ops[opcode]) { ops[opcode](m, op); return; }
         else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
     }
 }
@@ -95,7 +96,7 @@ int main(int argc, char** argv) {
     {
         size_t r = fread(program, sizeof(uint32_t), 1024, src);
         for (size_t i = 0; i < r; i++) {
-            bus_write(&m, i, program[i]);
+            bus_write(i, program[i]);
         }
         fclose(src);
     }
@@ -103,9 +104,9 @@ int main(int argc, char** argv) {
     block_state = block_init("orion.img");
     block_device.state = block_state;
 
-    bus_register(&m, &block_device);
-    bus_register(&m, &vga_device);
-    bus_register(&m, &kbd_device);
+    bus_register(&block_device);
+    bus_register(&vga_device);
+    bus_register(&kbd_device);
 
     m.cpu.running = true;
     m.cpu.pc = 0;

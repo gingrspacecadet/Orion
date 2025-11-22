@@ -107,8 +107,8 @@ Label* parse_label(const char *str) {
         char listbuf[512] = {0};
         for (size_t i = 0; i < num_labels && shown < max_show; ++i) {
             if (labels[i].name) {
-                if (shown) strncat(listbuf, ", ", sizeof(listbuf));
-                strncat(listbuf, labels[i].name, sizeof(listbuf));
+                if (shown) strncat(listbuf, ", ", sizeof(listbuf) - 1);
+                strncat(listbuf, labels[i].name, sizeof(listbuf) - 1);
                 shown++;
             }
         }
@@ -130,7 +130,7 @@ int parse_imm(char *str) {
         return 1;
     }
     if (str[0] == '$') {
-        sprintf(str + 1, "%ld", parse_label(str)->offset);
+        sprintf(str + 1, "%u", parse_label(str)->offset);
         *str = '#';
         return parse_imm(str);
     }

@@ -20,7 +20,7 @@ void push(Machine* m, uint32_t value) {
         printf("Stack overflow!");
         exit(1);
     }
-    bus_write(m, m->cpu.sp--, value);
+    bus_write(m->cpu.sp--, value);
 }
 
 uint32_t pop(Machine* m) {
@@ -28,7 +28,7 @@ uint32_t pop(Machine* m) {
         printf("Stack underflow!");
         exit(1);
     }
-    return bus_read(m, ++m->cpu.sp);
+    return bus_read(++m->cpu.sp);
 }
 
 OP(NOP) {
@@ -94,7 +94,7 @@ OP(INT) {
     } else {
         int32_t imm = sign_extend(getbits(op, 17, 2), 16);
         push(m, m->cpu.pc);
-        m->cpu.pc = bus_read(m, 0x1234 + imm);
+        m->cpu.pc = bus_read(0x1234 + imm);
         m->mode = BIOS;
     }
 }
@@ -106,7 +106,7 @@ OP(LDR) {
 
     uint32_t addr_index = (uint32_t)((int32_t)m->cpu.registers[base] + imm);
 
-    m->cpu.registers[dest] = bus_read(m, addr_index);
+    m->cpu.registers[dest] = bus_read(addr_index);
 }
 
 OP(STR) {
@@ -116,7 +116,7 @@ OP(STR) {
 
     uint32_t addr_index = (uint32_t)((int32_t)m->cpu.registers[base] + imm);
 
-    bus_write(m, addr_index, m->cpu.registers[src_reg]);
+    bus_write(addr_index, m->cpu.registers[src_reg]);
 }
 
 OP(PUSH) {
@@ -168,6 +168,7 @@ OP(OR) {
 }
 
 OP(IRET) {
+    (void)op;
     m->mode = ~m->mode;
     m->cpu.pc = pop(m);
 }
