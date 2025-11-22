@@ -54,15 +54,15 @@ void (*ops[])(Machine* m, uint32_t op) = {
 
 #define unlikely(cond)  __glibc_unlikely(cond)
 #define likely(cond)    __glibc_unlikely(cond)
+#define CYCLE_TO_TRIGGER (1024 * 1024)
 
 void step(Machine* m) {
     m->cpu.cycle++;
-    if (unlikely(m->cpu.cycle % 1000 == 0)) {
+    if (unlikely(m->cpu.cycle % CYCLE_TO_TRIGGER == 0)) {
         F_SET(m->cpu, F_INT);
         m->cpu.interrupt = 0;
     }
     if (unlikely(F_CHECK(m->cpu, F_INT) && F_CHECK(m->cpu, F_INT_ENABLED))) {
-        printf("Recieved interrupt %d\n", m->cpu.interrupt);
         uint32_t op = 0b01111100000000000000000000000000;
         op |= m->cpu.interrupt << 2;
         F_CLEAR(m->cpu, F_INT);
@@ -74,6 +74,7 @@ void step(Machine* m) {
         else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
     }
 }
+
 
 int main(int argc, char** argv) {
     #ifdef DEBUG
@@ -156,22 +157,24 @@ int main(int argc, char** argv) {
            If in step_mode, wait for Enter to proceed; otherwise proceed immediately. */
 
         /* Non-blocking poll for space toggle before stepping */
-        if (stdin_has_data()) {
-            int c = getchar();
-            if (c == ' ') {
-                step_mode = !step_mode;
-                /* show current mode change in footer by printing once */
-                print_cpu_state(&m, &prev);
-                printf(ANSI_DIM "Step-by-step mode %s. Press Enter to advance, Space to toggle.\n" ANSI_RESET,
-                       step_mode ? "ENABLED" : "DISABLED");
-                fflush(stdout);
-                /* consume any extra pending input */
-                while (stdin_has_data()) (void)getchar();
-                /* If we turned off step_mode, continue to step below immediately */
-            } else {
-                kbd_push(&kbd_device, c);
-                m.cpu.interrupt = 1;
-                F_SET(m.cpu, F_INT);
+        if (unlikely(m.cpu.cycle % CYCLE_TO_TRIGGER == 0)) {
+            if (stdin_has_data()) {
+                int c = getchar();
+                if (c == ' ') {
+                    step_mode = !step_mode;
+                    /* show current mode change in footer by printing once */
+                    print_cpu_state(&m, &prev);
+                    printf(ANSI_DIM "Step-by-step mode %s. Press Enter to advance, Space to toggle.\n" ANSI_RESET,
+                        step_mode ? "ENABLED" : "DISABLED");
+                    fflush(stdout);
+                    /* consume any extra pending input */
+                    while (stdin_has_data()) (void)getchar();
+                    /* If we turned off step_mode, continue to step below immediately */
+                } else {
+                    kbd_push(&kbd_device, c);
+                    m.cpu.interrupt = 1;
+                    F_SET(m.cpu, F_INT);
+                }
             }
         }
 
@@ -200,17 +203,15 @@ int main(int argc, char** argv) {
                 }
             }
 
-            /* finally perform a single step */
             step(&m);
-            /* update prev to current for next iteration (visual only) */
             memcpy(&prev, &m, sizeof(Machine));
-            continue; /* loop back to handle potential immediate toggles */
+            continue;
         } else {
-            /* not in step mode: normal execution, but still show state after each step */
             step(&m);
-            print_cpu_state(&m, &prev);
-            memcpy(&prev, &m, sizeof(Machine));
-            /* small sleep could be added here for readability if desired */
+            if (unlikely(m.cpu.cycle % CYCLE_TO_TRIGGER == 0)) {
+                print_cpu_state(&m, &prev);
+                memcpy(&prev, &m, sizeof(Machine));
+            }
         }
 
         #else
