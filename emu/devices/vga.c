@@ -82,9 +82,9 @@ void vga_drawchar(VGA* vga, Font* c, int dst_x, int dst_y) {
 }
 
 Font* vga_getchar(char c) {
-    for(size_t i = 0; i < 128; i++)
+    for(size_t i = 0; i < 96; i++)
         if(font[i].c == c) return &font[i];
-    return NULL;
+    return font + 96;
 }
 
 void vga_render(VGA* vga) {
