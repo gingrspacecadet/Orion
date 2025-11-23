@@ -363,9 +363,6 @@ void parse(char* line, uint32_t** out) {
                 } else if (parse_reg(arg2) != 0) {
                     puts(error);
                     exit(1);
-                } else if (parse_reg(arg3) != 0) {
-                    puts(error);
-                    exit(1);
                 }
             }
             
@@ -374,7 +371,7 @@ void parse(char* line, uint32_t** out) {
             if (opcodes[index].num_operands > 0) {
                 **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
                 **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
-                **out |= (uint32_t)atoi(arg3 + 1) << (32 - 6 - 4 - 4 - 4);
+                // **out |= (uint32_t)atoi(arg3 + 1) << (32 - 6 - 4 - 4 - 4);
             }
         }
         

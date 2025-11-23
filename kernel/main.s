@@ -1,4 +1,4 @@
-jmp  $end
+jmp  $.loop
 
 start:
     mov r0, #0x00FE
@@ -26,5 +26,3 @@ start:
 
 .loop:
     jmp $.loop
-end:
-    Nop

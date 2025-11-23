@@ -36,13 +36,13 @@ void (*ops[])(Machine* m, uint32_t op) = {
     // [0b00010001] = JC,
     // [0b00010010] = JNC,
     // [0b00010011] = JG,
-    // [0b00010100] = JL,
+    [0b00010100] = JIL,
     [0b00010101] = PUSH,
     [0b00010110] = POP,
     [0b00010111] = HLT,
     // [0b00011000] = ADR,
     // [0b00011001] = CMPU,
-    // [0b00011010] = MUL,
+    [0b00011010] = MUL,
     // [0b00011011] = DIV,
     // [0b00011100] = LDRB,
     // [0b00011101] = STRB,
@@ -68,7 +68,7 @@ void step(Machine* m) {
         uint32_t op = fetch(m);
         uint8_t opcode = getbyte(op, 32) >> 2;
         if (ops[opcode]) { ops[opcode](m, op); return; }
-        else { printf("Illegal opcode 0x%04X\n", opcode); exit(1); }
+        else { m->cpu.pc--; print_cpu_state(m, m);  printf("Illegal opcode 0x%04X\n", opcode); handle_signal(SIGABRT); }
     }
 }
 
@@ -204,6 +204,9 @@ int main(int argc, char** argv) {
         #endif
     }
 
+    m.cpu.pc--;
+    print_cpu_state(&m, &m);
+    dump_machine_state(&m);
 
     free(m.ram);
     free(m.rom);

@@ -33,12 +33,13 @@ asm: $(BUILD_DIR)
 
 cc: $(BUILD_DIR)
 	@$(MAKE) --no-print-directory -s -C cc
+	@cd cc && ./ccomp test.c
 
 bios: asm
 	@./build/asm bios/main.s bios.out > /dev/null
 
 kernel: asm
-	@./build/asm kernel/main.s kernel.out  > /dev/null
+	@./build/asm cc/out.s kernel.out  > /dev/null
 
 clean:
 	@rm -rf $(BUILD_DIR)

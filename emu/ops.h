@@ -17,16 +17,20 @@ uint8_t get_opcode_name(uint8_t byte) {
 
 void push(Machine* m, uint32_t value) {
     if (m->cpu.sp == 0) {
-        printf("Stack overflow!");
-        exit(1);
+        m->cpu.pc--;
+        print_cpu_state(m, m);
+        printf("Stack overflow!\n");
+        handle_signal(SIGABRT);
     }
     bus_write(m->cpu.sp--, value);
 }
 
 uint32_t pop(Machine* m) {
     if (m->cpu.sp == RAM_SIZE) {
-        printf("Stack underflow!");
-        exit(1);
+        m->cpu.pc--;
+        print_cpu_state(m, m);
+        printf("Stack underflow!\n");
+        handle_signal(SIGABRT);
     }
     return bus_read(++m->cpu.sp);
 }
@@ -187,6 +191,10 @@ OP(CMP) {
         F_SET(m->cpu, F_ZERO);
     else
         F_CLEAR(m->cpu, F_ZERO);
+    if ((int32_t)m->cpu.registers[a] - (int32_t)b < 0)
+        F_SET(m->cpu, F_NEGATIVE);
+    else
+        F_CLEAR(m->cpu, F_NEGATIVE);
 }
 
 OP(JE) {
@@ -199,4 +207,25 @@ OP(JNE) {
     if (!F_CHECK(m->cpu, F_ZERO)) {
         JMP(m, op);
     }
+}
+
+OP(JIL) {
+    if (F_CHECK(m->cpu, F_NEGATIVE)) {
+        JMP(m, op);
+    }
+}
+
+OP(MUL) {
+    bool I_type = (getbit(op, 0) != 0);
+    uint8_t dest = getbits(op, 25, 22);
+    uint8_t src1 = getbits(op, 21, 18);
+
+    if (!I_type) { // R-type
+        uint8_t src2 = getbits(op, 17, 14);
+        m->cpu.registers[dest] = m->cpu.registers[src1] * m->cpu.registers[src2];
+    } else { // I-type
+        int32_t imm = sign_extend(getbits(op, 17, 2), 16);
+
+        m->cpu.registers[dest] = m->cpu.registers[src1] * (uint32_t)imm;
+    }    
 }

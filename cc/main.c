@@ -1,37 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include "ast.h"
 
-void parse(char* line) {
+extern int yyparse(void);
+extern FILE *yyin;
+void codegen_all(FILE *out);
 
-}
-
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Incorrect usage:\n"
-        "  cc <in.c>\n");
-        return EXIT_FAILURE;
+        fprintf(stderr, "usage: %s <source.c> [-o out.s]\n", argv[0]);
+        return 1;
     }
-
-
-    FILE *f = fopen(argv[1], "rb");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    rewind(f);
-
-    char *string = malloc(fsize + 1);
-    fread(string, fsize, 1, f);
-    fclose(f);
-
-    string[fsize] = 0;
-
-    char* line = strtok(string, "\n");
-    while (line) {
-        parse(line);
-        line = strtok(NULL, "\n");
-    }
-
-    free(string);
-
-    return EXIT_SUCCESS;
+    yyin = fopen(argv[1], "r");
+    if (!yyin) { perror("fopen"); return 1; }
+    yyparse();
+    const char *outname = "out.s";
+    FILE *out = fopen(outname, "w");
+    if (!out) { perror("fopen out"); return 1; }
+    codegen_all(out);
+    fclose(out);
+    printf("Wrote assembly to %s\n", outname);
+    return 0;
 }

@@ -1,29 +1,28 @@
 CC = gcc
-CFLAGS += -Wall -Wextra -g -DDEBUG -Wno-unused-function
-LDFLAGS = 
+CFLAGS = -g -O2 -Wall $(shell pkg-config --cflags glib-2.0)
+LDFLAGS = $(shell pkg-config --libs glib-2.0`)
+FLEX = flex
+BISON = bison
 
-BUILD_DIR = ../build
-SRC_DIR = .
+all: ccomp
 
-SRC = $(shell find $(SRC_DIR) -name '*.c')
-OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
+lexer.c: lexer.l
+	$(FLEX) -o lexer.c lexer.l
 
-TARGET = $(BUILD_DIR)/cc
+parser.c parser.h: parser.y
+	$(BISON) -d -o parser.c parser.y
 
-.PHONY: all clean
+ccomp: lexer.c parser.c ast.o codegen.o main.o
+	$(CC) $(CFLAGS) -o ccomp lexer.c parser.c ast.o codegen.o main.o
 
-all: $(TARGET)
+ast.o: ast.c ast.h
+	$(CC) $(CFLAGS) -c ast.c
 
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+codegen.o: codegen.c ast.h
+	$(CC) $(CFLAGS) -c codegen.c
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+main.o: main.c parser.h ast.h
+	$(CC) $(CFLAGS) -c main.c
 
 clean:
-	rm -rf $(BUILD_DIR)
-	rm -f $(TARGET)
+	rm -f ccomp lexer.c parser.c parser.h *.o a.out *.s
