@@ -2,7 +2,6 @@
 #define RAM_H
 
 #include <stdint.h>
-#include "machine.h"
 
 #define PAGE_SIZE 4096
 #define WORDS_PER_PAGE (PAGE_SIZE / sizeof(uint32_t))

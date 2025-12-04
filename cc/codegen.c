@@ -23,6 +23,8 @@ typedef struct {
     int next_slot;         /* next available local slot (words) */
     FILE *out;
     int label_id;
+    int break_label;       /* label to jump to on break */
+    int continue_label;    /* label to jump to on continue */
 } CGContext;
 
 static int newlabel(CGContext *c) { return ++c->label_id; }
@@ -119,6 +121,38 @@ static void cg_expr(CGContext *c, ASTNode *n) {
         emit_load_local(c, slot, "r0");
         break;
     }
+    case NODE_STRING:
+        /* For now, just emit a warning (string handling requires data section) */
+        fprintf(c->out, "    ; TODO: string literal: %s\n", n->u.str);
+        fprintf(c->out, "    MOV r0, #0\n");
+        break;
+    case NODE_UNARY: {
+        cg_expr(c, n->u.unary.expr);
+        switch (n->u.unary.op) {
+        case OP_NEG:
+            fprintf(c->out, "    SUB r0, #0, r0    ; r0 = 0 - r0\n");
+            break;
+        case OP_NOT:
+            {
+                int Ltrue = newlabel(c);
+                int Ldone = newlabel(c);
+                fprintf(c->out, "    CMP r0, #0\n");
+                fprintf(c->out, "    JE $L%04d\n", Ltrue);
+                fprintf(c->out, "    MOV r0, #0\n");
+                fprintf(c->out, "    JMP $L%04d\n", Ldone);
+                fprintf(c->out, "L%04d:\n", Ltrue);
+                fprintf(c->out, "    MOV r0, #1\n");
+                fprintf(c->out, "L%04d:\n", Ldone);
+            }
+            break;
+        case OP_BITWISE_XOR:
+            fprintf(c->out, "    XOR r0, r0, #0xFFFFFFFF    ; bitwise NOT\n");
+            break;
+        default:
+            cg_error("unsupported unary op");
+        }
+        break;
+    }
     case NODE_ASSIGN: {
         /* evaluate rhs into r0, then store into local */
         cg_expr(c, n->u.assign.rhs);
@@ -127,9 +161,14 @@ static void cg_expr(CGContext *c, ASTNode *n) {
         emit_store_local(c, slot, "r0");
         break;
     }
+    case NODE_ARRAY_ACCESS: {
+        /* For now, emit basic array access (simplified) */
+        cg_expr(c, n->u.array_access.index);
+        fprintf(c->out, "    ; TODO: array access: %s[...]\n", n->u.array_access.name);
+        break;
+    }
     case NODE_BINOP: {
         /* Evaluate left into r1, right into r0, then perform op producing r0 */
-        /* Evaluate left -> r0; move to r1; evaluate right -> r0 */
         cg_expr(c, n->u.binop.l);           /* r0 = left */
         fprintf(c->out, "    MOV r1, r0\n"); /* r1 = left */
         cg_expr(c, n->u.binop.r);           /* r0 = right */
@@ -147,6 +186,24 @@ static void cg_expr(CGContext *c, ASTNode *n) {
             break;
         case OP_DIV:
             fprintf(c->out, "    DIV r0, r1, r0    ; r0 = r1 / r0\n");
+            break;
+        case OP_MOD:
+            fprintf(c->out, "    MOD r0, r1, r0    ; r0 = r1 %% r0\n");
+            break;
+        case OP_BITWISE_AND:
+            fprintf(c->out, "    AND r0, r1, r0    ; r0 = r1 & r0\n");
+            break;
+        case OP_BITWISE_OR:
+            fprintf(c->out, "    OR r0, r1, r0    ; r0 = r1 | r0\n");
+            break;
+        case OP_BITWISE_XOR:
+            fprintf(c->out, "    XOR r0, r1, r0    ; r0 = r1 ^ r0\n");
+            break;
+        case OP_LSHIFT:
+            fprintf(c->out, "    SHL r0, r1, r0    ; r0 = r1 << r0\n");
+            break;
+        case OP_RSHIFT:
+            fprintf(c->out, "    SHR r0, r1, r0    ; r0 = r1 >> r0\n");
             break;
         case OP_EQ:
             /* r0 = (r1 == r0) ? 1 : 0 */
@@ -271,6 +328,14 @@ static void cg_stmt(CGContext *c, ASTNode *n) {
         }
         fprintf(c->out, "    RET\n");
         break;
+    case NODE_BREAK:
+        if (c->break_label == 0) cg_error("break outside loop");
+        fprintf(c->out, "    JMP $L%04d    ; break\n", c->break_label);
+        break;
+    case NODE_CONTINUE:
+        if (c->continue_label == 0) cg_error("continue outside loop");
+        fprintf(c->out, "    JMP $L%04d    ; continue\n", c->continue_label);
+        break;
     case NODE_ASSIGN:
         cg_expr(c, n->u.assign.rhs);
         {
@@ -295,6 +360,10 @@ static void cg_stmt(CGContext *c, ASTNode *n) {
     case NODE_WHILE: {
         int Ltop = newlabel(c);
         int Lend = newlabel(c);
+        int prev_break = c->break_label;
+        int prev_continue = c->continue_label;
+        c->break_label = Lend;
+        c->continue_label = Ltop;
         fprintf(c->out, "L%04d:\n", Ltop);
         cg_expr(c, n->u.while_node.cond);
         fprintf(c->out, "    CMP r0, #0\n");
@@ -302,6 +371,53 @@ static void cg_stmt(CGContext *c, ASTNode *n) {
         cg_stmt(c, n->u.while_node.body);
         fprintf(c->out, "    JMP $L%04d\n", Ltop);
         fprintf(c->out, "L%04d:\n", Lend);
+        c->break_label = prev_break;
+        c->continue_label = prev_continue;
+        break;
+    }
+    case NODE_DO_WHILE: {
+        int Ltop = newlabel(c);
+        int Lend = newlabel(c);
+        int prev_break = c->break_label;
+        int prev_continue = c->continue_label;
+        c->break_label = Lend;
+        c->continue_label = Ltop;
+        fprintf(c->out, "L%04d:\n", Ltop);
+        cg_stmt(c, n->u.do_while_node.body);
+        cg_expr(c, n->u.do_while_node.cond);
+        fprintf(c->out, "    CMP r0, #0\n");
+        fprintf(c->out, "    JNE $L%04d\n", Ltop);
+        fprintf(c->out, "L%04d:\n", Lend);
+        c->break_label = prev_break;
+        c->continue_label = prev_continue;
+        break;
+    }
+    case NODE_FOR: {
+        int Ltop = newlabel(c);
+        int Lupdate = newlabel(c);
+        int Lend = newlabel(c);
+        int prev_break = c->break_label;
+        int prev_continue = c->continue_label;
+        c->break_label = Lend;
+        c->continue_label = Lupdate;
+        /* init expression */
+        if (n->u.for_node.init) cg_expr(c, n->u.for_node.init);
+        fprintf(c->out, "L%04d:\n", Ltop);
+        /* condition */
+        if (n->u.for_node.cond) {
+            cg_expr(c, n->u.for_node.cond);
+            fprintf(c->out, "    CMP r0, #0\n");
+            fprintf(c->out, "    JE $L%04d\n", Lend);
+        }
+        /* body */
+        cg_stmt(c, n->u.for_node.body);
+        /* update */
+        fprintf(c->out, "L%04d:\n", Lupdate);
+        if (n->u.for_node.update) cg_expr(c, n->u.for_node.update);
+        fprintf(c->out, "    JMP $L%04d\n", Ltop);
+        fprintf(c->out, "L%04d:\n", Lend);
+        c->break_label = prev_break;
+        c->continue_label = prev_continue;
         break;
     }
     case NODE_BLOCK: {
@@ -353,7 +469,9 @@ void codegen_all(FILE *out) {
         if (!user_start) {
             fprintf(out, "_start:\n");
             /* set SP and FP: choose a constant or expose macro/define */
-            fprintf(out, "    MOV r13, #0x%X    ; init SP (word address)\n", 0xFFFFFFFF);
+            fprintf(out, "    MOV r13, #0xFFFF    ; init SP (word address)\n");
+            fprintf(out, "    SHL r13, r13, #16\n");
+            fprintf(out, "    OR  r13, r13, #0xFFFF\n");
             fprintf(out, "    MOV r12, r13    ; init FP\n");
             /* zero argc/argv to be safe */
             fprintf(out, "    MOV r0, #0\n");

@@ -16,6 +16,10 @@ WS      [ \t\r]+
 "if"            { return IF; }
 "else"          { return ELSE; }
 "while"         { return WHILE; }
+"for"           { return FOR; }
+"do"            { return DO; }
+"break"         { return BREAK; }
+"continue"      { return CONTINUE; }
 
 "=="            { return EQ; }
 "!="            { return NEQ; }
@@ -23,23 +27,34 @@ WS      [ \t\r]+
 ">="            { return GE; }
 "&&"            { return AND; }
 "||"            { return OR; }
+"<<"            { return LSHIFT; }
+">>"            { return RSHIFT; }
 
 {ID}            { yylval.string = strdup(yytext); return IDENT; }
 {DIGIT}+        { yylval.ival = atoi(yytext); return INTEGER; }
+\"[^\"]*\"      { yylval.string = strdup(yytext); return STRING; }
 
 "("             { return '('; }
 ")"             { return ')'; }
 "{"             { return '{'; }
 "}"             { return '}'; }
+"["             { return '['; }
+"]"             { return ']'; }
 ","             { return ','; }
 ";"             { return ';'; }
 "+"             { return '+'; }
 "-"             { return '-'; }
 "*"             { return '*'; }
 "/"             { return '/'; }
+"%"             { return '%'; }
 "="             { return '='; }
 "<"             { return '<'; }
 ">"             { return '>'; }
+"!"             { return '!'; }
+"&"             { return '&'; }
+"|"             { return '|'; }
+"^"             { return '^'; }
+"~"             { return '~'; }
 
 \n              { ++yylineno; }
 {WS}            { /* skip */ }

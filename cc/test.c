@@ -1,8 +1,7 @@
 int main() {
     int x;
-    x = 2;
-    while (x < 20) {
-        x = x * 2;
+    for (x = 0; x < 10; x++) {
+        
     }
     return x;
 }

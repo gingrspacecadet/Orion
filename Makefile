@@ -16,7 +16,7 @@ TARGET = build/orion
 
 .PHONY: all clean run crun asm ints bios kernel cc
 
-all: bios kernel $(TARGET)
+all: cc bios kernel $(TARGET)
 
 $(TARGET): $(OBJ)
 	@$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

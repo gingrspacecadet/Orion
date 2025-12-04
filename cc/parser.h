@@ -55,18 +55,26 @@ extern int yydebug;
     YYerror = 256,                 /* error  */
     YYUNDEF = 257,                 /* "invalid token"  */
     IDENT = 258,                   /* IDENT  */
-    INTEGER = 259,                 /* INTEGER  */
-    INT = 260,                     /* INT  */
-    RETURN = 261,                  /* RETURN  */
-    IF = 262,                      /* IF  */
-    ELSE = 263,                    /* ELSE  */
-    WHILE = 264,                   /* WHILE  */
-    EQ = 265,                      /* EQ  */
-    NEQ = 266,                     /* NEQ  */
-    LE = 267,                      /* LE  */
-    GE = 268,                      /* GE  */
-    AND = 269,                     /* AND  */
-    OR = 270                       /* OR  */
+    STRING = 259,                  /* STRING  */
+    INTEGER = 260,                 /* INTEGER  */
+    INT = 261,                     /* INT  */
+    RETURN = 262,                  /* RETURN  */
+    IF = 263,                      /* IF  */
+    ELSE = 264,                    /* ELSE  */
+    WHILE = 265,                   /* WHILE  */
+    FOR = 266,                     /* FOR  */
+    DO = 267,                      /* DO  */
+    BREAK = 268,                   /* BREAK  */
+    CONTINUE = 269,                /* CONTINUE  */
+    EQ = 270,                      /* EQ  */
+    NEQ = 271,                     /* NEQ  */
+    LE = 272,                      /* LE  */
+    GE = 273,                      /* GE  */
+    AND = 274,                     /* AND  */
+    OR = 275,                      /* OR  */
+    LSHIFT = 276,                  /* LSHIFT  */
+    RSHIFT = 277,                  /* RSHIFT  */
+    UNARY_MINUS = 278              /* UNARY_MINUS  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -82,7 +90,7 @@ union YYSTYPE
     struct ASTNode *node;
     struct ASTNodeList *nlist;
 
-#line 86 "parser.h"
+#line 94 "parser.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

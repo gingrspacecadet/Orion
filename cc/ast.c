@@ -33,6 +33,11 @@ ASTNode *ast_binop_new(BinOp op, ASTNode *l, ASTNode *r) {
     n->u.binop.op = op; n->u.binop.l = l; n->u.binop.r = r;
     return n;
 }
+ASTNode *ast_unary_new(BinOp op, ASTNode *expr) {
+    ASTNode *n = node_new(NODE_UNARY);
+    n->u.unary.op = op; n->u.unary.expr = expr;
+    return n;
+}
 ASTNode *ast_return_new(ASTNode *e) {
     ASTNode *n = node_new(NODE_RETURN);
     n->u.ret.expr = e; return n;
@@ -45,6 +50,16 @@ ASTNode *ast_if_new(ASTNode *cond, ASTNode *thenb, ASTNode *elseb) {
 ASTNode *ast_while_new(ASTNode *cond, ASTNode *body) {
     ASTNode *n = node_new(NODE_WHILE);
     n->u.while_node.cond = cond; n->u.while_node.body = body;
+    return n;
+}
+ASTNode *ast_for_new(ASTNode *init, ASTNode *cond, ASTNode *update, ASTNode *body) {
+    ASTNode *n = node_new(NODE_FOR);
+    n->u.for_node.init = init; n->u.for_node.cond = cond; n->u.for_node.update = update; n->u.for_node.body = body;
+    return n;
+}
+ASTNode *ast_do_while_new(ASTNode *body, ASTNode *cond) {
+    ASTNode *n = node_new(NODE_DO_WHILE);
+    n->u.do_while_node.body = body; n->u.do_while_node.cond = cond;
     return n;
 }
 ASTNode *ast_block_new(ASTNodeList *decls, ASTNodeList *stmts) {
@@ -60,6 +75,27 @@ ASTNode *ast_call_new(char *name, ASTNodeList *args) {
 ASTNode *ast_function_new(char *name, ASTNodeList *params, ASTNode *body) {
     ASTNode *n = node_new(NODE_FUNC);
     n->u.func.fname = name; n->u.func.params = params; n->u.func.body = body;
+    return n;
+}
+ASTNode *ast_break_new(void) {
+    return node_new(NODE_BREAK);
+}
+ASTNode *ast_continue_new(void) {
+    return node_new(NODE_CONTINUE);
+}
+ASTNode *ast_array_access_new(char *name, ASTNode *index) {
+    ASTNode *n = node_new(NODE_ARRAY_ACCESS);
+    n->u.array_access.name = name; n->u.array_access.index = index;
+    return n;
+}
+ASTNode *ast_array_decl_new(char *name, int size) {
+    ASTNode *n = node_new(NODE_ARRAY_DECL);
+    n->u.array_decl.name = name; n->u.array_decl.size = size;
+    return n;
+}
+ASTNode *ast_string_new(char *str) {
+    ASTNode *n = node_new(NODE_STRING);
+    n->u.str = str;
     return n;
 }
 

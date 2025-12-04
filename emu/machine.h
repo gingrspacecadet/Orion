@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "ram.h"
 
 #define F_ZERO          0b00000001
 #define F_CARRY         0b00000010
@@ -29,6 +30,10 @@ typedef struct {
     uint16_t interrupt;
     uint8_t flags;
     bool running;
+    struct {
+        Page* data;
+        uint32_t addr;
+    } cache;
 } CPU;
 
 typedef struct {

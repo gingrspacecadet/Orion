@@ -18,10 +18,23 @@ void yyerror(const char *s);
 }
 
 /* tokens with types */
-%token <string> IDENT
+%token <string> IDENT STRING
 %token <ival> INTEGER
-%token INT RETURN IF ELSE WHILE
-%token EQ NEQ LE GE AND OR
+%token INT RETURN IF ELSE WHILE FOR DO BREAK CONTINUE
+%token EQ NEQ LE GE AND OR LSHIFT RSHIFT
+
+/* Operator precedence and associativity */
+%left OR
+%left AND
+%left '|'
+%left '^'
+%left '&'
+%left EQ NEQ
+%left '<' '>' LE GE
+%left LSHIFT RSHIFT
+%left '+' '-'
+%left '*' '/' '%'
+%right '!' '~' UNARY_MINUS
 
 /* nonterminals with types */
 %type <node> translation_unit function_def compound_stmt stmt expr
@@ -80,17 +93,23 @@ stmt:
   | IF '(' expr ')' stmt        { $$ = ast_if_new($3, $5, NULL); }
   | IF '(' expr ')' stmt ELSE stmt { $$ = ast_if_new($3, $5, $7); }
   | WHILE '(' expr ')' stmt     { $$ = ast_while_new($3, $5); }
+  | FOR '(' expr ';' expr ';' expr ')' stmt { $$ = ast_for_new($3, $5, $7, $9); }
+  | DO stmt WHILE '(' expr ')' ';' { $$ = ast_do_while_new($2, $5); }
+  | BREAK ';'                   { $$ = ast_break_new(); }
+  | CONTINUE ';'                { $$ = ast_continue_new(); }
   | compound_stmt               { $$ = $1; }
   ;
 
 expr:
     INTEGER                     { $$ = ast_int_new($1); }
+  | STRING                      { $$ = ast_string_new($1); }
   | IDENT                       { $$ = ast_var_new($1); }
   | IDENT '=' expr              { $$ = ast_assign_new($1, $3); }
   | expr '+' expr               { $$ = ast_binop_new(OP_ADD, $1, $3); }
   | expr '-' expr               { $$ = ast_binop_new(OP_SUB, $1, $3); }
   | expr '*' expr               { $$ = ast_binop_new(OP_MUL, $1, $3); }
   | expr '/' expr               { $$ = ast_binop_new(OP_DIV, $1, $3); }
+  | expr '%' expr               { $$ = ast_binop_new(OP_MOD, $1, $3); }
   | expr EQ expr                { $$ = ast_binop_new(OP_EQ, $1, $3); }
   | expr NEQ expr               { $$ = ast_binop_new(OP_NEQ, $1, $3); }
   | expr '<' expr               { $$ = ast_binop_new(OP_LT, $1, $3); }
@@ -99,7 +118,16 @@ expr:
   | expr GE expr                { $$ = ast_binop_new(OP_GE, $1, $3); }
   | expr AND expr               { $$ = ast_binop_new(OP_AND, $1, $3); }
   | expr OR expr                { $$ = ast_binop_new(OP_OR, $1, $3); }
+  | expr '&' expr               { $$ = ast_binop_new(OP_BITWISE_AND, $1, $3); }
+  | expr '|' expr               { $$ = ast_binop_new(OP_BITWISE_OR, $1, $3); }
+  | expr '^' expr               { $$ = ast_binop_new(OP_BITWISE_XOR, $1, $3); }
+  | expr LSHIFT expr            { $$ = ast_binop_new(OP_LSHIFT, $1, $3); }
+  | expr RSHIFT expr            { $$ = ast_binop_new(OP_RSHIFT, $1, $3); }
+    | '-' expr %prec UNARY_MINUS  { $$ = ast_unary_new(OP_NEG, $2); }
+    | '!' expr %prec UNARY_MINUS  { $$ = ast_unary_new(OP_NOT, $2); }
+    | '~' expr %prec UNARY_MINUS  { $$ = ast_unary_new(OP_BITWISE_XOR, $2); }
   | '(' expr ')'                { $$ = $2; }
+  | IDENT '[' expr ']'          { $$ = ast_array_access_new($1, $3); }
   | IDENT '(' ')'               { $$ = ast_call_new($1, NULL); }
   | IDENT '(' arg_list ')'      { $$ = ast_call_new($1, $3); }
   ;
