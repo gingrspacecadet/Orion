@@ -130,8 +130,15 @@ int parse_imm(char *str) {
         return 1;
     }
     if (str[0] == '$') {
+        if (!str[1]) return 1;
         sprintf(str + 1, "%u", parse_label(str)->offset);
         *str = '#';
+        return parse_imm(str);
+    }
+    if (str[0] == '\'') {
+        sprintf(str + 1, "%u", str[1]);
+        *str = '#';
+        printf("Found a character literal. Replacing with %s...\n", str);
         return parse_imm(str);
     }
     if (str[0] != '#') {
@@ -217,15 +224,14 @@ void parse(char* line, uint32_t** out) {
     line = trimwhitespace(line);
     char* comment = strchr(line, ';');
 
-    if (*line == '\n') { (*out)--; offset--; return; }
+    if (*line == '\n' || *line == '\0') { --*out; offset--; return; }
     if (comment) *comment = '\0';
 
     char* word1 = strtok(line, " ");
+    if (word1 == NULL) { --*out; offset--; return; }
     char* colon = strchr(word1, ':');
     if (colon != NULL) {    // LABEL
-        --*out;
-        return;
-    }
+        --*out; return; }
 
     if (*line == '.') { // DIRECTIVE
         if (strcmp(line, ".str") == 0) {
