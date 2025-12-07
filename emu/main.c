@@ -74,9 +74,9 @@ void step(Machine* m) {
 
 
 int main(int argc, char** argv) {
-    #ifdef DEBUG
+#ifdef DEBUG
     puts("\n\n\n");
-    #endif
+#endif
     
     if (argc < 2) {
         printf("Missing input file");
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     bus_register(&kbd_device);
 
     m.cpu.running = true;
-    m.cpu.pc = 0;
+    m.cpu.pc = 0x0;
     m.mode = KERNEL;
     m.cpu.sp = RAM_SIZE;
     m.cpu.cycle = 0;
@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     Machine prev = {0};
     memcpy(&prev, &m, sizeof(Machine));
 
-    #ifdef DEBUG
+#ifdef DEBUG
     /* step_mode: when true, do not auto-step; only step on Enter.
        Space toggles step_mode at any time. Start enabled. */
     bool step_mode = true;
@@ -146,10 +146,10 @@ int main(int argc, char** argv) {
     signal(SIGTERM, handle_signal);  // kill
     signal(SIGABRT, handle_signal);  // abort
     signal(SIGSEGV, handle_signal);  // segmentation fault
-    #endif
+#endif
 
     while (m.cpu.running) {
-        #ifdef DEBUG
+#ifdef DEBUG
 
         if (step_mode) {
             print_cpu_state(&m, &prev);
@@ -199,9 +199,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        #else
+#else
         step(&m);
-        #endif
+#endif
     }
 
     m.cpu.pc--;

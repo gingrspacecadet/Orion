@@ -1,6 +1,6 @@
 CC = clang
 DEBUG = true
-CFLAGS += -Wall -Wextra -Werror -Wpedantic -g -Wno-unused-function -Iemu -std=gnu23 -O3
+CFLAGS += -Wall -Wextra -Werror -Wpedantic -g -Wno-unused-function -Iemu -std=gnu23 -O3 -flto -funroll-loops -fomit-frame-pointer
 ifeq ($(DEBUG), true)
 	CFLAGS += -DDEBUG
 endif
