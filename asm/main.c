@@ -291,7 +291,6 @@ void parse(char* line, uint32_t** out) {
             **out |= (int32_t)strtol(arg1 + 1, NULL, 0) << (32 - 6 - 4 - 4 - 16); 
         }
         
-        printf("OUT: 0b%032b\n", **out);
         **out = **out;
          
         break;
@@ -314,7 +313,6 @@ void parse(char* line, uint32_t** out) {
             **out |= (uint32_t)atoi(arg2 + 1) << (32 - 6 - 4 - 4);
         }
         
-        printf("OUT: 0b%032b\n", **out);
         break;
     case M:
         printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
@@ -333,9 +331,6 @@ void parse(char* line, uint32_t** out) {
                 exit(1);
             }
         }
-        
-        
-        printf("OUT: 0b%032b\n", **out);
         
         break;
     case RI:
@@ -381,8 +376,6 @@ void parse(char* line, uint32_t** out) {
             }
         }
         
-        
-        printf("OUT: 0b%032b\n", **out);
         break;
     default:
     }
@@ -425,6 +418,7 @@ int main(int argc, char** argv) {
     }
 
     fwrite(base_out, sizeof(uint32_t), offset, dest);
+    printf("Wrote %lu bytes.\n", offset * sizeof(uint32_t));
 
     for (size_t i = 0; i < num_labels; i++) {
         printf("Found label %s with offset 0x%04X\n", labels[i].name, labels[i].offset);
