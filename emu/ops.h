@@ -2,6 +2,10 @@
 #include "../asm/ops.h"
 #include "device.h"
 
+#ifdef DEBUG
+#include <signal.h>
+#endif
+
 #define OP(name) void name(Machine* m, uint32_t op)
 
 uint8_t get_opcode_name(uint8_t byte) {
@@ -18,9 +22,13 @@ uint8_t get_opcode_name(uint8_t byte) {
 void push(Machine* m, uint32_t value) {
     if (m->cpu.sp == 0) {
         m->cpu.pc--;
+#ifdef DEBUG
         print_cpu_state(m, m);
         printf("Stack overflow!\n");
         handle_signal(SIGABRT);
+#else
+        exit(2);
+#endif
     }
     bus_write(m->cpu.sp--, value);
 }
@@ -28,9 +36,13 @@ void push(Machine* m, uint32_t value) {
 uint32_t pop(Machine* m) {
     if (m->cpu.sp == RAM_SIZE) {
         m->cpu.pc--;
+#ifdef DEBUG
         print_cpu_state(m, m);
         printf("Stack underflow!\n");
         handle_signal(SIGABRT);
+#else
+        exit(2);
+#endif
     }
     return bus_read(++m->cpu.sp);
 }
@@ -92,14 +104,13 @@ OP(RET) {
 }
 
 OP(INT) {
+    int32_t imm = sign_extend(getbits(op, 17, 2), 16);
     if (m->mode == BIOS) {
         m->mode = KERNEL;
-        m->cpu.pc = 0;
+        m->cpu.pc = imm;
     } else {
-        int32_t imm = sign_extend(getbits(op, 17, 2), 16);
         push(m, m->cpu.pc);
         m->cpu.pc = bus_read(0x1234 + imm);
-        m->mode = BIOS;
     }
 }
 
