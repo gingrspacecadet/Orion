@@ -220,8 +220,14 @@ OP(JNE) {
     }
 }
 
-OP(JIL) {
+OP(JL) {
     if (F_CHECK(m->cpu, F_NEGATIVE)) {
+        JMP(m, op);
+    }
+}
+
+OP(JLE) {
+    if (F_CHECK(m->cpu, F_NEGATIVE) || F_CHECK(m->cpu, F_ZERO)) {
         JMP(m, op);
     }
 }

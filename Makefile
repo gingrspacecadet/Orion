@@ -16,7 +16,7 @@ TARGET = build/orion
 
 .PHONY: all clean run crun asm ints bios kernel cc
 
-all: bios kernel $(TARGET)
+all: bios test_kernel $(TARGET)
 
 $(TARGET): $(OBJ)
 	@$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -32,8 +32,7 @@ asm: $(BUILD_DIR)
 	@$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
 
 cc: $(BUILD_DIR)
-	@$(MAKE) --no-print-directory -s -C cc
-	@cd cc && ./ccomp test.c
+	@gcc cc/cc.c -o build/cc
 
 bios: asm
 	@./build/asm bios/main.s bios.out
@@ -45,14 +44,13 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f $(TARGET)
 	@rm -f *.dump *.out
+	@rm -f orion.img
 
 run: all
 	@./$(TARGET) kernel.out bios.out
 
 crun: clean run
 
-ints: asm
-	@mkdir -p build/ints
-	@find ints -type f -print0 | while IFS= read -r -d '' f; do \
-		./build/asm "$$f" "build/$$f"; \
-	done
+test_kernel: asm cc
+	@./build/cc kernel/main.c > build/kernel.s
+	@./build/asm build/kernel.s kernel.out

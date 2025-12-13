@@ -388,6 +388,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    for (size_t i = 0; i < sizeof(opcodes) / sizeof(opcodes[0]); ++i) {
+        if (opcodes[i].name == NULL) continue;
+        opcodes[i].opcode <<= 2;
+    }
+
     error = malloc(sizeof(char) * 1024);
     
     FILE* src = fopen(argv[1], "r");
