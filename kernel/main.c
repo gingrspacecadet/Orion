@@ -1,6 +1,5 @@
 int main() {
-    asm("BOOT:
-    MOV   R15, #0
+    asm("    MOV   R15, #0
 
     MOV   R0, #0
     MOV   R1, #0x00002000

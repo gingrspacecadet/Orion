@@ -16,7 +16,7 @@ TARGET = build/orion
 
 .PHONY: all clean run crun asm ints bios kernel cc
 
-all: bios test_kernel $(TARGET)
+all: bios kernel $(TARGET)
 
 $(TARGET): $(OBJ)
 	@$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -34,11 +34,13 @@ asm: $(BUILD_DIR)
 cc: $(BUILD_DIR)
 	@$(CC) -g cc/cc.c -o build/cc
 
-bios: asm
-	@./build/asm bios/main.s bios.out
+bios: asm cc
+	build/cc bios/main.c > build/bios.s
+	@./build/asm build/bios.s bios.out
 
-kernel: asm
-	@./build/asm kernel/main.s kernel.out
+kernel: asm cc
+	@./build/cc kernel/main.c > build/kernel.s
+	@./build/asm build/kernel.s kernel.out
 
 clean:
 	@rm -rf $(BUILD_DIR)
@@ -50,7 +52,3 @@ run: all
 	@./$(TARGET) kernel.out bios.out
 
 crun: clean run
-
-test_kernel: asm cc
-	@./build/cc kernel/main.c > build/kernel.s
-	@./build/asm build/kernel.s kernel.out
