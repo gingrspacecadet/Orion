@@ -21,7 +21,7 @@ static Opcode opcodes[64] = {
     { "MOV",  RI, 0x01, 2},
     { "ADD",  RI, 0x02, 3},
     { "SUB",  RI, 0x03, 3},
-    { "OR",   RI, 0x04, 3},
+    { "OR",   RI, 0x05, 3},
     { "SHL",  RI, 0x07, 3},
     { "LDR",  I,  0x0A, 3},
     { "STR",  I,  0x0B, 3},

@@ -274,9 +274,9 @@ void parse(char* line, uint32_t** out) {
     if (arg1 && strchr(arg1, ',') != NULL) *strchr(arg1, ',') = '\0';
     if (arg2 && strchr(arg2, ',') != NULL) *strchr(arg2, ',') = '\0';
 
+    printf("Writing opcode %s (0x%02X) with operands '%s', '%s' and '%s'\n", word1, opcodes[index].opcode >> 2, arg1, arg2, arg3);
     switch(opcodes[index].type) {
     case I:
-        printf("Writing opcode %s with operands '%s', '%s' and '%s'\n", word1, arg1, arg2, arg3);
         **out = ((uint32_t)opcodes[index].opcode << (24));
         
         **out |= (uint32_t)atoi(arg1 + 1) << (32 - 6 - 4);
@@ -305,7 +305,6 @@ void parse(char* line, uint32_t** out) {
             }
         }
         
-        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
         **out = ((uint32_t)opcodes[index].opcode << (24));
         
         if (opcodes[index].num_operands > 0) {
@@ -315,7 +314,6 @@ void parse(char* line, uint32_t** out) {
         
         break;
     case M:
-        printf("Writing opcode %s with operands %s and %s\n", word1, arg1, arg2);
         if (opcodes[index].num_operands > 0) {
             **out = ((uint32_t)opcodes[index].opcode << (24));
             if (parse_label(arg1) != NULL) {    
@@ -334,7 +332,6 @@ void parse(char* line, uint32_t** out) {
         
         break;
     case RI:
-        printf("Writing opcode %s with operands '%s', '%s' and '%s'\n", word1, arg1, arg2, arg3);
         if (parse_imm(arg2) == 0) {
             **out = ((uint32_t)opcodes[index].opcode << (24));
             
