@@ -32,7 +32,7 @@ asm: $(BUILD_DIR)
 	@$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
 
 cc: $(BUILD_DIR)
-	@gcc cc/cc.c -o build/cc
+	@$(CC) -g cc/cc.c -o build/cc
 
 bios: asm
 	@./build/asm bios/main.s bios.out

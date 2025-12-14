@@ -26,10 +26,10 @@
 
 typedef enum {
     TK_IDENT, TK_NUM, TK_KW_INT, TK_KW_RETURN, TK_KW_IF, TK_KW_ELSE,
-    TK_KW_WHILE, TK_KW_FOR, TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
+    TK_KW_WHILE, TK_KW_FOR, TK_KW_ASM, TK_LPAREN, TK_RPAREN, TK_LBRACE, TK_RBRACE,
     TK_SEMI, TK_COMMA, TK_ASSIGN, TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH,
     TK_PERCENT, TK_EQ, TK_NE, TK_LT, TK_GT, TK_LE, TK_GE, TK_AND, TK_OR,
-    TK_EOF
+    TK_STRING, TK_EOF
 } TokenKind;
 
 typedef struct { TokenKind kind; char *text; long val; } Token;
@@ -38,6 +38,8 @@ const char *src;
 size_t pos;
 Token curtok;
 FILE *out_file;
+char** functions;
+int function_counter = 0;
 int label_counter = 0;
 
 char *gen_label() {
@@ -68,6 +70,7 @@ void next_token() {
         else if (strcmp(s, "else") == 0) curtok.kind = TK_KW_ELSE;
         else if (strcmp(s, "while") == 0) curtok.kind = TK_KW_WHILE;
         else if (strcmp(s, "for") == 0) curtok.kind = TK_KW_FOR;
+        else if (strcmp(s, "asm") == 0) curtok.kind = TK_KW_ASM;
         else curtok.kind = TK_IDENT;
         curtok.text = s;
         return;
@@ -88,6 +91,63 @@ void next_token() {
         curtok.kind = TK_NUM;
         curtok.val = v;
         curtok.text = NULL;
+        return;
+    }
+
+    if (src[pos] == '"') {
+        pos++;  /* skip opening quote */
+        size_t bufcap = 64;
+        size_t buflen = 0;
+        char *buf = malloc(bufcap);
+        if (!buf) { perror("malloc"); exit(1); }
+        while (src[pos] != '"' && src[pos] != '\0') {
+            char ch = src[pos++];
+            if (ch == '\\') {
+                if (src[pos] == '\0') break;
+                char esc = src[pos++];
+                unsigned int val = 0;
+                if (esc == 'n') ch = '\n';
+                else if (esc == 't') ch = '\t';
+                else if (esc == 'r') ch = '\r';
+                else if (esc == '\\') ch = '\\';
+                else if (esc == '\'') ch = '\''; 
+                else if (esc == '"') ch = '"';
+                else if (esc == 'x') {
+                    /* hex escape: one or more hex digits (limit to two for a byte) */
+                    int cnt = 0; val = 0;
+                    while (isxdigit((unsigned char)src[pos]) && cnt < 2) {
+                        char h = src[pos++];
+                        val = val * 16 + (isdigit((unsigned char)h) ? h - '0' : (h >= 'a' ? 10 + h - 'a' : 10 + h - 'A'));
+                        cnt++;
+                    }
+                    ch = (char)val;
+                } else if (esc >= '0' && esc <= '7') {
+                    /* octal escape: up to 3 digits total (we already consumed one) */
+                    val = esc - '0';
+                    int cnt = 1;
+                    while (cnt < 3 && src[pos] >= '0' && src[pos] <= '7') {
+                        val = val * 8 + (src[pos++] - '0');
+                        cnt++;
+                    }
+                    ch = (char)val;
+                } else {
+                    /* unknown escape: treat literally */
+                    ch = esc;
+                }
+            }
+            /* append ch to buffer */
+            if (buflen + 1 >= bufcap) {
+                bufcap *= 2;
+                buf = realloc(buf, bufcap);
+                if (!buf) { perror("realloc"); exit(1); }
+            }
+            buf[buflen++] = ch;
+        }
+        if (src[pos] != '"') { fprintf(stderr, "Unterminated string\n"); exit(1); }
+        pos++;  /* skip closing quote */
+        buf[buflen] = '\0';
+        curtok.kind = TK_STRING;
+        curtok.text = buf;
         return;
     }
 
@@ -203,7 +263,7 @@ int scope_get_var_offset(const char *name) {
 typedef enum {
     ND_NUM, ND_VAR, ND_CALL, ND_ADD, ND_SUB, ND_MUL, ND_DIV, ND_MOD,
     ND_EQ, ND_NE, ND_LT, ND_GT, ND_LE, ND_GE, ND_AND, ND_OR,
-    ND_ASSIGN, ND_STMT_LIST, ND_IF, ND_WHILE, ND_FOR, ND_RETURN
+    ND_ASSIGN, ND_STMT_LIST, ND_IF, ND_WHILE, ND_FOR, ND_RETURN, ND_ASM
 } NodeKind;
 
 typedef struct Node {
@@ -320,6 +380,17 @@ Node *parse_assign() {
 Node *parse_expr() { return parse_assign(); }
 
 Node *parse_stmt() {
+    if (curtok.kind == TK_KW_ASM) {
+        next_token();
+        expect(TK_LPAREN);
+        if (curtok.kind != TK_STRING) { fprintf(stderr, "Expected string in asm()\n"); exit(1); }
+        Node *asmn = new_stmt(ND_ASM);
+        asmn->name = curtok.text;
+        next_token();
+        expect(TK_RPAREN);
+        expect(TK_SEMI);
+        return asmn;
+    }
     if (curtok.kind == TK_KW_INT) {
         next_token();
         if (curtok.kind != TK_IDENT) { fprintf(stderr, "Expected identifier\n"); exit(1); }
@@ -472,13 +543,19 @@ void gen_expr(Node *n) {
     }
 }
 
-void gen_stmt(Node *n);
+// void gen_stmt(Node *n);
 
 void gen_stmt(Node *n) {
     if (!n) return;
+    if (n->kind == ND_ASM) {
+        emit("%s\n", n->name);
+        if (n->next) gen_stmt(n->next);
+        return;
+    }
     if (n->kind == ND_RETURN) {
         gen_expr(n->lhs);
         emit("    ret\n");
+        if (n->next) gen_stmt(n->next);
         return;
     }
     if (n->kind == ND_IF) {
@@ -492,6 +569,7 @@ void gen_stmt(Node *n) {
         emit("%s:\n", else_label);
         if (n->els) gen_stmt(n->els);
         emit("%s:\n", done_label);
+        if (n->next) gen_stmt(n->next);
         return;
     }
     if (n->kind == ND_WHILE) {
@@ -504,6 +582,7 @@ void gen_stmt(Node *n) {
         gen_stmt(n->body);
         emit("    jmp $%s\n", loop_label);
         emit("%s:\n", done_label);
+        if (n->next) gen_stmt(n->next);
         return;
     }
     if (n->kind == ND_FOR) {
@@ -520,6 +599,7 @@ void gen_stmt(Node *n) {
         if (n->incr) gen_expr(n->incr);
         emit("    jmp $%s\n", loop_label);
         emit("%s:\n", done_label);
+        if (n->next) gen_stmt(n->next);
         return;
     }
     /* Statement list */
@@ -557,7 +637,7 @@ void compile_function(const char *name, int arg_count, char **arg_names) {
     scope_exit();
 }
 
-void emit_start(FILE *out) {
+void emit_start() {
     emit("_start:\n"
         "    call $main\n"
         "    hlt\n"
@@ -566,12 +646,13 @@ void emit_start(FILE *out) {
 
 void compile(FILE *out) {
     out_file = out;
-    emit_start(out);
+    emit_start();
     while (curtok.kind != TK_EOF) {
         if (curtok.kind == TK_KW_INT) {
             next_token();
             if (curtok.kind != TK_IDENT) { fprintf(stderr, "Expected function name\n"); exit(1); }
             char *fname = strdup(curtok.text);
+            functions[function_counter++] = fname;
             next_token();
             expect(TK_LPAREN);
             char **arg_names = malloc(sizeof(char*) * 4);
@@ -601,6 +682,16 @@ void compile(FILE *out) {
             fprintf(stderr, "Unexpected token at top level\n"); exit(1);
         }
     }
+    
+    int found_main = 0;
+    for (int i = 0; i < function_counter; i++) {
+        if (strcmp(functions[i], "main") == 0) {
+            found_main = 1; break;
+        }
+    }
+    if (found_main == 0) {
+        fprintf(stderr, "Missing main function\n"); exit(1);
+    }
 }
 
 int main(int argc, char **argv) {
@@ -614,6 +705,8 @@ int main(int argc, char **argv) {
     src = malloc(sz+1); fread((void*)src,1,sz,f); ((char*)src)[sz]='\0'; fclose(f);
     pos = 0;
     next_token();
+
+    functions = malloc(sizeof(char*) * 1024);
 
     FILE *out = stdout;
     if (outfile[0] != '-' ) {

@@ -1,3 +1,5 @@
 int main() {
-    return 2;
+    asm("    mov r0, #0x10\n    mov r1, r0");
+    asm("\l");
+    return 0;
 }
