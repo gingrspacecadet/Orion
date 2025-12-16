@@ -77,6 +77,7 @@ void step(Machine* m) {
 int main(int argc, char** argv) {
 #ifdef DEBUG
     puts("\n\n\n");
+    debug_init();
 #endif
     
     if (argc < 2) {

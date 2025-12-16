@@ -94,6 +94,15 @@ void next_token() {
         return;
     }
 
+    if (src[pos] == '/' && src[pos + 1] == '/') {
+        while (src[pos] != '\n') pos++;
+        return next_token();
+    } else if (src[pos] == '/' && src[pos + 1] == '*') {
+        while (src[pos] != '*' || src[pos + 1] != '/') pos++;
+        pos += 2;
+        return next_token();
+    }
+
     if (src[pos] == '"') {
         pos++;  /* skip opening quote */
         size_t bufcap = 64;
@@ -109,9 +118,6 @@ void next_token() {
                 if (esc == 'n') ch = '\n';
                 else if (esc == 't') ch = '\t';
                 else if (esc == 'r') ch = '\r';
-                else if (esc == '\\') ch = '\\';
-                else if (esc == '\'') ch = '\''; 
-                else if (esc == '"') ch = '"';
                 else if (esc == 'x') {
                     /* hex escape: one or more hex digits (limit to two for a byte) */
                     int cnt = 0; val = 0;
@@ -314,7 +320,7 @@ Node *parse_primary() {
         expect(TK_RPAREN);
         return n;
     }
-    fprintf(stderr, "Unexpected token in primary\n"); exit(1);
+    fprintf(stderr, "Unexpected token in primary (got %d)\n", curtok.kind); exit(1);
 }
 
 Node *parse_mul() {

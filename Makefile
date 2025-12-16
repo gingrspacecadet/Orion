@@ -1,8 +1,12 @@
 CC = clang
 DEBUG = true
-CFLAGS += -Wall -Wextra -Werror -Wpedantic -g -Wno-unused-function -Iemu -std=gnu23 -O3 -flto -funroll-loops -fomit-frame-pointer
+OPTIMISE = true
+CFLAGS += -Iemu -std=gnu23
 ifeq ($(DEBUG), true)
-	CFLAGS += -DDEBUG
+	CFLAGS += -DDEBUG -Wall -Wextra -Werror -Wpedantic -g -Wno-unused-function
+endif
+ifeq ($(OPTIMISE), true)
+	CFLAGS +=  -O3 -flto -funroll-loops -fomit-frame-pointer
 endif
 LDFLAGS = $(shell pkg-config --cflags --libs sdl2) -lm
 
@@ -35,7 +39,7 @@ cc: $(BUILD_DIR)
 	@$(CC) -g cc/cc.c -o build/cc
 
 bios: asm cc
-	build/cc bios/main.c > build/bios.s
+	@build/cc bios/main.c > build/bios.s
 	@./build/asm build/bios.s bios.out
 
 kernel: asm cc

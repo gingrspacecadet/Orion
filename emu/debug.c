@@ -333,4 +333,11 @@ void handle_signal(int sig) {
     exit(1);
 }
 
+void debug_init(void) {
+    for (size_t i = 0; i < sizeof(opcodes) / sizeof(opcodes[0]); ++i) {
+        if (opcodes[i].name == NULL) continue;
+        opcodes[i].opcode <<= 2;
+    }
+}
+
 #endif

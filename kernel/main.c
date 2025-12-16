@@ -1,4 +1,6 @@
 int main() {
+    // test
+    /* test 2! */
     asm("    MOV   R15, #0
 
     MOV   R0, #0

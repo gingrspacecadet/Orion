@@ -52,6 +52,7 @@ void print_cpu_state(const Machine* machine, const Machine* prev);
 
 void dump_machine_state(Machine* machine);
 void handle_signal(int sig);
+void debug_init(void);
 
 #endif
 
