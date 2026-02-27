@@ -3,7 +3,7 @@ DEBUG = true
 OPTIMISE = true
 CFLAGS += -Iemu -std=gnu23
 ifeq ($(DEBUG), true)
-	CFLAGS += -DDEBUG -Wall -Wextra -Werror -Wpedantic -g -Wno-unused-function
+	CFLAGS += -DDEBUG -g -Wno-unused-function
 endif
 ifeq ($(OPTIMISE), true)
 	CFLAGS +=  -O3 -flto -funroll-loops -fomit-frame-pointer
@@ -18,7 +18,7 @@ OBJ = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRC))
 
 TARGET = build/orion
 
-.PHONY: all clean run crun asm ints bios kernel cc
+.PHONY: all clean run crun asm ints bios kernel
 
 all: bios kernel $(TARGET)
 
@@ -35,16 +35,12 @@ $(BUILD_DIR):
 asm: $(BUILD_DIR)
 	@$(CC) $(CFLAGS) asm/main.c -o $(BUILD_DIR)/asm
 
-cc: $(BUILD_DIR)
-	@$(CC) -g cc/cc.c -o build/cc
 
-bios: asm cc
-	@build/cc bios/main.c > build/bios.s
-	@./build/asm build/bios.s bios.out
+bios: asm
+	@./build/asm bios/main.s bios.out
 
-kernel: asm cc
-	@./build/cc kernel/main.c > build/kernel.s
-	@./build/asm build/kernel.s kernel.out
+kernel: asm
+	@./build/asm kernel/main.s kernel.out
 
 clean:
 	@rm -rf $(BUILD_DIR)

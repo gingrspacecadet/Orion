@@ -1,7 +1,8 @@
-int main() {
-    // test
-    /* test 2! */
-    asm("    MOV   R15, #0
+_start:
+    call $main
+    hlt
+main:
+    MOV   R15, #0
 
     MOV   R0, #0
     MOV   R1, #0x00002000
@@ -56,6 +57,7 @@ IRQ1_HANDLER:
 
 idle:
     JMP   $idle
-");
-    return 0;
-}
+
+    mov r0, #0
+    ret
+
