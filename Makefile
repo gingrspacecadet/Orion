@@ -1,16 +1,21 @@
-CC     ?= gcc
-CFLAGS ?= -O2 -g -std=c11 -Wall -Wextra -fno-common
-LDFLAGS?=
-RM     ?= rm -rf
+.DEFAULT_GOAL := all
+
+CC      := gcc
+CFLAGS  ?= -O2 -g -std=c11 -Wall -Wextra -fno-common -Iinclude -MMD -MP -Icommon/include
+LDFLAGS ?=
 
 -include template.mk
 
-MODULES := emu
+MODULES := common emu asm
+LIBRARY_MODULES := common
 
 $(foreach mod,$(MODULES),$(eval $(call BUILD_MODULE,$(mod))))
 
-.PHONY: all clean
+ALL_OBJS := $(foreach mod,$(MODULES),$(OBJS_$(mod)))
+-include $(ALL_OBJS:.o=.d)
+
+.PHONY: all clean common
 all: $(MODULE_BINS)
 
 clean:
-	$(RM) build
+	rm -rf build
