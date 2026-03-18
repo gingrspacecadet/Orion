@@ -1,2 +1,0 @@
-nop
-call #0x0
