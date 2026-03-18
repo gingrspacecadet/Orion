@@ -1,0 +1,24 @@
+#ifndef RAM_H
+#define RAM_H
+
+#include <stdint.h>
+
+#define PAGE_SIZE 4096
+#define WORDS_PER_PAGE (PAGE_SIZE / sizeof(uint32_t))
+
+typedef struct Page {
+    uint32_t data[WORDS_PER_PAGE];
+} Page;
+
+typedef struct Node {
+    uint32_t page_num;
+    Page *page;
+    struct Node *next;
+} Node;
+
+void ram_init(void);
+void ram_free(void);
+void ram_write(uint32_t addr, uint32_t value);
+uint32_t ram_read(uint32_t addr);
+
+#endif
