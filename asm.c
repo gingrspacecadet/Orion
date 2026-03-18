@@ -213,7 +213,7 @@ int64_t decode_lit(char *str) {
     return strtoll(str, NULL, base);
 }
 
-void assemble(SourceFile src) {
+void assemble(SourceFile src, FILE *out) {
     LabelVector labels = LabelVector_init();
     size_t pos = 0;
     
@@ -265,16 +265,16 @@ void assemble(SourceFile src) {
                         exit(1);
                     }
     
-                    // this has gotta be wrong
                     uint32_t constructed = 
-                        (opcode & 6) << 26 |
-                        (rn & 4) << 22 |
-                        (rm & 4) << 18 |
-                        (imm & 16) << 2 |
+                        (opcode & 0x3F) << 26 |
+                        (rn & 0xF) << 22 |
+                        (rm & 0xF) << 18 |
+                        (imm & 0xFFFF) << 2 |
                         (imm < 0) << 1 |
                         (imm > (imm < 0 ? INT16_MAX : UINT16_MAX));
 
-                    printf("opc %d rn %d rm %d imm %d\n", opcode, rn, rm, imm);
+                    fwrite(&constructed, 4, 1, out);
+                    printf("%08X\n", constructed);
                 }
             }
     
@@ -300,5 +300,8 @@ int main(int argc, char **argv) {
 
     SourceFile src = open_source(argv[1]);
 
-    assemble(src);
+    char *outpath = "a.out";
+    if (argc >= 3) outpath = argv[2];
+
+    assemble(src, fopen(outpath, "wb"));
 }
