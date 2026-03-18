@@ -1,2 +1,3 @@
-_start:
-    
+add r0, #0x41
+add r0, #0x41
+add r0, #0x41
