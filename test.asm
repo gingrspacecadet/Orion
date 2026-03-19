@@ -1,5 +1,4 @@
-add r0, #0x41
-add r0, #0x41
-add r0, #0x41
-add r1, r9
-sub
+_start:
+    add r1, $_start
+two:
+    add r1, $two

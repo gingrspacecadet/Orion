@@ -26,6 +26,9 @@ static inline void T##Vector_free(T##Vector *v) { \
     free(v->data); \
     v->idx = v->cap = 0; \
 } \
+static inline T T##Vector_lookup(T##Vector *v, size_t idx) { \
+    return v->data[idx > v->cap ? v->cap : idx]; \
+}
 
 typedef enum {
     TOKEN_LABEL,
@@ -168,6 +171,7 @@ VECTOR_DECLARE(Label);
 
 typedef enum {
     OPC_ADD,
+    OPC_SUB,
 } OpcType;
 
 typedef struct {
@@ -178,6 +182,7 @@ typedef struct {
 
 Opc opcodes[] = (Opc[]){
     {OPC_ADD, "add", 0},
+    {OPC_SUB, "sub", 1},
 
     // default "bad" token
     {-1, NULL},
@@ -195,24 +200,42 @@ Opc parse_opc(Token t) {
     return opcodes[sizeof(opcodes) / sizeof(opcodes[0])];
 }
 
-int64_t decode_lit(char *str) {
-    uint8_t base = 10;
-    if (str[0] == '0') {
-        if (tolower(str[1]) == 'x') {
-            base = 16;
+int64_t decode_lit(LabelVector labels, Token t) {
+    if (t.type == TOKEN_NUM) {
+        char *str = t.data;
+        uint8_t base = 10;
+        if (str[0] == '0') {
+            if (tolower(str[1]) == 'x') {
+                base = 16;
+            }
+            else if (tolower(str[1]) == 'o') {
+                base = 8;
+            } 
+            else if (tolower(str[1]) == 'b') {
+                base = 2;
+            }
+            else {
+                fprintf(stderr, "Unknown base for lit %s\n", str);
+                exit(1);
+            }
         }
-        else if (tolower(str[1]) == 'o') {
-            base = 8;
-        } 
-        else if (tolower(str[1]) == 'b') {
-            base = 2;
-        }
-        else {
-            fprintf(stderr, "Unknown base for lit %s\n", str);
-            exit(1);
-        }
+        return strtoll(str, NULL, base);
     }
-    return strtoll(str, NULL, base);
+    else if (t.type == TOKEN_REF) {
+        for (size_t i = 0; i < labels.idx; i++) {
+            if (!labels.data[i].name) continue;
+            if (strcmp(labels.data[i].name, t.data) == 0) {
+                return labels.data[i].pos;
+            }
+        }
+
+        fprintf(stderr, "Unknown label reference %s\n", t.data);
+        exit(1);
+    }
+    else {
+        fprintf(stderr, "Unknown literal %s\n", t.data);
+        exit(1);
+    }
 }
 
 void assemble(SourceFile src, FILE *out) {
@@ -221,8 +244,8 @@ void assemble(SourceFile src, FILE *out) {
     
     Token t = next_token(&src);
 
-    while (t.type != TOKEN_EOF) {
-
+    while (t.type != TOKEN_EOF) {      
+        printf("token = %s pos = %d\n", t.data, pos);  
         if (t.type == TOKEN_LABEL) {
             LabelVector_push(&labels, (Label){pos, t.data});
         }
@@ -232,16 +255,17 @@ void assemble(SourceFile src, FILE *out) {
                 fprintf(stderr, "Unknown opcode %s\n", t.data);
                 exit(1);
             }
-    
+            
             switch (opc.type) {
-                case OPC_ADD: {
+                case OPC_ADD:
+                case OPC_SUB: {
                     uint8_t opcode = opc.opcode;
                     t = next_token(&src);
                     if (t.type != TOKEN_REG) {
                         fprintf(stderr, "Expected a register: %s\n", t.data, t.type);
                         exit(1);
                     }
-                    uint8_t rn = strtoll(t.data, NULL, 10); //TODO: more bases
+                    uint8_t rn = strtoll(t.data, NULL, 10);
                     t = next_token(&src);
                     if (t.type != TOKEN_COMMA) {
                         fprintf(stderr, "Expected a comma: %s", t.data);
@@ -253,45 +277,49 @@ void assemble(SourceFile src, FILE *out) {
                     if (t.type == TOKEN_REG) {
                         rm = strtoll(t.data, NULL, 10);
                     }
-                    else if (t.type == TOKEN_NUM) {
-                        imm = decode_lit(t.data);
+                    else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
+                        imm = decode_lit(labels, t);
                     }
                     else {
-                        fprintf(stderr, "Unknown token '%s'\n", t.data);
+                        fprintf(stderr, "Unknown token '%s' (%d)\n", t.data, t.type);
                         exit(1);
                     }
-
+                    
                     t = next_token(&src);
                     if (t.type != TOKEN_NL && t.type != TOKEN_EOF) {
-                        fprintf(stderr, "Unexpected token '%s'\n", t.data);
+                        fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
                         exit(1);
                     }
-    
+                    
                     uint32_t constructed = 
-                        (opcode & 0x3F) << 26 |
-                        (rn & 0xF) << 22 |
-                        (rm & 0xF) << 18 |
-                        (imm & 0xFFFF) << 2 |
-                        (imm < 0) << 1 |
-                        (imm > (imm < 0 ? INT16_MAX : UINT16_MAX));
-
+                    (opcode & 0x3F) << 26 |
+                    (rn & 0xF) << 22 |
+                    (rm & 0xF) << 18 |
+                    (imm & 0xFFFF) << 2 |
+                    (imm < 0) << 1 |
+                    (imm > (imm < 0 ? INT16_MAX : UINT16_MAX));
+                    
                     fwrite(&constructed, 4, 1, out);
-                    printf("%08X\n", constructed);
+                    
+                    break;
+                }
+                
+                default: {
+                    fprintf(stderr, "Unknown opcode %s\n", opc.mnem);
+                    exit(1);
                 }
             }
-    
+            
             pos++;
         }
-        else if (t.type == TOKEN_NL) {
-            t = next_token(&src);
-            continue;
-        }
+        else if (t.type == TOKEN_NL){}    // skip empty lines
         else {
-            fprintf(stderr, "Unexpected token '%s'\n", t.data);
+            fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
             exit(1);
         }
-    }
 
+        t = next_token(&src);
+    }
 }
 
 int main(int argc, char **argv) {
