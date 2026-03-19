@@ -200,7 +200,7 @@ Opc parse_opc(Token t) {
     return opcodes[sizeof(opcodes) / sizeof(opcodes[0])];
 }
 
-int64_t decode_lit(LabelVector labels, Token t) {
+int64_t decode_lit(size_t pos, LabelVector labels, Token t) {
     if (t.type == TOKEN_NUM) {
         char *str = t.data;
         uint8_t base = 10;
@@ -225,7 +225,7 @@ int64_t decode_lit(LabelVector labels, Token t) {
         for (size_t i = 0; i < labels.idx; i++) {
             if (!labels.data[i].name) continue;
             if (strcmp(labels.data[i].name, t.data) == 0) {
-                return labels.data[i].pos;
+                return pos - labels.data[i].pos;
             }
         }
 
@@ -244,11 +244,26 @@ void assemble(SourceFile src, FILE *out) {
     
     Token t = next_token(&src);
 
-    while (t.type != TOKEN_EOF) {      
-        printf("token = %s pos = %d\n", t.data, pos);  
+    // first pass - collect labels
+    while (t.type != TOKEN_EOF) {
         if (t.type == TOKEN_LABEL) {
             LabelVector_push(&labels, (Label){pos, t.data});
         }
+        else if (t.type == TOKEN_OPC) {
+            pos++;
+        }
+
+        t = next_token(&src);
+    }
+
+    // reset source
+    src.contents.idx = 0;
+    pos = 0;
+
+    t = next_token(&src);
+
+    while (t.type != TOKEN_EOF) {
+        if (t.type == TOKEN_LABEL) {}   // already handled
         else if (t.type == TOKEN_OPC) {
             Opc opc = parse_opc(t);
             if (!opc.mnem) {
@@ -273,12 +288,12 @@ void assemble(SourceFile src, FILE *out) {
                     }
                     t = next_token(&src);
                     uint8_t rm = 0;
-                    uint32_t imm = 0;
+                    int32_t imm = 0;
                     if (t.type == TOKEN_REG) {
                         rm = strtoll(t.data, NULL, 10);
                     }
                     else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
-                        imm = decode_lit(labels, t);
+                        imm = decode_lit(pos, labels, t);
                     }
                     else {
                         fprintf(stderr, "Unknown token '%s' (%d)\n", t.data, t.type);
