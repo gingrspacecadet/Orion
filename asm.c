@@ -185,11 +185,13 @@ Opc opcodes[] = (Opc[]){
 
 Opc parse_opc(Token t) {
     for (size_t i = 0; i < sizeof(opcodes) / sizeof(opcodes[0]); i++) {
+        if (!t.data || !opcodes[i].mnem) continue;
         if (strcasecmp(t.data, opcodes[i].mnem) == 0) {
             return opcodes[i];
         }
     }
 
+    // the last opcode
     return opcodes[sizeof(opcodes) / sizeof(opcodes[0])];
 }
 
