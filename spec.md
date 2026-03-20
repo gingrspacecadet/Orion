@@ -24,6 +24,6 @@ J-type: JMP, JE, JGE, CALL, etc
 A-type: ADD, SUB, SHL etc  
 M-type: LDR, STR,  
 
-J-type: opcode(6) imm(24) signed?(1) variable?(1)  
-A-type: opcode(6) rn(4) rm(4) imm(16) signed?(1) variable?(1)  
-M-type: opcode(6) rn(4) rm(4) imm(16) signed?(1) variable?(1)  
+J-type: opcode(6) imm(24) signed?(1) extended?(1)  
+A-type: opcode(6) rn(4) rm(4) imm(16) signed?(1) extended?(1)  
+M-type: opcode(6) rn(4) rm(4) imm(16) signed?(1) extended?(1)  

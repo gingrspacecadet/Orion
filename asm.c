@@ -4,31 +4,9 @@
 #include <strings.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include "opcodes.h"
 
-// preprocessorslop
-#define VECTOR_DECLARE(T) \
-typedef struct { \
-    T *data; \
-    size_t idx; \
-    size_t cap; \
-} T##Vector; \
-static inline T##Vector T##Vector_init(void) { \
-    T##Vector v = {calloc(8, sizeof(T)), 0, 8}; return v; \
-} \
-static inline void T##Vector_push(T##Vector *v, T item) { \
-    if (v->idx == v->cap) { \
-        v->cap = v->cap ? v->cap * 2 : 8; \
-        v->data = realloc(v->data, v->cap * sizeof(T)); \
-    } \
-    v->data[v->idx++] = item; \
-} \
-static inline void T##Vector_free(T##Vector *v) { \
-    free(v->data); \
-    v->idx = v->cap = 0; \
-} \
-static inline T T##Vector_lookup(T##Vector *v, size_t idx) { \
-    return v->data[idx > v->cap ? v->cap : idx]; \
-}
+#include "vector.h"
 
 typedef enum {
     TOKEN_LABEL,
@@ -121,6 +99,7 @@ Token next_token(SourceFile *src) {
     // Literals start with '#'
     if (peek(src) == '#') {
         consume(src);
+        if (peek(src) == '-') charVector_push(&cbuf, consume(src));
         while ((isxdigit(peek(src)) || tolower(peek(src)) == 'x' || tolower(peek(src)) == 'b' || tolower(peek(src)) == 'o') && peek(src) != EOF) {
             charVector_push(&cbuf, consume(src));
         }
@@ -169,20 +148,15 @@ typedef struct {
 
 VECTOR_DECLARE(Label);
 
-typedef enum {
-    OPC_ADD,
-    OPC_SUB,
-} OpcType;
-
 typedef struct {
-    OpcType type;
+    int type;
     char *mnem;
     uint8_t opcode;
 } Opc;
 
 Opc opcodes[] = (Opc[]){
-    {OPC_ADD, "add", 0},
-    {OPC_SUB, "sub", 1},
+    {OP_ADD, "add", 0},
+    {OP_SUB, "sub", 1},
 
     // default "bad" token
     {-1, NULL},
@@ -225,7 +199,7 @@ int64_t decode_lit(size_t pos, LabelVector labels, Token t) {
         for (size_t i = 0; i < labels.idx; i++) {
             if (!labels.data[i].name) continue;
             if (strcmp(labels.data[i].name, t.data) == 0) {
-                return pos - labels.data[i].pos;
+                return labels.data[i].pos - pos;
             }
         }
 
@@ -272,9 +246,8 @@ void assemble(SourceFile src, FILE *out) {
             }
             
             switch (opc.type) {
-                case OPC_ADD:
-                case OPC_SUB: {
-                    uint8_t opcode = opc.opcode;
+                case OP_ADD:
+                case OP_SUB: {
                     t = next_token(&src);
                     if (t.type != TOKEN_REG) {
                         fprintf(stderr, "Expected a register: %s\n", t.data, t.type);
@@ -288,9 +261,9 @@ void assemble(SourceFile src, FILE *out) {
                     }
                     t = next_token(&src);
                     uint8_t rm = 0;
-                    int32_t imm = 0;
+                    int64_t imm = 0;
                     if (t.type == TOKEN_REG) {
-                        rm = strtoll(t.data, NULL, 10);
+                        rm = strtol(t.data, NULL, 10);
                     }
                     else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
                         imm = decode_lit(pos, labels, t);
@@ -305,16 +278,21 @@ void assemble(SourceFile src, FILE *out) {
                         fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
                         exit(1);
                     }
+
+                    int sign = (imm < 0);
+                    int ext = (sign ? (imm < INT16_MIN) : (imm > UINT16_MAX));
                     
                     uint32_t constructed = 
-                    (opcode & 0x3F) << 26 |
+                    (opc.opcode & 0x3F) << 26 |
                     (rn & 0xF) << 22 |
                     (rm & 0xF) << 18 |
                     (imm & 0xFFFF) << 2 |
-                    (imm < 0) << 1 |
-                    (imm > (imm < 0 ? INT16_MAX : UINT16_MAX));
-                    
+                    (sign) << 1 |
+                    (ext);
+
                     fwrite(&constructed, 4, 1, out);
+
+                    if (ext) fwrite(&imm, 4, 1, out);
                     
                     break;
                 }
