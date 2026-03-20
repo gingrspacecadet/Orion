@@ -149,14 +149,14 @@ typedef struct {
 VECTOR_DECLARE(Label);
 
 typedef struct {
-    int type;
-    char *mnem;
     uint8_t opcode;
+    char *mnem;
 } Opc;
 
 Opc opcodes[] = (Opc[]){
-    {OP_ADD, "add", 0},
-    {OP_SUB, "sub", 1},
+    {OP_ADD, "add"},
+    {OP_SUB, "sub"},
+    {OP_MOV, "mov"},
 
     // default "bad" token
     {-1, NULL},
@@ -245,9 +245,10 @@ void assemble(SourceFile src, FILE *out) {
                 exit(1);
             }
             
-            switch (opc.type) {
+            switch (opc.opcode) {
                 case OP_ADD:
-                case OP_SUB: {
+                case OP_SUB:
+                case OP_MOV: {
                     t = next_token(&src);
                     if (t.type != TOKEN_REG) {
                         fprintf(stderr, "Expected a register: %s\n", t.data, t.type);
