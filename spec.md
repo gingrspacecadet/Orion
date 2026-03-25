@@ -24,7 +24,6 @@ J-type: JMP, JE, JGE, CALL, etc
 A-type: ADD, SUB, SHL etc  
 M-type: LDR, STR,  
 
-
-J-type: opcode(6) base(4) roffset(4) ioffset(16) register?(1) extended?(1)  
+J-type: opcode(6) rn(4) rm(4) imm(16) register?(1) extended?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
-M-type: opcode(6) base(4) roffset(4) ioffset(16) register?(1) extended?(1)  
+M-type: opcode(6) rn(4) rm(4) imm(16) register?(1) extended?(1)  
