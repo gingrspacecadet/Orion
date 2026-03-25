@@ -37,9 +37,15 @@ uint32_tVector open_file(char *path) {
     return s;
 }
 
+#define flag_set(flags, flag) ((flags) |= (1 << (flag)))
+#define flag_clear(flags, flag) ((flags) &= ~(1 << (flag)))
+
+#define FLAG_INT_ENABLED    0
+
 typedef struct {
     uint32_t pc;
     uint32_t regs[16];
+    uint8_t flags;
 } Cpu;
 
 void print_regs(Cpu *cpu) {

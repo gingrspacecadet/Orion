@@ -8,7 +8,7 @@ pc aligned to 32-bit word
 
 fixed 32-bit instructions, with optional extended immediates for funsies  
 
-big endian  
+little endian  
 
 basic alu, might add more later  
 
