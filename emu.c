@@ -107,5 +107,7 @@ int main(int argc, char **argv) {
         cpu.pc++;
     }
 
+    print_regs(&cpu);
+
     return 0;
 }
