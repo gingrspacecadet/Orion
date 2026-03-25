@@ -264,17 +264,24 @@ void assemble(SourceFile src, FILE *out) {
             fprintf(stderr, "Unknown opcode %s\n", t.data);
             exit(1);
         }
+
+        uint8_t rn = 0;
+        uint8_t rd = 0;
+        uint8_t rm = 0;
+        uint32_t imm = 0;
+
+        int ext = 0;
+        int reg = 0;
+
+        uint32_t constructed = 0;
         
         switch (opc.opcode) {
             case OP_ADD:
             case OP_SUB: {
                 t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
-                uint8_t rn = strtoll(t.data, NULL, 10);
+                rn = strtoll(t.data, NULL, 10);
                 t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
                 t = next_token(&src);
-                uint8_t rm = 0;
-                uint32_t imm = 0;
-                int reg = 0;
                 if (t.type == TOKEN_REG) {
                     reg = 1;
                     rm = strtol(t.data, NULL, 10);
@@ -290,7 +297,7 @@ void assemble(SourceFile src, FILE *out) {
                 expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
                 t = expect(TOKEN_REG, &src, "Expected destination register, got %s", t.data);
 
-                uint8_t rd = strtol(t.data, NULL, 10);
+                rd = strtol(t.data, NULL, 10);
 
                 t = next_token(&src);
 
@@ -298,10 +305,8 @@ void assemble(SourceFile src, FILE *out) {
                     fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
                     exit(1);
                 }
-
-                int ext = imm > UINT16_MAX ? 1 : 0;
                 
-                uint32_t constructed = 
+                constructed = 
                 (opc.opcode & 0x3F) << 26 |
                 (rn & 0xF) << 22 |
                 (rd & 0xF) << 18 |
@@ -309,22 +314,15 @@ void assemble(SourceFile src, FILE *out) {
                 (imm & 0xFFFF) << 2 |
                 (reg) << 1 |
                 (ext);
-
-                fwrite(&constructed, 4, 1, out);
-
-                if (ext) fwrite(&imm, 4, 1, out);
                 
                 break;
             }
 
             case OP_MOV: {
                 t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
-                uint8_t rn = strtoll(t.data, NULL, 10);
+                rn = strtoll(t.data, NULL, 10);
                 t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
                 t = next_token(&src);
-                uint8_t rm = 0;
-                uint32_t imm = 0;
-                int reg = 0;
                 if (t.type == TOKEN_REG) {
                     reg = 1;
                     rm = strtol(t.data, NULL, 10);
@@ -344,19 +342,15 @@ void assemble(SourceFile src, FILE *out) {
                     exit(1);
                 }
 
-                int ext = imm > UINT16_MAX ? 1 : 0;
+                ext = imm > UINT16_MAX ? 1 : 0;
                 
-                uint32_t constructed = 
+                constructed = 
                 (opc.opcode & 0x3F) << 26 |
                 (rn & 0xF) << 22 |
                 (rm & 0xF) << 14 |
                 (imm & 0xFFFF) << 2 |
                 (reg) << 1 |
                 (ext);
-
-                fwrite(&constructed, 4, 1, out);
-
-                if (ext) fwrite(&imm, 4, 1, out);
                 
                 break;
             }
@@ -366,6 +360,11 @@ void assemble(SourceFile src, FILE *out) {
                 exit(1);
             }
         }
+
+
+        fwrite(&constructed, 4, 1, out);
+
+        if (ext) fwrite(&imm, 4, 1, out);
         
         pos++;
 
