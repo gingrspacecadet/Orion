@@ -277,7 +277,8 @@ void assemble(SourceFile src, FILE *out) {
         
         switch (opc.opcode) {
             case OP_ADD:
-            case OP_SUB: {
+            case OP_SUB:
+            case OP_MOV: {
                 t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
                 rn = strtoll(t.data, NULL, 10);
                 t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
@@ -294,10 +295,12 @@ void assemble(SourceFile src, FILE *out) {
                     exit(1);
                 }
 
-                expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
-                t = expect(TOKEN_REG, &src, "Expected destination register, got %s", t.data);
+                if (opc.opcode != OP_MOV) {
+                    expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
+                    t = expect(TOKEN_REG, &src, "Expected destination register, got %s", t.data);
+                    rd = strtol(t.data, NULL, 10);
+                }
 
-                rd = strtol(t.data, NULL, 10);
 
                 t = next_token(&src);
 
@@ -318,43 +321,6 @@ void assemble(SourceFile src, FILE *out) {
                 break;
             }
 
-            case OP_MOV: {
-                t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
-                rn = strtoll(t.data, NULL, 10);
-                t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
-                t = next_token(&src);
-                if (t.type == TOKEN_REG) {
-                    reg = 1;
-                    rm = strtol(t.data, NULL, 10);
-                }
-                else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
-                    imm = decode_lit(pos, labels, t);
-                }
-                else {
-                    fprintf(stderr, "Expected an argument register, number or reference, got %s\n", t.data);
-                    exit(1);
-                }
-
-                t = next_token(&src);
-
-                if (t.type != TOKEN_NL && t.type != TOKEN_EOF) {
-                    fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
-                    exit(1);
-                }
-
-                ext = imm > UINT16_MAX ? 1 : 0;
-                
-                constructed = 
-                (opc.opcode & 0x3F) << 26 |
-                (rn & 0xF) << 22 |
-                (rm & 0xF) << 14 |
-                (imm & 0xFFFF) << 2 |
-                (reg) << 1 |
-                (ext);
-                
-                break;
-            }
-            
             default: {
                 fprintf(stderr, "Unknown opcode %s\n", opc.mnem);
                 exit(1);
