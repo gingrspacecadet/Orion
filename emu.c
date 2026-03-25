@@ -42,6 +42,14 @@ typedef struct {
     uint32_t regs[16];
 } Cpu;
 
+void print_regs(Cpu *cpu) {
+    for (int i = 0; i < 16; i++) {
+        printf("R%d 0x%08X\t", i, cpu->regs[i]);
+    }
+
+    putc('\n', stdout);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Missing target boot image\n");
@@ -57,53 +65,35 @@ int main(int argc, char **argv) {
         uint8_t opcode = (word >> 26) & 0x3F;
 
         uint8_t rn = (word >> 22) & 0xF;
-        uint8_t rm = (word >> 18) & 0xF;
+        uint8_t rd = (word >> 18) & 0xF;
+        uint8_t rm = (word >> 14) & 0xF;
 
-        uint8_t sign = (word >> 1) & 0x1;
+        uint8_t reg = (word >> 1) & 0x1;
         uint8_t ext = word & 0x1;
 
-        int32_t imm;
-        if (ext) {
-            imm = uint32_tVector_lookup(&boot, ++cpu.pc);
-        } else {
-            imm = (word >> 2) & 0xFFFF;
+        uint32_t imm = 0;
+        if (!reg) {
+            if (ext) {
+                imm = uint32_tVector_lookup(&boot, ++cpu.pc);
+            } else {
+                imm = (word >> 2) & 0xFFFF;
+            }
         }
-
-        uint8_t reg = 1;
-        if (sign || ext) reg = 0;
-        else if (rm == 0 && imm != 0) reg = 0;
 
         switch (opcode) {
             case OP_ADD: {
-                if (reg) {
-                    cpu.regs[rn] += cpu.regs[rm];
-                } else {
-                    if (ext && sign) cpu.regs[rn] += imm;
-                    else if (ext) cpu.regs[rn] += (uint32_t)imm;
-                    else if (sign) cpu.regs[rn] += (int16_t)imm;
-                    else cpu.regs[rn] += (uint16_t)imm;
-                }
+                cpu.regs[rd] = cpu.regs[rn] + imm + (reg ? cpu.regs[rm] : 0);
                 break;
             }
             case OP_SUB: {
-                if (reg) {
-                    cpu.regs[rn] -= cpu.regs[rm];
-                } else {
-                    if (ext && sign) cpu.regs[rn] -= imm;
-                    else if (ext) cpu.regs[rn] -= (uint32_t)imm;
-                    else if (sign) cpu.regs[rn] -= (int16_t)imm;
-                    else cpu.regs[rn] -= (uint16_t)imm;
-                }
+                cpu.regs[rd] = cpu.regs[rn] - imm - (reg ? cpu.regs[rm] : 0);
                 break;
             }
             case OP_MOV: {
                 if (reg) {
                     cpu.regs[rn] = cpu.regs[rm];
                 } else {
-                    if (ext && sign) cpu.regs[rn] = imm;
-                    else if (ext) cpu.regs[rn] = (uint32_t)imm;
-                    else if (sign) cpu.regs[rn] = (int16_t)imm;
-                    else cpu.regs[rn] = (uint16_t)imm;
+                    cpu.regs[rn] = imm;
                 }
                 break;
             }
@@ -116,4 +106,6 @@ int main(int argc, char **argv) {
 
         cpu.pc++;
     }
+
+    return 0;
 }

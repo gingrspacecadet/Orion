@@ -4,6 +4,7 @@
 #include <strings.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include "opcodes.h"
 
 #include "vector.h"
@@ -174,7 +175,7 @@ Opc parse_opc(Token t) {
     return opcodes[sizeof(opcodes) / sizeof(opcodes[0])];
 }
 
-int64_t decode_lit(size_t pos, LabelVector labels, Token t) {
+uint32_t decode_lit(size_t pos, LabelVector labels, Token t) {
     if (t.type == TOKEN_NUM) {
         char *str = t.data;
         uint8_t base = 10;
@@ -193,7 +194,7 @@ int64_t decode_lit(size_t pos, LabelVector labels, Token t) {
                 exit(1);
             }
         }
-        return strtoll(str, NULL, base);
+        return strtol(str, NULL, base);
     }
     else if (t.type == TOKEN_REF) {
         for (size_t i = 0; i < labels.idx; i++) {
@@ -210,6 +211,20 @@ int64_t decode_lit(size_t pos, LabelVector labels, Token t) {
         fprintf(stderr, "Unknown literal %s\n", t.data);
         exit(1);
     }
+}
+
+Token expect(TokenType type, SourceFile *src, const char *msg, ...) {
+    Token t = next_token(src);
+    if (t.type != type) {
+        va_list args;
+        va_start(args, msg);
+        fprintf(stderr, "Parse error: ");
+        vfprintf(stderr, msg, args);
+        putc('\n', stderr);
+        exit(1);
+    }
+
+    return t;
 }
 
 void assemble(SourceFile src, FILE *out) {
@@ -237,80 +252,78 @@ void assemble(SourceFile src, FILE *out) {
     t = next_token(&src);
 
     while (t.type != TOKEN_EOF) {
-        if (t.type == TOKEN_LABEL) {}   // already handled
-        else if (t.type == TOKEN_OPC) {
-            Opc opc = parse_opc(t);
-            if (!opc.mnem) {
-                fprintf(stderr, "Unknown opcode %s\n", t.data);
-                exit(1);
-            }
-            
-            switch (opc.opcode) {
-                case OP_ADD:
-                case OP_SUB:
-                case OP_MOV: {
-                    t = next_token(&src);
-                    if (t.type != TOKEN_REG) {
-                        fprintf(stderr, "Expected a register: %s\n", t.data, t.type);
-                        exit(1);
-                    }
-                    uint8_t rn = strtoll(t.data, NULL, 10);
-                    t = next_token(&src);
-                    if (t.type != TOKEN_COMMA) {
-                        fprintf(stderr, "Expected a comma: %s", t.data);
-                        exit(1);
-                    }
-                    t = next_token(&src);
-                    uint8_t rm = 0;
-                    int64_t imm = 0;
-                    if (t.type == TOKEN_REG) {
-                        rm = strtol(t.data, NULL, 10);
-                    }
-                    else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
-                        imm = decode_lit(pos, labels, t);
-                    }
-                    else {
-                        fprintf(stderr, "Unknown token '%s' (%d)\n", t.data, t.type);
-                        exit(1);
-                    }
-                    
-                    t = next_token(&src);
-                    if (t.type != TOKEN_NL && t.type != TOKEN_EOF) {
-                        fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
-                        exit(1);
-                    }
-
-                    int sign = (imm < 0);
-                    int ext = (sign ? (imm < INT16_MIN) : (imm > UINT16_MAX));
-                    
-                    uint32_t constructed = 
-                    (opc.opcode & 0x3F) << 26 |
-                    (rn & 0xF) << 22 |
-                    (rm & 0xF) << 18 |
-                    (imm & 0xFFFF) << 2 |
-                    (sign) << 1 |
-                    (ext);
-
-                    fwrite(&constructed, 4, 1, out);
-
-                    if (ext) fwrite(&imm, 4, 1, out);
-                    
-                    break;
-                }
-                
-                default: {
-                    fprintf(stderr, "Unknown opcode %s\n", opc.mnem);
-                    exit(1);
-                }
-            }
-            
-            pos++;
-        }
-        else if (t.type == TOKEN_NL){}    // skip empty lines
-        else {
+        if (t.type == TOKEN_LABEL) continue;   // already handled
+        if (t.type == TOKEN_NL) continue;
+        if (t.type != TOKEN_OPC) {
             fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
             exit(1);
         }
+
+        Opc opc = parse_opc(t);
+        if (!opc.mnem) {
+            fprintf(stderr, "Unknown opcode %s\n", t.data);
+            exit(1);
+        }
+        
+        switch (opc.opcode) {
+            case OP_ADD:
+            case OP_SUB: {
+                t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
+                uint8_t rn = strtoll(t.data, NULL, 10);
+                t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
+                t = next_token(&src);
+                uint8_t rm = 0;
+                uint32_t imm = 0;
+                int reg = 0;
+                if (t.type == TOKEN_REG) {
+                    reg = 1;
+                    rm = strtol(t.data, NULL, 10);
+                }
+                else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
+                    imm = decode_lit(pos, labels, t);
+                }
+                else {
+                    fprintf(stderr, "Expected an argument register, number or reference, got %s\n", t.data);
+                    exit(1);
+                }
+
+                expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
+                t = expect(TOKEN_REG, &src, "Expected destination register, got %s", t.data);
+
+                uint8_t rd = strtol(t.data, NULL, 10);
+
+                t = next_token(&src);
+
+                if (t.type != TOKEN_NL && t.type != TOKEN_EOF) {
+                    fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
+                    exit(1);
+                }
+
+                int ext = imm > UINT16_MAX ? 1 : 0;
+                
+                uint32_t constructed = 
+                (opc.opcode & 0x3F) << 26 |
+                (rn & 0xF) << 22 |
+                (rd & 0xF) << 18 |
+                (rm & 0xF) << 14 |
+                (imm & 0xFFFF) << 2 |
+                (reg) << 1 |
+                (ext);
+
+                fwrite(&constructed, 4, 1, out);
+
+                if (ext) fwrite(&imm, 4, 1, out);
+                
+                break;
+            }
+            
+            default: {
+                fprintf(stderr, "Unknown opcode %s\n", opc.mnem);
+                exit(1);
+            }
+        }
+        
+        pos++;
 
         t = next_token(&src);
     }

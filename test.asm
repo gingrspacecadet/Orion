@@ -1,5 +1,3 @@
-mov r0, #67
-mov r1, #69
-add r2, r0
-add r2, r1
-mov r0, r2
+add r0, #3, r0
+add r1, #4, r1
+add r0, r1, r2
