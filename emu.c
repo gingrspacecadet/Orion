@@ -97,6 +97,14 @@ int main(int argc, char **argv) {
                 }
                 break;
             }
+            case OP_JMP: {
+                if (reg) {
+                    cpu.pc = cpu.regs[rm];
+                } else {
+                    cpu.pc = imm;
+                }
+                break;
+            }
 
             default: {
                 fprintf(stderr, "Invalid opcode %d\n", opcode);

@@ -140,6 +140,9 @@ Token next_token(SourceFile *src) {
     if (peek(src) == EOF) {
         return (Token){TOKEN_EOF, cbuf.data};
     }
+
+    fprintf(stderr, "Unknown character %c\n", peek(src));
+    exit(1);
 }
 
 typedef struct {
@@ -158,6 +161,7 @@ Opc opcodes[] = (Opc[]){
     {OP_ADD, "add"},
     {OP_SUB, "sub"},
     {OP_MOV, "mov"},
+    {OP_JMP, "jmp"},
 
     // default "bad" token
     {-1, NULL},
@@ -249,9 +253,12 @@ void assemble(SourceFile src, FILE *out) {
     src.contents.idx = 0;
     pos = 0;
 
-    t = next_token(&src);
+    memset(&t, 0, sizeof(t));
 
-    while (t.type != TOKEN_EOF) {
+    while (1) {  
+        t = next_token(&src);
+        if (t.type == TOKEN_EOF) break;
+
         if (t.type == TOKEN_LABEL) continue;   // already handled
         if (t.type == TOKEN_NL) continue;
         if (t.type != TOKEN_OPC) {
@@ -288,10 +295,10 @@ void assemble(SourceFile src, FILE *out) {
                     rm = strtol(t.data, NULL, 10);
                 }
                 else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
-                    imm = decode_lit(pos, labels, t);
+                    imm = decode_lit(pos - 1, labels, t);
                 }
                 else {
-                    fprintf(stderr, "Expected an argument register, number or reference, got %s\n", t.data);
+                    fprintf(stderr, "Expected an argument register, number, or reference, got %s\n", t.data);
                     exit(1);
                 }
 
@@ -309,15 +316,20 @@ void assemble(SourceFile src, FILE *out) {
                     exit(1);
                 }
                 
-                constructed = 
-                (opc.opcode & 0x3F) << 26 |
-                (rn & 0xF) << 22 |
-                (rd & 0xF) << 18 |
-                (rm & 0xF) << 14 |
-                (imm & 0xFFFF) << 2 |
-                (reg) << 1 |
-                (ext);
-                
+                break;
+            }
+
+            case OP_JMP: {
+                t = next_token(&src);
+                if (t.type == TOKEN_REF || t.type == TOKEN_NUM) {
+                    imm = decode_lit(pos - 1, labels, t);
+                } else if (t.type == TOKEN_REG) {
+                    rm = strtol(t.data, NULL, 10);
+                } else {
+                    fprintf(stderr, "Expected an argument register, number, or reference, got %s\n", t.data);
+                    exit(1);
+                }
+
                 break;
             }
 
@@ -327,14 +339,20 @@ void assemble(SourceFile src, FILE *out) {
             }
         }
 
+        constructed = 
+            (opc.opcode & 0x3F) << 26 |
+            (rn & 0xF) << 22 |
+            (rd & 0xF) << 18 |
+            (rm & 0xF) << 14 |
+            (imm & 0xFFFF) << 2 |
+            (reg) << 1 |
+            (ext);
 
         fwrite(&constructed, 4, 1, out);
 
         if (ext) fwrite(&imm, 4, 1, out);
-        
-        pos++;
 
-        t = next_token(&src);
+        pos++;
     }
 }
 

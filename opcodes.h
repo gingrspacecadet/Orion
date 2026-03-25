@@ -4,5 +4,6 @@
 #define OP_ADD  0
 #define OP_SUB  1
 #define OP_MOV  2
+#define OP_JMP  3
 
 #endif
