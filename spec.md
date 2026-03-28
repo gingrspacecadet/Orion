@@ -12,7 +12,7 @@ PC always points to the next instruction to be processed.
 the Flags register - a private register containing all the status flags of the cpu.
 |Bit|Flag name|Desc|
 |---|---------|----|
-|0|Carry (C)|Set when the last alu operation's result couldn't fit into 32 bits, but can in 33 (aka this bit)|
+|0|Carry (C)|Set when the last alu operation had an arithmetic carry|
 |1|Overflow (V)|Set when the last alu operation's result overflows a int32_t|
 |2|Zero (Z)|Set when the last alu operation resulted in exactly 0|
 |3|Negative (N)|Set when the last alu operation's result's MSB was set|
@@ -24,7 +24,7 @@ little endian
 
 basic alu, might add more later  
 
-un/conditional JMP, CALL/RET push and pop from the stack, all relative offsets in words  
+un/conditional JMP, CALL/RET push and pop from the stack, all relative offsets in bytes  
 
 Stack - SP points to next free section of memory. Stack grows downwards.
 
@@ -41,25 +41,16 @@ M-type: LDR, STR,
 
 A-types always update flags as they go through the ALU, which handles it.  
 
-J-type: opcode(6) rabs(4) cond(4) (roffset(4) | ioffset(16)) register?(1) extended?(1)  
+J-type: opcode(6) reserved(3) cond(4) (rm(4) | imm(16)) absolute?(1) register?(1) extended?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
 M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
 F-type: opcode(6) enabled?(1) reserved(25)
 
-J-type target resolution - there are two modes:
-* Mode A: Absolute jump
-  * Used when either `rabs` is set or `extended?` is set. Target is `PC = (rabs | imm)`
-* Mode B: Relative jump
-  * Used when `roffset` or `ioffset` is set. Target is `PC += offset * 4`  
-
-Decoding precedence:
-- `extended?` -> absolute immediate jump
-- `register? && rabs != 0` -> absolute register jump
-- `!register?` -> relative immediate jump
-- `register? && rabs == 0` -> relative register jump
+J-type decoding:  
+If `absolute?` is set, treat rm or imm (depending on `register?`) as an absolute jump (`PC = addr`), else treat like relative (`PC += offset`)
 
 M-type meaning:  
-   R\[rd\] = ram\[rn + (rm | imm)\];
+   R\[rd\] = ram\[rn + offset\];
    `rn` is the base register, `rm` or `imm` are the offsets on top of that.
 
 all `reserved` bits **MUST** be 0. If not, it raises an "Invalid Instruction" fault.
@@ -83,10 +74,10 @@ Instructions:
 |0x13  |LDRB    |M   |Load a byte   |
 |0x14  |STRB    |M   |Store a byte  |
 |0x15  |JXX     |J   |Jumps to addr |
-|0x16  |CALL    |J   |Pushes PC + 4 and jumps to addr|
-|0x17  |RET     |J   |Pops PC       |
+|0x16  |CALL    |J   |Pushes the byte address of the next instruction and jumps to addr|
+|0x17  |RET     |J   |Pops into PC  |
 |0x18  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
-|0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Loads from `SP`, then increments by 4|
+|0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
 |0x1A-1F|reserved|||
 |0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
 |0x21-3F|reserved|||
@@ -132,8 +123,26 @@ Exact opcode spec table
 |LDRB|            |         |         |Out-of-bounds target|
 |STRB|            |         |         |Out-of-bounds target|
 |JXX |            |Sets to decoded target if `cond` is true|         |Out-of-bounds target|
-|CALL|            |Pushes PC + 1 to SP, then follows `JXX` logic to jump to target unconditionally|Decrements by 4|Out-of-bounds target|
+|CALL|            |Pushes PC + 4 to SP, then follows `JXX` logic to jump to target unconditionally|Decrements by 4|Out-of-bounds target|
 |RET |            |Pops from SP|Increments by 4|Out-of-bounds target|
-|PUSH|            |         |On single-register, decrements by 4. On bitmask, decrements by 4 for every set bit|           |
-|POP |            |         |On single-register, increments by 4. On bitmask, increments by 4 for every set bit|           |
+|PUSH|            |         |On single-register, decrements by 4. On bitmask, decrements by 4 for every set bit|Pushing SP|
+|POP |            |         |On single-register, increments by 4. On bitmask, increments by 4 for every set bit|Popping SP|
 |INTE|IE          |         |         |Any `reserved` bits set|
+
+CPU Exceptions:
+|Name|Number|Description|
+|----|------|-----------|
+|Invalid instruction|0x0|A general error thrown by the decoder if it fails to properly decode an instruction|
+|Misaligned PC|0x1|Thrown when PC is not a multiple of 4|
+|Invalid memory access|0x2|Thrown when an instruction attempts to access a memory location that does not exist|
+|Stack under/overflow|0x3|Thrown when trying to pop past memory maximum or push past 0x0|
+|reserved|0x4-0x1F||
+|Interrupt entry|0x20-0xFF|Not a cpu exception, and infact a hardware interrupt|
+
+For all exceptions less than `0x20`, the cpu first pushes some details to the stack, then jumps to the address stored in the Interrupt Handler Vector Table: `PC = IHVT[irq]`. For "Interrupt Entry" exceptions, the `IE` flag must be enabled for this to happen, otherwise the exception is ignored.
+
+The IHVT is a 256-word-long array of function pointers. Its address is `0x0000_0100`.
+
+On an exception, the cpu pushes the following:
+- PC
+- the offending instruction (if any)
