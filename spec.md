@@ -5,7 +5,9 @@ R0..R15 general-purpose
 R15 is SP  
 Private PC and flags registers  
 
-PC counts in words, and always points to the current instruction being processed.  
+SP and PC are both stored as byte addresses, but must be word-aligned.
+
+PC always points to the next instruction to be processed.  
 
 the Flags register - a private register containing all the status flags of the cpu.
 |Bit|Flag name|Desc|
@@ -39,9 +41,10 @@ M-type: LDR, STR,
 
 A-types always update flags as they go through the ALU, which handles it.  
 
-J-type: opcode(6) rn(4) mode(4) (rm(4) | imm(16)) register?(1) extended?(1)  
+J-type: opcode(6) rbase(4) mode(4) (roffset(4) | ioffset(16)) register?(1) extended?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
-M-type: opcode(6) rn(4) (rm(4) | imm(16)) register?(1) extended?(1)  
+M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
+F-type: opcode(6) enabled(1)
 
 Instructions:
 |Number|Mnemonic|Type|Description   |
@@ -62,14 +65,13 @@ Instructions:
 |0x13  |LDRB    |M   |Load a byte   |
 |0x14  |STRB    |M   |Store a byte  |
 |0x15  |JXX     |J   |Jumps to addr |
-|0x16  |CALL    |J   |Pushes PC and jumps to addr|
+|0x16  |CALL    |J   |Pushes PC + 1 and jumps to addr|
 |0x17  |RET     |J   |Pops PC       |
-|0x18  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push. Stores at `SP`, then decrements by 4|
-|0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop. Loads from `SP`, then increments by 4|
+|0x18  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
+|0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Loads from `SP`, then increments by 4|
 |0x1A-1F|reserved|||
-|0x20  |INTE    |F   |Toggles the `INTE` flag based on the immediate|
+|0x20  |INTE    |F   |Sets the `INTE` flag to `enabled`|
 |0x21-3F|reserved|||
-|0x40  |reserved|    |              |
 
 J-type modes:
 assemblers should prefer using these mnemonics, and encoding `mode` accordingly  
