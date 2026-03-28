@@ -41,10 +41,28 @@ M-type: LDR, STR,
 
 A-types always update flags as they go through the ALU, which handles it.  
 
-J-type: opcode(6) rbase(4) mode(4) (roffset(4) | ioffset(16)) register?(1) extended?(1)  
+J-type: opcode(6) rabs(4) cond(4) (roffset(4) | ioffset(16)) register?(1) extended?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
 M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
-F-type: opcode(6) enabled(1)
+F-type: opcode(6) enabled?(1) reserved(25)
+
+J-type target resolution - there are two modes:
+* Mode A: Absolute jump
+  * Used when either `rabs` is set or `extended?` is set. Target is `PC = (rabs | imm)`
+* Mode B: Relative jump
+  * Used when `roffset` or `ioffset` is set. Target is `PC += offset * 4`  
+
+Decoding precedence:
+- `extended?` -> absolute immediate jump
+- `register? && rabs != 0` -> absolute register jump
+- `!register?` -> relative immediate jump
+- `register? && rabs == 0` -> relative register jump
+
+M-type meaning:  
+   R\[rd\] = ram\[rn + (rm | imm)\];
+   `rn` is the base register, `rm` or `imm` are the offsets on top of that.
+
+all `reserved` bits **MUST** be 0. If not, it raises an "Invalid Instruction" fault.
 
 Instructions:
 |Number|Mnemonic|Type|Description   |
@@ -65,16 +83,16 @@ Instructions:
 |0x13  |LDRB    |M   |Load a byte   |
 |0x14  |STRB    |M   |Store a byte  |
 |0x15  |JXX     |J   |Jumps to addr |
-|0x16  |CALL    |J   |Pushes PC + 1 and jumps to addr|
+|0x16  |CALL    |J   |Pushes PC + 4 and jumps to addr|
 |0x17  |RET     |J   |Pops PC       |
 |0x18  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
 |0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Loads from `SP`, then increments by 4|
 |0x1A-1F|reserved|||
-|0x20  |INTE    |F   |Sets the `INTE` flag to `enabled`|
+|0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
 |0x21-3F|reserved|||
 
-J-type modes:
-assemblers should prefer using these mnemonics, and encoding `mode` accordingly  
+J-type conditions:
+assemblers should prefer using these mnemonics, and encode `cond` accordingly  
 |num|mnem|condition|
 |---|----|---------|
 |0x0|JMP|`true`|
@@ -94,3 +112,28 @@ assemblers should prefer using these mnemonics, and encoding `mode` accordingly
 |0xE|JLS|`C == 0`|
 |0xF|reserved||
 
+
+Exact opcode spec table
+
+|Mnem|Flag updates|PC effect|SP effect|Fault cases|
+|----|------------|---------|---------|-----------|
+|SUB |C,V,Z,N     |         |         |           |
+|ADD |C,V,Z,N     |         |         |           |
+|MUL |C,V,Z,N     |         |         |           |
+|DIV |C,V,Z,N     |         |         |Division by 0|
+|SHL |C,V,Z,N     |         |         |           |
+|SHR |C,V,Z,N     |         |         |           |
+|AND |Z,N         |         |         |           |
+|OR  |Z,N         |         |         |           |
+|NOT |Z,N         |         |         |           |
+|XOR |Z,N         |         |         |           |
+|LDR |            |         |         |Out-of-bounds target|
+|STR |            |         |         |Out-of-bounds target|
+|LDRB|            |         |         |Out-of-bounds target|
+|STRB|            |         |         |Out-of-bounds target|
+|JXX |            |Sets to decoded target if `cond` is true|         |Out-of-bounds target|
+|CALL|            |Pushes PC + 1 to SP, then follows `JXX` logic to jump to target unconditionally|Decrements by 4|Out-of-bounds target|
+|RET |            |Pops from SP|Increments by 4|Out-of-bounds target|
+|PUSH|            |         |On single-register, decrements by 4. On bitmask, decrements by 4 for every set bit|           |
+|POP |            |         |On single-register, increments by 4. On bitmask, increments by 4 for every set bit|           |
+|INTE|IE          |         |         |Any `reserved` bits set|
