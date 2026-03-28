@@ -49,10 +49,13 @@ typedef struct {
 } Cpu;
 
 void print_regs(Cpu *cpu) {
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 8; i++) {
         printf("R%d 0x%08X\t", i, cpu->regs[i]);
     }
-
+    putc('\n', stdout);
+    for (int i = 8; i < 16; i++) {
+        printf("R%d 0x%08X\t", i, cpu->regs[i]);
+    }
     putc('\n', stdout);
 }
 

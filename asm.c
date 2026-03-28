@@ -349,7 +349,6 @@ void assemble(SourceFile src, FILE *out) {
             (ext);
 
         fwrite(&constructed, 4, 1, out);
-        printf("%08X\n", constructed);
 
         if (ext) fwrite(&imm, 4, 1, out);
 
