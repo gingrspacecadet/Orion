@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
                 }
                 break;
             }
-            case OP_JMP: {
+            case OP_JXX: {
                 if (reg) {
                     cpu.pc = cpu.regs[rm];
                 } else {

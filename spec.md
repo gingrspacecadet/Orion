@@ -68,7 +68,7 @@ Instructions:
 |0x7   |OR      |A   |bitwise or    |
 |0x8   |NOT     |A   |bitwise not   |
 |0x9   |XOR     |A   |bitwise xor   |
-|0x10  |reserved|    |              |
+|0x10  |MOV     |A   |sets a register directly|
 |0x11  |LDR     |M   |Load a word   |
 |0x12  |STR     |M   |Store a word  |
 |0x13  |LDRB    |M   |Load a byte   |

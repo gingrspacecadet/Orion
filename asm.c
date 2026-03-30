@@ -5,8 +5,10 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include "opcodes.h"
+#include <errno.h>
+#include <limits.h>
 
+#include "opcodes.h"
 #include "vector.h"
 
 typedef enum {
@@ -81,20 +83,29 @@ Token next_token(SourceFile *src) {
 
     charVector cbuf = charVector_init();
 
-    if (peek(src) == '\n') {
-        charVector_push(&cbuf, consume(src));
-        return (Token){TOKEN_NL, cbuf.data};
+    // Skip whitespace and comments repeatedly
+    while (1) {
+        if (peek(src) == '\n') {
+            charVector_push(&cbuf, consume(src));
+            return (Token){TOKEN_NL, cbuf.data};
+        }
+
+        while (peek(src) != '\n' && isspace(peek(src)) && peek(src) != EOF)
+            consume(src);
+
+        if (peek(src) == ';') {
+            while (peek(src) != '\n' && peek(src) != EOF)
+                consume(src);
+            continue; // loop again to skip newline + more whitespace
+        }
+
+        break;
     }
+
 
     if (peek(src) == ',') {
         charVector_push(&cbuf, consume(src));
         return (Token){TOKEN_COMMA, cbuf.data};
-    }
-
-    if (isspace(peek(src))) {
-        while (isspace(peek(src)) && peek(src) != EOF) {
-            consume(src);
-        }
     }
 
     // Literals start with '#'
@@ -160,8 +171,40 @@ typedef struct {
 Opc opcodes[] = (Opc[]){
     {OP_ADD, "add"},
     {OP_SUB, "sub"},
+    {OP_MUL, "mul"},
+    {OP_DIV, "div"},
+    {OP_SHL, "shl"},
+    {OP_SHR, "shr"},
+    {OP_AND, "and"},
+    {OP_OR, "or"},
+    {OP_NOT, "not"},
+    {OP_XOR, "xor"},
     {OP_MOV, "mov"},
-    {OP_JMP, "jmp"},
+    {OP_LDR, "ldr"},
+    {OP_STR, "str"},
+    {OP_LDRB, "ldrb"},
+    {OP_STRB, "strb"},
+    {OP_JXX, "jmp"},     {OP_JXX, "jmpa"},
+    {OP_JXX, "jeq"},     {OP_JXX, "jeqa"},
+    {OP_JXX, "jne"},     {OP_JXX, "jnea"},
+    {OP_JXX, "jlt"},     {OP_JXX, "jlta"},
+    {OP_JXX, "jge"},     {OP_JXX, "jgea"},
+    {OP_JXX, "jltu"},    {OP_JXX, "jltua"},
+    {OP_JXX, "jgeu"},    {OP_JXX, "jgeua"},
+    {OP_JXX, "jcs"},     {OP_JXX, "jcsa"},
+    {OP_JXX, "jcc"},     {OP_JXX, "jcca"},
+    {OP_JXX, "jn"},      {OP_JXX, "jna"},
+    {OP_JXX, "jp"},      {OP_JXX, "jpa"},
+    {OP_JXX, "jvs"},     {OP_JXX, "jvsa"},
+    {OP_JXX, "jvc"},     {OP_JXX, "jvca"},
+    {OP_JXX, "jhi"},     {OP_JXX, "jhia"},
+    {OP_JXX, "jls"},     {OP_JXX, "jlsa"},
+    {OP_CALL, "call"},
+    {OP_RET, "ret"},
+    {OP_IRET, "iret"},
+    {OP_PUSH, "push"},
+    {OP_POP, "pop"},
+    {OP_INTE, "inte"},
 
     // default "bad" token
     {-1, NULL},
@@ -217,6 +260,36 @@ uint32_t decode_lit(size_t pos, LabelVector labels, Token t) {
     }
 }
 
+uint8_t decode_reg(Token t) {
+    if (t.type != TOKEN_REG) {
+        fprintf(stderr, "Expected a register, got %s\n", t.data);
+        exit(1);
+    }
+
+    if (strcasecmp(t.data, "sp") == 0) {
+        return 15;
+    }
+
+    char *endptr;
+    errno = 0;
+    uint8_t result = strtol(t.data, &endptr, 10);
+    if (endptr == t.data) {
+        fprintf(stderr, "Invalid register number %s\n", t.data);
+        exit(1);
+    }
+    if ((result == LONG_MAX || result == LONG_MIN) && errno == ERANGE) {
+        fprintf(stderr, "Invalid register number %s\n", t.data);
+        exit(1);
+    }
+
+    if (result < 0 || result > 15) {
+        fprintf(stderr, "Invalid register number %s (must be within range 0-15)\n", t.data);
+        exit(1);
+    }
+
+    return result;
+}
+
 Token expect(TokenType type, SourceFile *src, const char *msg, ...) {
     Token t = next_token(src);
     if (t.type != type) {
@@ -262,7 +335,7 @@ void assemble(SourceFile src, FILE *out) {
         if (t.type == TOKEN_LABEL) continue;   // already handled
         if (t.type == TOKEN_NL) continue;
         if (t.type != TOKEN_OPC) {
-            fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
+            fprintf(stderr, "Expected an opcode, got '%s'\n", t.data, t.type);
             exit(1);
         }
 
@@ -286,13 +359,15 @@ void assemble(SourceFile src, FILE *out) {
             case OP_ADD:
             case OP_SUB:
             case OP_MOV: {
+                uint8_t rn = 0, rm = 0, reg = 0, ext = 0;
+                uint32_t imm;
                 t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
-                rn = strtoll(t.data, NULL, 10);
+                rn = decode_reg(t);
                 t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
                 t = next_token(&src);
                 if (t.type == TOKEN_REG) {
                     reg = 1;
-                    rm = strtol(t.data, NULL, 10);
+                    rm = decode_reg(t);
                 }
                 else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
                     imm = decode_lit(pos - 1, labels, t);
@@ -302,33 +377,80 @@ void assemble(SourceFile src, FILE *out) {
                     exit(1);
                 }
 
-                if (opc.opcode != OP_MOV) {
-                    expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
-                    t = expect(TOKEN_REG, &src, "Expected destination register, got %s", t.data);
-                    rd = strtol(t.data, NULL, 10);
-                }
-
-
                 t = next_token(&src);
+                if (t.type == TOKEN_COMMA) {
+                    t = expect(TOKEN_REG, &src, "Expected destination register, got %s", t.data);
+                    rd = decode_reg(t);
+                    t = next_token(&src);
+                } else {
+                    rd = rn;
+                }
 
                 if (t.type != TOKEN_NL && t.type != TOKEN_EOF) {
-                    fprintf(stderr, "Unexpected token '%s' (%d)\n", t.data, t.type);
+                    fprintf(stderr, "Expected a newline, got '%s'\n", t.data, t.type);
                     exit(1);
                 }
+
+                constructed = 
+                    (opc.opcode & 0x3F) << 26 |
+                    (rn & 0xF) << 22 |
+                    (rd & 0xF) << 18 |
+                    (rm & 0xF) << 14 |
+                    (imm & 0xFFFF) << 2 |
+                    (reg) << 1 |
+                    (ext);
                 
                 break;
             }
 
-            case OP_JMP: {
+            case OP_JXX: {
                 t = next_token(&src);
                 if (t.type == TOKEN_REF || t.type == TOKEN_NUM) {
                     imm = decode_lit(pos - 1, labels, t);
                 } else if (t.type == TOKEN_REG) {
-                    rm = strtol(t.data, NULL, 10);
+                    rm = decode_reg(t);
                 } else {
                     fprintf(stderr, "Expected an argument register, number, or reference, got %s\n", t.data);
                     exit(1);
                 }
+
+                uint8_t cond = 0;
+                uint8_t absolute = 0;
+                char *mnem = strdup(opc.mnem + 1);
+                if (mnem[strlen(mnem) - 1] == 'a') {
+                    absolute = 1;
+                    mnem[strlen(mnem) - 1] = '\0';
+                }
+
+                if (strcasecmp(mnem, "mp") == 0) cond = 0x0;
+                else if (strcasecmp(mnem, "eq") == 0) cond = 0x1;
+                else if (strcasecmp(mnem, "ne") == 0) cond = 0x2;
+                else if (strcasecmp(mnem, "lt") == 0) cond = 0x3;
+                else if (strcasecmp(mnem, "ge") == 0) cond = 0x4;
+                else if (strcasecmp(mnem, "ltu") == 0) cond = 0x5;
+                else if (strcasecmp(mnem, "geu") == 0) cond = 0x6;
+                else if (strcasecmp(mnem, "cs") == 0) cond = 0x7;
+                else if (strcasecmp(mnem, "cc") == 0) cond = 0x8;
+                else if (strcasecmp(mnem, "n") == 0) cond = 0x9;
+                else if (strcasecmp(mnem, "p") == 0) cond = 0xA;
+                else if (strcasecmp(mnem, "vs") == 0) cond = 0xB;
+                else if (strcasecmp(mnem, "vc") == 0) cond = 0xC;
+                else if (strcasecmp(mnem, "hi") == 0) cond = 0xD;
+                else if (strcasecmp(mnem, "ls") == 0) cond = 0xE;
+                // else if (strcmp(mnem, "reserved") == 0) cond = 0xF;
+                else {
+                    fprintf(stderr, "Unknown opcode %s\n", opc.opcode);
+                    exit(1);
+                }
+
+                constructed = 
+                    (opc.opcode & 0x3F) << 26 |
+                    (cond & 0xF) << 22 |
+                    (rm & 0xF) << 18 |
+                    (imm & 0xFFFF) << 6 |
+                    (absolute & 0x1) << 2 |
+                    (reg & 0x1) << 1 |
+                    (ext & 0x1);
 
                 break;
             }
@@ -338,15 +460,6 @@ void assemble(SourceFile src, FILE *out) {
                 exit(1);
             }
         }
-
-        constructed = 
-            (opc.opcode & 0x3F) << 26 |
-            (rn & 0xF) << 22 |
-            (rd & 0xF) << 18 |
-            (rm & 0xF) << 14 |
-            (imm & 0xFFFF) << 2 |
-            (reg) << 1 |
-            (ext);
 
         fwrite(&constructed, 4, 1, out);
 
