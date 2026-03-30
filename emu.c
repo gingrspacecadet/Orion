@@ -39,8 +39,13 @@ uint32_tVector open_file(char *path) {
 
 #define flag_set(flags, flag) ((flags) |= (1 << (flag)))
 #define flag_clear(flags, flag) ((flags) &= ~(1 << (flag)))
+#define flag_get(flags, flag) (((flags) >> flag) & 0x1)
 
-#define FLAG_INT_ENABLED    0
+#define FLAG_CARRY          0
+#define FLAG_OVERFLOW       1
+#define FLAG_ZERO           2
+#define FLAG_NEGATIVE       3
+#define FLAG_INT_ENABLED    4
 
 typedef struct {
     uint32_t pc;
@@ -107,11 +112,41 @@ int main(int argc, char **argv) {
                 break;
             }
             case OP_JXX: {
-                if (reg) {
-                    cpu.pc = cpu.regs[rm];
-                } else {
-                    cpu.pc = imm;
+                uint8_t cond = (word >> 22) & 0xF;
+                uint8_t should = 0;
+                switch (cond) {
+                    case 0x0: should = 1; break;
+                    case 0x1: should = flag_get(cpu.flags, FLAG_ZERO) == 1; break;
+                    case 0x2: should = flag_get(cpu.flags, FLAG_ZERO) == 0; break;
+                    case 0x3: should = flag_get(cpu.flags, FLAG_NEGATIVE) != flag_get(cpu.flags, FLAG_OVERFLOW); break;
+                    case 0x4: should = flag_get(cpu.flags, FLAG_NEGATIVE) == flag_get(cpu.flags, FLAG_OVERFLOW); break;
+                    case 0x5: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
+                    case 0x6: should = flag_get(cpu.flags, FLAG_CARRY) == 1; break;
+                    case 0x7: should = flag_get(cpu.flags, FLAG_CARRY) == 1; break;
+                    case 0x8: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
+                    case 0x9: should = flag_get(cpu.flags, FLAG_NEGATIVE) == 1; break;
+                    case 0xA: should = flag_get(cpu.flags, FLAG_NEGATIVE) == 0; break;
+                    case 0xB: should = flag_get(cpu.flags, FLAG_OVERFLOW) == 1; break;
+                    case 0xC: should = flag_get(cpu.flags, FLAG_OVERFLOW) == 0; break;
+                    case 0xD: should = (flag_get(cpu.flags, FLAG_CARRY) == 1) && (flag_get(cpu.flags, FLAG_ZERO) == 0); break;
+                    case 0xE: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
+                    case 0xF: // TODO: cpu excpetions!
                 }
+                uint8_t absolute = (word >> 2) & 0x1;
+                if (absolute) {
+                    if (reg) {
+                        cpu.pc = cpu.regs[rm];
+                    } else {
+                        cpu.pc = imm;
+                    }
+                } else {
+                    if (reg) {
+                        cpu.pc = (int32_t)cpu.pc + (int32_t)cpu.regs[rm];
+                    } else {
+                        cpu.pc = (int32_t)cpu.pc + (int32_t)imm;
+                    }
+                }
+
                 break;
             }
 

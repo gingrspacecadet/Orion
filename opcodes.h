@@ -19,9 +19,9 @@
 #define OP_JXX  0x15
 #define OP_CALL 0x16
 #define OP_RET  0x17
-#define OP_IRET 0x18
-#define OP_PUSH 0x19
-#define OP_POP  0x1A
+#define OP_PUSH 0x18
+#define OP_POP  0x19
+// #define OP_reserved 0x1A
 // #define OP_reserved 0x1B
 // #define OP_reserved 0x1C
 // #define OP_reserved 0x1D

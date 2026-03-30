@@ -201,7 +201,6 @@ Opc opcodes[] = (Opc[]){
     {OP_JXX, "jls"},     {OP_JXX, "jlsa"},
     {OP_CALL, "call"},
     {OP_RET, "ret"},
-    {OP_IRET, "iret"},
     {OP_PUSH, "push"},
     {OP_POP, "pop"},
     {OP_INTE, "inte"},

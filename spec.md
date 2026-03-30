@@ -76,10 +76,9 @@ Instructions:
 |0x15  |JXX     |J   |Jumps to addr |
 |0x16  |CALL    |J   |Pushes PC and jumps to addr|
 |0x17  |RET     |J   |Pops PC       |
-|0x18  |IRET    |J   |Pops flags, then pops PC|
-|0x19  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
-|0x1A  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
-|0x1B-1F|reserved|||
+|0x18  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
+|0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
+|0x1A-1F|reserved|||
 |0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
 |0x21-3F|reserved|||
 
