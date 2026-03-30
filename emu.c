@@ -132,6 +132,7 @@ int main(int argc, char **argv) {
                     case 0xE: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
                     case 0xF: // TODO: cpu excpetions!
                 }
+                if (!should) break;
                 uint8_t absolute = (word >> 2) & 0x1;
                 if (absolute) {
                     if (reg) {
