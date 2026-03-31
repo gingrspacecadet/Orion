@@ -164,6 +164,6 @@ MMIO address - 0x0000_0200
 - 0x04 - ISR (In-Service Register): one bit per IRQ; set when the ICU has dispatched an IRQ to the CPU. Cleared by EOI
 - 0x08 - IMR (Interrupt Mask Register): one bit per IRQ; software can mask unwanted interrupts and they get dropped.
 - 0x0C - PRIO[n] (Priority table): 8-bit priority per irq. HIgher number = higher priority.
-- 0x10 - VEC[n] (vector table): 8-Bit IHVT vector per IRQ. ICU reads `VEC[irq]` and signals the CPU with that vector (valid range `0x20-0xFE`). if invalid range, ICU uses `DEFAULT` vector.
-- 0x20 - EOI (write only): write irq number to signal end-of-interrupt, clears `ISR[irq]`
-- 0x24 - DEFAULT: the vector used on invalid vector table entry.
+- 0x2C - VEC[n] (vector table): 8-Bit IHVT vector per IRQ. ICU reads `VEC[irq]` and signals the CPU with that vector (valid range `0x20-0xFE`). if invalid range, ICU uses `DEFAULT` vector.
+- 0x4C - EOI (write only): write irq number to signal end-of-interrupt, clears `ISR[irq]`
+- 0x50 - DEFAULT: the vector used on invalid vector table entry.
