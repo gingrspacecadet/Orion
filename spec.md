@@ -41,7 +41,7 @@ M-type: LDR, STR,
 
 A-types always update flags as they go through the ALU, which handles it.  
 
-J-type: opcode(6) cond(4) (rm(4) | imm(16)) reserved(3) absolute?(1) register?(1) extended?(1)  
+J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) extended?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
 M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
 F-type: opcode(6) enabled?(1) reserved(25)

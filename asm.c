@@ -235,6 +235,9 @@ uint32_t decode_lit(size_t pos, LabelVector labels, Token t) {
             else if (tolower(str[1]) == 'b') {
                 base = 2;
             }
+            else if (str[1] == '\0') {
+                base = 10;
+            }
             else {
                 fprintf(stderr, "Unknown base for lit %s\n", str);
                 exit(1);
@@ -315,7 +318,7 @@ void assemble(SourceFile src, FILE *out) {
             LabelVector_push(&labels, (Label){pos, t.data});
         }
         else if (t.type == TOKEN_OPC) {
-            pos++;
+            pos += 4;
         }
 
         t = next_token(&src);
@@ -358,8 +361,6 @@ void assemble(SourceFile src, FILE *out) {
             case OP_ADD:
             case OP_SUB:
             case OP_MOV: {
-                uint8_t rn = 0, rm = 0, reg = 0, ext = 0;
-                uint32_t imm;
                 t = expect(TOKEN_REG, &src, "Expected the target register, got %s", t.data);
                 rn = decode_reg(t);
                 t = expect(TOKEN_COMMA, &src, "Expected a comma, got %s", t.data);
@@ -369,7 +370,7 @@ void assemble(SourceFile src, FILE *out) {
                     rm = decode_reg(t);
                 }
                 else if (t.type == TOKEN_NUM || t.type == TOKEN_REF) {
-                    imm = decode_lit(pos - 1, labels, t);
+                    imm = decode_lit(pos, labels, t);
                 }
                 else {
                     fprintf(stderr, "Expected an argument register, number, or reference, got %s\n", t.data);
@@ -390,6 +391,10 @@ void assemble(SourceFile src, FILE *out) {
                     exit(1);
                 }
 
+                if (imm > UINT16_MAX || (int32_t)imm < 0) {
+                    ext = 1;
+                }
+
                 constructed = 
                     (opc.opcode & 0x3F) << 26 |
                     (rn & 0xF) << 22 |
@@ -405,12 +410,16 @@ void assemble(SourceFile src, FILE *out) {
             case OP_JXX: {
                 t = next_token(&src);
                 if (t.type == TOKEN_REF || t.type == TOKEN_NUM) {
-                    imm = decode_lit(pos - 1, labels, t);
+                    imm = decode_lit(pos, labels, t);
                 } else if (t.type == TOKEN_REG) {
                     rm = decode_reg(t);
                 } else {
                     fprintf(stderr, "Expected an argument register, number, or reference, got %s\n", t.data);
                     exit(1);
+                }
+
+                if (imm > UINT16_MAX || (int32_t)imm < 0) {
+                    ext = 1;
                 }
 
                 uint8_t cond = 0;
@@ -445,9 +454,10 @@ void assemble(SourceFile src, FILE *out) {
                 constructed = 
                     (opc.opcode & 0x3F) << 26 |
                     (cond & 0xF) << 22 |
-                    (rm & 0xF) << 18 |
-                    (imm & 0xFFFF) << 6 |
-                    (absolute & 0x1) << 2 |
+                    (absolute & 0x1) << 21 |
+                    // reserved << 18 |
+                    (rm & 0xF) << 14 |
+                    (imm & 0xFFFF) << 2 |
                     (reg & 0x1) << 1 |
                     (ext & 0x1);
 
@@ -460,11 +470,14 @@ void assemble(SourceFile src, FILE *out) {
             }
         }
 
-        fwrite(&constructed, 4, 1, out);
+        fwrite(&constructed, sizeof(uint32_t), 1, out);
 
-        if (ext) fwrite(&imm, 4, 1, out);
+        if (ext) {
+            fwrite(&imm, sizeof(uint32_t), 1, out);
+            pos += 4;
+        }
 
-        pos++;
+        pos += 4;
     }
 }
 

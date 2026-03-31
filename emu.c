@@ -48,7 +48,7 @@ uint32_tVector open_file(char *path) {
 #define FLAG_INT_ENABLED    4
 
 typedef struct {
-    uint32_t pc;
+    uint8_t pc;
     uint32_t regs[16];
     uint8_t flags;
 } Cpu;
@@ -75,7 +75,8 @@ int main(int argc, char **argv) {
     Cpu cpu = {0};
 
     while (cpu.pc < boot.cap) {
-        uint32_t word = uint32_tVector_lookup(&boot, cpu.pc);
+        uint32_t word = uint32_tVector_lookup(&boot, cpu.pc / 4);
+
         uint8_t opcode = (word >> 26) & 0x3F;
 
         uint8_t rn = (word >> 22) & 0xF;
@@ -88,7 +89,7 @@ int main(int argc, char **argv) {
         uint32_t imm = 0;
         if (!reg) {
             if (ext) {
-                imm = uint32_tVector_lookup(&boot, ++cpu.pc);
+                imm = uint32_tVector_lookup(&boot, (cpu.pc + 4) / 4);
             } else {
                 imm = (word >> 2) & 0xFFFF;
             }
@@ -133,31 +134,37 @@ int main(int argc, char **argv) {
                     case 0xF: // TODO: cpu excpetions!
                 }
                 if (!should) break;
-                uint8_t absolute = (word >> 2) & 0x1;
+                uint8_t absolute = (word >> 21) & 0x1;
+                uint32_t target = 0;
                 if (absolute) {
                     if (reg) {
-                        cpu.pc = cpu.regs[rm];
+                        target = cpu.regs[rm];
                     } else {
-                        cpu.pc = imm;
+                        target = imm;
                     }
                 } else {
                     if (reg) {
-                        cpu.pc = (int32_t)cpu.pc + (int32_t)cpu.regs[rm];
+                        target = (int32_t)cpu.pc + (int32_t)cpu.regs[rm];
                     } else {
-                        cpu.pc = (int32_t)cpu.pc + (int32_t)imm;
+                        target = (int32_t)cpu.pc + (int32_t)imm;
                     }
                 }
+
+                printf("0x%X 0x%X 0x%X\n", absolute, reg, target);
+
+                cpu.pc = target;
 
                 break;
             }
 
             default: {
-                fprintf(stderr, "Invalid opcode %d\n", opcode);
+                fprintf(stderr, "Invalid opcode 0x%X\n", opcode);
                 exit(1);    // TODO: interrupts!!
             }
         }
 
-        cpu.pc++;
+        cpu.pc += sizeof(uint32_t);
+        if (ext) cpu.pc += sizeof(uint32_t);
     }
 
     print_regs(&cpu);
