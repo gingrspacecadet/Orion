@@ -80,6 +80,7 @@ Instructions:
 |0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
 |0x1A-1F|reserved|||
 |0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
+|0x21  |FLAGS   |R   |Copies the flag register to `rd`|
 |0x21-3F|reserved|||
 
 J-type conditions:
@@ -99,8 +100,8 @@ assemblers should prefer using these mnemonics, and encode `cond` accordingly
 |0xA|JP|`N == 0`|
 |0xB|JVS|`V == 1`|
 |0xC|JVC|`V == 0`|
-|0xD|JHI|`(C == 1) && (Z == 0)`|
-|0xE|JLS|`C == 0`|
+|0xD|JLS|`C == 0`|
+|0xE|reserved||
 |0xF|reserved||
 
 
@@ -128,6 +129,7 @@ Exact opcode spec table
 |PUSH|            |         |On single-register, decrements by 4. On bitmask, decrements by 4 for every set bit|Pushing SP|
 |POP |            |         |On single-register, increments by 4. On bitmask, increments by 4 for every set bit|Popping SP|
 |INTE|IE          |         |         |Any `reserved` bits set|
+|FLAGS|           |         |         |           |
 
 CPU Exceptions:
 |Name|Number|Description|

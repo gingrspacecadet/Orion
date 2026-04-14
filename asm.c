@@ -197,7 +197,6 @@ Opc opcodes[] = (Opc[]){
     {OP_JXX, "jp"},      {OP_JXX, "jpa"},
     {OP_JXX, "jvs"},     {OP_JXX, "jvsa"},
     {OP_JXX, "jvc"},     {OP_JXX, "jvca"},
-    {OP_JXX, "jhi"},     {OP_JXX, "jhia"},
     {OP_JXX, "jls"},     {OP_JXX, "jlsa"},
     {OP_CALL, "call"},
     {OP_RET, "ret"},
@@ -443,8 +442,7 @@ void assemble(SourceFile src, FILE *out) {
                 else if (strcasecmp(mnem, "p") == 0) cond = 0xA;
                 else if (strcasecmp(mnem, "vs") == 0) cond = 0xB;
                 else if (strcasecmp(mnem, "vc") == 0) cond = 0xC;
-                else if (strcasecmp(mnem, "hi") == 0) cond = 0xD;
-                else if (strcasecmp(mnem, "ls") == 0) cond = 0xE;
+                else if (strcasecmp(mnem, "ls") == 0) cond = 0xD;
                 // else if (strcmp(mnem, "reserved") == 0) cond = 0xF;
                 else {
                     fprintf(stderr, "Unknown opcode %s\n", opc.opcode);
