@@ -1,7 +1,7 @@
 # Orion design spec
 
 registers  
-R0..R15 general-purpose  
+R0..R14 general-purpose  
 R15 is SP  
 Private PC and flags registers  
 
@@ -18,7 +18,7 @@ the Flags register - a private register containing all the status flags of the c
 |3|Negative (N)|Set when the last alu operation's result's MSB was set|
 |4|Interrupts Enabled(IE)|Set manually using the `INTE` instruction. When false, external interrupts are ignored|
 
-fixed 32-bit instructions, with optional extended immediates for funsies  
+fixed 32-bit instructions.
 
 little endian  
 
@@ -30,10 +30,6 @@ Stack - SP points to next free section of memory. Stack grows downwards.
 
 Memory access - memory is byte-addressable, and the ISA provides methods for both bytes and words.
 
-fancy immediates!  
-if enabled by the extended flag in the instruction, the next word is treated as the immediate, allowing for true 32-bit immediates!  
-if the bit is set, the program counter will be incremented by a further word by the decoder.
-
 encoding types  
 J-type: JMP, JE, JGE, CALL, etc  
 A-type: ADD, SUB, SHL etc  
@@ -41,9 +37,9 @@ M-type: LDR, STR,
 
 A-types always update flags as they go through the ALU, which handles it.  
 
-J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) extended?(1)  
-A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
-M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) extended?(1)  
+J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) signed?(1)  
+A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) signed?(1)  
+M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) signed?(1)  
 F-type: opcode(6) enabled?(1) reserved(25)
 
 J-type decoding:  
@@ -68,20 +64,21 @@ Instructions:
 |0x7   |OR      |A   |bitwise or    |
 |0x8   |NOT     |A   |bitwise not   |
 |0x9   |XOR     |A   |bitwise xor   |
-|0x10  |MOV     |A   |sets a register directly|
-|0x11  |LDR     |M   |Load a word   |
-|0x12  |STR     |M   |Store a word  |
-|0x13  |LDRB    |M   |Load a byte   |
-|0x14  |STRB    |M   |Store a byte  |
-|0x15  |JXX     |J   |Jumps to addr |
-|0x16  |CALL    |J   |Pushes PC and jumps to addr|
-|0x17  |RET     |J   |Pops PC       |
-|0x18  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
-|0x19  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
-|0x1A-1F|reserved|||
+|0xA   |reserved|||
+|0xB   |LDR     |M   |Load a word   |
+|0xC   |STR     |M   |Store a word  |
+|0xD   |LDRB    |M   |Load a byte   |
+|0xE   |STRB    |M   |Store a byte  |
+|0xF   |JXX     |J   |Jumps to addr |
+|0x10  |CALL    |J   |Pushes PC and jumps to addr|
+|0x11  |RET     |J   |Pops PC       |
+|0x12  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
+|0x13  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
+|0x14-1F|reserved|||
 |0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
 |0x21  |FLAGS   |R   |Copies the flag register to `rd`|
-|0x21-3F|reserved|||
+|0x22  |HALT    |x   |Pauses the cpu until an interrupt fires|
+|0x23-3F|reserved|||
 
 J-type conditions:
 assemblers should prefer using these mnemonics, and encode `cond` accordingly  
@@ -169,3 +166,28 @@ MMIO address - 0x0000_0200
 - 0x2C - VEC[n] (vector table): 8-Bit IHVT vector per IRQ. ICU reads `VEC[irq]` and signals the CPU with that vector (valid range `0x20-0xFE`). if invalid range, ICU uses `DEFAULT` vector.
 - 0x4C - EOI (write only): write irq number to signal end-of-interrupt, clears `ISR[irq]`
 - 0x50 - DEFAULT: the vector used on invalid vector table entry.
+
+System/ABI
+
+Calling convention
+
+Argument registers: R0-R3
+Return register: R0
+Callee-saved: R4-R11
+Caller-saved/temporaries: R12-R14
+
+Stack conventions and frame layout
+
+Stack grows down. SP points to next free byte
+Stack alignment: 8-byte alignment at call boundaries (SP % 8 == 0). All stack allocs must preserve this
+Caller responsibilities: place additional args (beyond four) on stack (pushed right-to-left), align stack before `CALL`. Caller cleans up stack after return (cdecl style)
+Function prologue:
+   `PUSH R4..Rn` for callee-saved used
+   `SUB SP, SP, <localsize>` (localsize rounded to 8)
+Epilogue: restore callee-saved, `RET` (which pops PC)
+<!-- TODO: variadic functions (maybe) -->
+
+Exception/Interrupt stack frames
+
+Internal exception entry (vec < 0x20): push Flags, PC, error code, offending instruction, then `PC = IHVT[vec]`
+External interrupt (vec >= 0x20): if `IE==1` or `vec=0xFF`: clear IE, push Flags, push PC, then `PC = IHVT[vec]`.

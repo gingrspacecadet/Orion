@@ -1,173 +1,297 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-#include "vector.h"
-#include "opcodes.h"
-
-VECTOR_DECLARE(uint32_t);
-
-uint32_tVector open_file(char *path) {
-    if (!path) exit(1);
-
-    FILE *fptr = fopen(path, "r");
-    if (!fptr) {
-        fprintf(stderr, "Failed to open file %s\n", path);
-        exit(1);
-    }
-    fseek(fptr, 0, SEEK_END);
-    size_t flen = ftell(fptr);
-    fseek(fptr, 0, SEEK_SET);
-    char *fbuf = malloc(flen);
-    if (!fbuf) {
-        fprintf(stderr, "Failed to allocate file buffer\n");
-        exit(1);
-    }
-    if (fread(fbuf, 1, flen, fptr) != flen) {
-        fprintf(stderr, "Failed to read file %s\n", path);
-        exit(1);
-    }
-    fclose(fptr);
-
-    uint32_tVector s = uint32_tVector_init();
-    uint32_tVector_resize(&s, flen);
-    memcpy(s.data, fbuf, flen);
-    s.cap = (flen / 4) + (flen % 4 != 0);
-    s.idx = 0;
-
-    return s;
-}
-
-#define flag_set(flags, flag) ((flags) |= (1 << (flag)))
-#define flag_clear(flags, flag) ((flags) &= ~(1 << (flag)))
-#define flag_get(flags, flag) (((flags) >> flag) & 0x1)
-
-#define FLAG_CARRY          0
-#define FLAG_OVERFLOW       1
-#define FLAG_ZERO           2
-#define FLAG_NEGATIVE       3
-#define FLAG_INT_ENABLED    4
+#include "gin.h"
 
 typedef struct {
-    uint8_t pc;
-    uint32_t regs[16];
-    uint8_t flags;
+    uint8_t *data;
+    size_t size;
+    bool readonly;
+} Memory;
+
+typedef uint32_t Register;
+
+typedef struct {
+    Memory *ram;
+    Memory *rom;
+
+    Register registers[16];
+    Register pc;
+    Register flags;
 } Cpu;
 
-void print_regs(Cpu *cpu) {
-    for (int i = 0; i < 8; i++) {
-        printf("R%d 0x%08X\t", i, cpu->regs[i]);
+typedef enum Flag {
+    FLAG_C,
+    FLAG_V,
+    FLAG_Z,
+    FLAG_N,
+    FLAG_IE,
+    FLAG_RUNNING
+} Flag;
+
+void memory_init(Memory *mem, size_t size, bool readonly) {
+    mem->readonly = readonly;
+    mem->size = size;
+    mem->data = xcalloc(size);
+}
+
+Cpu *cpu_init(uint32_t pc) {
+    Cpu *cpu = xcalloc(sizeof(Cpu));
+    cpu->ram = xcalloc(sizeof(Memory));
+    cpu->rom = xcalloc(sizeof(Memory));
+
+    memory_init(cpu->ram, 0x1000, false);
+    memory_init(cpu->rom, 0x1000, true);
+
+    cpu->pc = pc;
+    cpu->registers[15] = cpu->ram->size;
+    return cpu;
+}
+
+// Instruction encoders for tests
+static uint32_t encode_a(uint32_t opcode, uint32_t rn, uint32_t rd, bool regmode, uint32_t rm_or_imm16, bool _signed) {
+    // A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) _signed?(1)
+    uint32_t instr = (opcode & 0x3F) << 26;
+    instr |= (rn & 0xF) << 22;
+    instr |= (rd & 0xF) << 18;
+    if (regmode) {
+        instr |= (rm_or_imm16 & 0xF) << 14;
+    } else {
+        instr |= (rm_or_imm16 & 0xFFFF);
     }
-    putc('\n', stdout);
-    for (int i = 8; i < 16; i++) {
-        printf("R%d 0x%08X\t", i, cpu->regs[i]);
+    instr |= (regmode ? 1u : 0u) << 1;
+    instr |= (_signed ? 1u : 0u);
+    return instr;
+}
+static uint32_t encode_j(uint32_t opcode, uint32_t cond, bool absolute, uint32_t rm_or_imm16, bool regmode, bool _signed) {
+    // J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) _signed?(1)
+    uint32_t instr = (opcode & 0x3F) << 26;
+    instr |= (cond & 0xF) << 22;
+    instr |= (absolute ? 1u : 0u) << 21;
+    // reserved 3 bits left as 0
+    if (regmode) instr |= (rm_or_imm16 & 0xF) << 14;
+    else instr |= (rm_or_imm16 & 0xFFFF);
+    instr |= (regmode ? 1u : 0u) << 1;
+    instr |= (_signed ? 1u : 0u);
+    return instr;
+}
+static uint32_t encode_m(uint32_t opcode, uint32_t rn, uint32_t rd, bool regmode, uint32_t rm_or_imm16, bool _signed) {
+    // M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) _signed?(1)
+    uint32_t instr = (opcode & 0x3F) << 26;
+    instr |= (rn & 0xF) << 22;
+    instr |= (rd & 0xF) << 18;
+    if (regmode) instr |= (rm_or_imm16 & 0xF) << 14;
+    else instr |= (rm_or_imm16 & 0xFFFF);
+    instr |= (regmode ? 1u : 0u) << 1;
+    instr |= (_signed ? 1u : 0u);
+    return instr;
+}
+
+typedef enum Exception {
+    EX_INVALID_MEM,
+    EX_MISALIGNED_PC,
+} Exception;
+
+static uint32_t load32(Memory *mem, uint32_t addr) {
+    if (addr + 4 > mem->size) {
+        // TODO: raise an exception
+        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
+        exit(EX_INVALID_MEM);
     }
-    putc('\n', stdout);
+    if (addr % 4 != 0) {
+        fprintf(stderr, "Misaligned memory access 0x%08X\n", addr);
+        exit(EX_INVALID_MEM);
+    }
+    return (uint32_t)mem->data[addr] | ((uint32_t)mem->data[addr+1] << 8) | ((uint32_t)mem->data[addr+2] << 16) | ((uint32_t)mem->data[addr+3] << 24);
+}
+
+static void store32(Memory *mem, uint32_t addr, uint32_t val) {
+    if (addr + 4 > mem->size) {
+        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
+        exit(EX_INVALID_MEM);
+    }
+    if (addr % 4 != 0) {
+        fprintf(stderr, "Misaligned memory access 0x%08X\n", addr);
+        exit(EX_INVALID_MEM);
+    }
+    mem->data[addr] = val & 0xFF;
+    mem->data[addr+1] = (val >> 8) & 0xFF;
+    mem->data[addr+2] = (val >> 16) & 0xFF;
+    mem->data[addr+3] = (val >> 24) & 0xFF;
+}
+
+static uint8_t load8(Memory *mem, uint32_t addr) {
+    if (addr >= mem->size) {
+        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
+        exit(EX_INVALID_MEM);
+    }
+    return mem->data[addr];
+}
+
+static void store8(Memory *mem, uint32_t addr, uint8_t val) {
+    if (addr >= mem->size) {
+        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
+        exit(EX_INVALID_MEM);
+    }
+    mem->data[addr] = val;
+}
+
+static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
+    if (v) cpu->flags |= (1u << flag);
+    else cpu->flags &= ~(1u << flag);
+}
+
+static inline bool get_flag(Cpu *cpu, Flag flag) {
+    return (cpu->flags >> flag) & 1u;
+}
+
+typedef enum Opcode {
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_DIV,
+    OP_SHL,
+    OP_SHR,
+    OP_AND,
+    OP_OR,
+    OP_NOT,
+    OP_XOR,
+    OP_LDR = 0xB,
+    OP_STR,
+    OP_LDRB,
+    OP_STRB,
+    OP_JXX,
+    OP_CALL,
+    OP_RET,
+    OP_PUSH,
+    OP_POP,
+    OP_INTE = 0x20,
+    OP_FLAGS,
+    OP_HALT,
+} Opcode;
+
+static void step(Cpu *cpu) {
+    if (!get_flag(cpu, FLAG_RUNNING)) return;
+    if (cpu->pc % 4 != 0) {
+        fprintf(stderr, "Misaligned PC\n");
+        exit(EX_MISALIGNED_PC);
+    }
+    uint32_t instr = load32(cpu->ram, cpu->pc); cpu->pc += 4;
+    uint32_t opcode = (instr >> 26) & 0x3F;
+
+    switch (opcode) {
+        case OP_ADD: {
+            uint32_t rn = (instr >> 22) & 0xF;
+            uint32_t rd = (instr >> 18) & 0xF;
+            bool regmode = ((instr >> 1) & 1);
+            bool _signed = instr & 1;
+            uint32_t operand = regmode ? ((instr >> 14) & 0xF) : (instr & 0xFFFF);
+            uint32_t op2 = regmode ? cpu->registers[operand] : operand;
+            uint64_t res = (uint64_t)cpu->registers[rn] + (uint64_t)op2;
+            cpu->registers[rd] = (uint32_t)res;
+            // update flags here
+            break;
+        }
+        
+        case OP_SUB: {
+            uint32_t rn = (instr >> 22) & 0xF;
+            uint32_t rd = (instr >> 18) & 0xF;
+            bool regmode = ((instr >> 1) & 1);
+            uint32_t operand = regmode ? ((instr >> 14) & 0xF) : (instr & 0xFFFF);
+            uint32_t op2 = regmode ? cpu->registers[operand] : operand;
+            uint64_t res = (uint64_t)cpu->registers[rn] - (uint64_t)op2;
+            cpu->registers[rd] = (uint32_t)res;
+            // update flags
+            break;
+        }
+        
+        case OP_PUSH: {
+            bool regmode = ((instr >> 1) & 1);
+            if (regmode) {
+                uint32_t rm = (instr >> 14) & 0xF;
+                if (cpu->registers[15] < 4) {
+                    fprintf(stderr, "STACK OVERFLOW!!\n");
+                    exit(1);
+                }
+                cpu->registers[15] -= 4;
+                store32(cpu->ram, cpu->registers[15], cpu->registers[rm]);
+            } else {
+                uint32_t mask = instr & 0xFFFF;
+                for (int r = 0; r < 16; r++) {
+                    if (mask & (1u << r)) {
+                        if (cpu->registers[15] < 4) {
+                            fprintf(stderr, "STACK OVERFLOW!!\n");
+                            exit(1);
+                        }
+                        cpu->registers[15] -= 4;
+                        store32(cpu->ram, cpu->registers[15], cpu->registers[r]);
+                    }
+                }
+            }
+            break;
+        }
+
+        case OP_POP: {
+            bool regmode = ((instr >> 1) & 1);
+            if (regmode) {
+                uint32_t rm = (instr >> 14) & 0xF;
+                if (cpu->registers[15] + 4 > cpu->ram->size) {
+                    fprintf(stderr, "stack underflow!!\n");
+                    exit(1);
+                }
+                cpu->registers[rm] = load32(cpu->ram, cpu->registers[15]);
+                cpu->registers[15] += 4;
+            } else {
+                uint32_t mask = instr & 0xFFFF;
+                for (int r = 15; r >= 0; r--) {
+                    if (mask & (1u << r)) {
+                        if (cpu->registers[15] + 4 > cpu->ram->size) {
+                            fprintf(stderr, "stack underflow!!\n");
+                            exit(1);
+                        }
+                        cpu->registers[r] = load32(cpu->ram, cpu->registers[15]);
+                        cpu->registers[15] += 4;
+                    }
+                }
+            }
+            break;
+        }
+
+        case OP_FLAGS: {
+            uint32_t rd = (instr >> 18) & 0xF;
+            cpu->registers[rd] = cpu->flags;
+            break;
+        }
+
+        case OP_HALT: {
+            set_flag(cpu, FLAG_RUNNING, false);
+            break;
+        }
+
+        default: {
+            fprintf(stderr, "Invalid opcode %d\n", opcode);
+            exit(1);
+        }
+    }
+}
+
+static void run(Cpu *cpu) {
+    set_flag(cpu, FLAG_RUNNING, true);
+    while (get_flag(cpu, FLAG_RUNNING)) {
+        step(cpu);
+    }
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Missing target boot image\n");
-        exit(1);
-    }
+    Cpu *cpu = cpu_init(0x0);
 
-    uint32_tVector boot = open_file(argv[1]);
+    uint32_t p = 0;
+    store32(cpu->ram, p, encode_a(OP_ADD, 0, 1, false, 5, false)); p += 4;
+    store32(cpu->ram, p, encode_a(OP_ADD, 0, 2, false, 7, false)); p += 4;
+    store32(cpu->ram, p, encode_a(OP_ADD, 1, 3, true, 2, false)); p += 4;
+    store32(cpu->ram, p, encode_m(OP_PUSH, 0, 0, true, 3, false)); p += 4;
+    store32(cpu->ram, p, encode_m(OP_POP, 0, 0, true, 4, false)); p += 4;
+    store32(cpu->ram, p, encode_a(OP_FLAGS, 0, 5, false, 0, false)); p += 4;
+    store32(cpu->ram, p, encode_a(OP_HALT, 0, 0, 0, 0, 0));
 
-    Cpu cpu = {0};
-
-    while (cpu.pc < boot.cap) {
-        uint32_t word = uint32_tVector_lookup(&boot, cpu.pc / 4);
-
-        uint8_t opcode = (word >> 26) & 0x3F;
-
-        uint8_t rn = (word >> 22) & 0xF;
-        uint8_t rd = (word >> 18) & 0xF;
-        uint8_t rm = (word >> 14) & 0xF;
-
-        uint8_t reg = (word >> 1) & 0x1;
-        uint8_t ext = word & 0x1;
-
-        uint32_t imm = 0;
-        if (!reg) {
-            if (ext) {
-                imm = uint32_tVector_lookup(&boot, (cpu.pc + 4) / 4);
-            } else {
-                imm = (word >> 2) & 0xFFFF;
-            }
-        }
-
-        switch (opcode) {
-            case OP_ADD: {
-                cpu.regs[rd] = cpu.regs[rn] + imm + (reg ? cpu.regs[rm] : 0);
-                break;
-            }
-            case OP_SUB: {
-                cpu.regs[rd] = cpu.regs[rn] - imm - (reg ? cpu.regs[rm] : 0);
-                break;
-            }
-            case OP_MOV: {
-                if (reg) {
-                    cpu.regs[rn] = cpu.regs[rm];
-                } else {
-                    cpu.regs[rn] = imm;
-                }
-                break;
-            }
-            case OP_JXX: {
-                uint8_t cond = (word >> 22) & 0xF;
-                uint8_t should = 0;
-                switch (cond) {
-                    case 0x0: should = 1; break;
-                    case 0x1: should = flag_get(cpu.flags, FLAG_ZERO) == 1; break;
-                    case 0x2: should = flag_get(cpu.flags, FLAG_ZERO) == 0; break;
-                    case 0x3: should = flag_get(cpu.flags, FLAG_NEGATIVE) != flag_get(cpu.flags, FLAG_OVERFLOW); break;
-                    case 0x4: should = flag_get(cpu.flags, FLAG_NEGATIVE) == flag_get(cpu.flags, FLAG_OVERFLOW); break;
-                    case 0x5: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
-                    case 0x6: should = flag_get(cpu.flags, FLAG_CARRY) == 1; break;
-                    case 0x7: should = flag_get(cpu.flags, FLAG_CARRY) == 1; break;
-                    case 0x8: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
-                    case 0x9: should = flag_get(cpu.flags, FLAG_NEGATIVE) == 1; break;
-                    case 0xA: should = flag_get(cpu.flags, FLAG_NEGATIVE) == 0; break;
-                    case 0xB: should = flag_get(cpu.flags, FLAG_OVERFLOW) == 1; break;
-                    case 0xC: should = flag_get(cpu.flags, FLAG_OVERFLOW) == 0; break;
-                    case 0xD: should = (flag_get(cpu.flags, FLAG_CARRY) == 1) && (flag_get(cpu.flags, FLAG_ZERO) == 0); break;
-                    case 0xE: should = flag_get(cpu.flags, FLAG_CARRY) == 0; break;
-                    case 0xF: // TODO: cpu excpetions!
-                }
-                if (!should) break;
-                uint8_t absolute = (word >> 21) & 0x1;
-                uint32_t target = 0;
-                if (absolute) {
-                    if (reg) {
-                        target = cpu.regs[rm];
-                    } else {
-                        target = imm;
-                    }
-                } else {
-                    if (reg) {
-                        target = (int32_t)cpu.pc + (int32_t)cpu.regs[rm];
-                    } else {
-                        target = (int32_t)cpu.pc + (int32_t)imm;
-                    }
-                }
-
-                printf("0x%X 0x%X 0x%X\n", absolute, reg, target);
-
-                cpu.pc = target;
-
-                break;
-            }
-
-            default: {
-                fprintf(stderr, "Invalid opcode 0x%X\n", opcode);
-                exit(1);    // TODO: interrupts!!
-            }
-        }
-
-        cpu.pc += sizeof(uint32_t);
-        if (ext) cpu.pc += sizeof(uint32_t);
-    }
-
-    print_regs(&cpu);
-
-    return 0;
+    for (int i = 0; i < 16; i++) printf("R%02d = 0x%08X\n", i, cpu->registers[i]);
+    
+    run(cpu);
 }
