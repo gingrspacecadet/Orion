@@ -62,23 +62,29 @@ Instructions:
 |0x5   |SHR     |A   |Right shift   |
 |0x6   |AND     |A   |bitwise and   |
 |0x7   |OR      |A   |bitwise or    |
-|0x8   |NOT     |A   |bitwise not   |
+|0x8   |NOT     |A   |bitwise not (idnores `rn`)|
 |0x9   |XOR     |A   |bitwise xor   |
-|0xA   |reserved|||
-|0xB   |LDR     |M   |Load a word   |
-|0xC   |STR     |M   |Store a word  |
-|0xD   |LDRB    |M   |Load a byte   |
-|0xE   |STRB    |M   |Store a byte  |
-|0xF   |JXX     |J   |Jumps to addr |
-|0x10  |CALL    |J   |Pushes PC and jumps to addr|
-|0x11  |RET     |J   |Pops PC       |
-|0x12  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
-|0x13  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
-|0x14-1F|reserved|||
+|0xA   |LUI     |A   |loads `rm`/`imm` into top 16 bits of `rd` (ignores `rn`)|
+|0xB   |CMP     |A   |Subtracts and discards result (`rd` is ignored)|
+|0xC   |LDR     |M   |Load a word   |
+|0xD   |STR     |M   |Store a word  |
+|0xE   |LDRB    |M   |Load a byte   |
+|0xF   |STRB    |M   |Store a byte  |
+|0x10   |JXX     |J   |Jumps to addr |
+|0x11  |CALL    |J   |Pushes PC and jumps to addr|
+|0x12  |RET     |J   |Pops PC       |
+|0x13  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
+|0x14  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
+|0x15-1F|reserved|||
 |0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
-|0x21  |FLAGS   |R   |Copies the flag register to `rd`|
+|0x21  |FLAGS   |below|Copies the flag register to `rd`|
 |0x22  |HALT    |x   |Pauses the cpu until an interrupt fires|
-|0x23-3F|reserved|||
+|0x23  |ICALL   |J   |Calls the specified interrupt number in either `rm` or `imm`|
+|0x24  |IRET    |J   |`POP`s `FLAGS` then `PC`|
+|0x25-3F|reserved|||
+
+`FLAGS` encoding:
+opcode(6) register(4) read/write(1) reserved(21)
 
 J-type conditions:
 assemblers should prefer using these mnemonics, and encode `cond` accordingly  
