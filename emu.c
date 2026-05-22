@@ -1,297 +1,165 @@
-#include "gin.h"
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
 
-typedef struct {
-    uint8_t *data;
-    size_t size;
-    bool readonly;
-} Memory;
+typedef enum {
+    OP_ADD = 0x00,
+    OP_SUB = 0x01,
+    OP_MUL = 0x02,
+    OP_DIV = 0x03,
+    OP_SHL = 0x04,
+    OP_SHR = 0x05,
+    OP_AND = 0x06,
+    OP_OR = 0x07,
+    OP_NOT = 0x08,
+    OP_XOR = 0x09,
+    OP_LUI = 0x0A,
+    OP_CMP = 0x0B,
+    OP_LDR = 0x0C,
+    OP_STR = 0x0D,
+    OP_LDRB = 0x0E,
+    OP_STRB = 0x0F,
+    OP_JXX = 0x10,
+    OP_CALL = 0x11,
+    OP_RET = 0x12,
+    OP_PUSH = 0x13,
+    OP_POP = 0x14,
 
-typedef uint32_t Register;
-
-typedef struct {
-    Memory *ram;
-    Memory *rom;
-
-    Register registers[16];
-    Register pc;
-    Register flags;
-} Cpu;
-
-typedef enum Flag {
-    FLAG_C,
-    FLAG_V,
-    FLAG_Z,
-    FLAG_N,
-    FLAG_IE,
-    FLAG_RUNNING
-} Flag;
-
-void memory_init(Memory *mem, size_t size, bool readonly) {
-    mem->readonly = readonly;
-    mem->size = size;
-    mem->data = xcalloc(size);
-}
-
-Cpu *cpu_init(uint32_t pc) {
-    Cpu *cpu = xcalloc(sizeof(Cpu));
-    cpu->ram = xcalloc(sizeof(Memory));
-    cpu->rom = xcalloc(sizeof(Memory));
-
-    memory_init(cpu->ram, 0x1000, false);
-    memory_init(cpu->rom, 0x1000, true);
-
-    cpu->pc = pc;
-    cpu->registers[15] = cpu->ram->size;
-    return cpu;
-}
-
-// Instruction encoders for tests
-static uint32_t encode_a(uint32_t opcode, uint32_t rn, uint32_t rd, bool regmode, uint32_t rm_or_imm16, bool _signed) {
-    // A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) _signed?(1)
-    uint32_t instr = (opcode & 0x3F) << 26;
-    instr |= (rn & 0xF) << 22;
-    instr |= (rd & 0xF) << 18;
-    if (regmode) {
-        instr |= (rm_or_imm16 & 0xF) << 14;
-    } else {
-        instr |= (rm_or_imm16 & 0xFFFF);
-    }
-    instr |= (regmode ? 1u : 0u) << 1;
-    instr |= (_signed ? 1u : 0u);
-    return instr;
-}
-static uint32_t encode_j(uint32_t opcode, uint32_t cond, bool absolute, uint32_t rm_or_imm16, bool regmode, bool _signed) {
-    // J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) _signed?(1)
-    uint32_t instr = (opcode & 0x3F) << 26;
-    instr |= (cond & 0xF) << 22;
-    instr |= (absolute ? 1u : 0u) << 21;
-    // reserved 3 bits left as 0
-    if (regmode) instr |= (rm_or_imm16 & 0xF) << 14;
-    else instr |= (rm_or_imm16 & 0xFFFF);
-    instr |= (regmode ? 1u : 0u) << 1;
-    instr |= (_signed ? 1u : 0u);
-    return instr;
-}
-static uint32_t encode_m(uint32_t opcode, uint32_t rn, uint32_t rd, bool regmode, uint32_t rm_or_imm16, bool _signed) {
-    // M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) _signed?(1)
-    uint32_t instr = (opcode & 0x3F) << 26;
-    instr |= (rn & 0xF) << 22;
-    instr |= (rd & 0xF) << 18;
-    if (regmode) instr |= (rm_or_imm16 & 0xF) << 14;
-    else instr |= (rm_or_imm16 & 0xFFFF);
-    instr |= (regmode ? 1u : 0u) << 1;
-    instr |= (_signed ? 1u : 0u);
-    return instr;
-}
-
-typedef enum Exception {
-    EX_INVALID_MEM,
-    EX_MISALIGNED_PC,
-} Exception;
-
-static uint32_t load32(Memory *mem, uint32_t addr) {
-    if (addr + 4 > mem->size) {
-        // TODO: raise an exception
-        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
-        exit(EX_INVALID_MEM);
-    }
-    if (addr % 4 != 0) {
-        fprintf(stderr, "Misaligned memory access 0x%08X\n", addr);
-        exit(EX_INVALID_MEM);
-    }
-    return (uint32_t)mem->data[addr] | ((uint32_t)mem->data[addr+1] << 8) | ((uint32_t)mem->data[addr+2] << 16) | ((uint32_t)mem->data[addr+3] << 24);
-}
-
-static void store32(Memory *mem, uint32_t addr, uint32_t val) {
-    if (addr + 4 > mem->size) {
-        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
-        exit(EX_INVALID_MEM);
-    }
-    if (addr % 4 != 0) {
-        fprintf(stderr, "Misaligned memory access 0x%08X\n", addr);
-        exit(EX_INVALID_MEM);
-    }
-    mem->data[addr] = val & 0xFF;
-    mem->data[addr+1] = (val >> 8) & 0xFF;
-    mem->data[addr+2] = (val >> 16) & 0xFF;
-    mem->data[addr+3] = (val >> 24) & 0xFF;
-}
-
-static uint8_t load8(Memory *mem, uint32_t addr) {
-    if (addr >= mem->size) {
-        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
-        exit(EX_INVALID_MEM);
-    }
-    return mem->data[addr];
-}
-
-static void store8(Memory *mem, uint32_t addr, uint8_t val) {
-    if (addr >= mem->size) {
-        fprintf(stderr, "Invalid memory access 0x%08X\n", addr);
-        exit(EX_INVALID_MEM);
-    }
-    mem->data[addr] = val;
-}
-
-static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
-    if (v) cpu->flags |= (1u << flag);
-    else cpu->flags &= ~(1u << flag);
-}
-
-static inline bool get_flag(Cpu *cpu, Flag flag) {
-    return (cpu->flags >> flag) & 1u;
-}
-
-typedef enum Opcode {
-    OP_ADD,
-    OP_SUB,
-    OP_MUL,
-    OP_DIV,
-    OP_SHL,
-    OP_SHR,
-    OP_AND,
-    OP_OR,
-    OP_NOT,
-    OP_XOR,
-    OP_LDR = 0xB,
-    OP_STR,
-    OP_LDRB,
-    OP_STRB,
-    OP_JXX,
-    OP_CALL,
-    OP_RET,
-    OP_PUSH,
-    OP_POP,
     OP_INTE = 0x20,
-    OP_FLAGS,
-    OP_HALT,
+    OP_FLAGS = 0x21,
+    OP_HALT = 0x22,
+    OP_ICALL = 0x23,
+    OP_IRET = 0x24
 } Opcode;
 
-static void step(Cpu *cpu) {
-    if (!get_flag(cpu, FLAG_RUNNING)) return;
-    if (cpu->pc % 4 != 0) {
-        fprintf(stderr, "Misaligned PC\n");
-        exit(EX_MISALIGNED_PC);
+typedef enum {
+    COND_JMP  = 0x0,
+    COND_JEQ  = 0x1,
+    COND_JNE  = 0x2,
+    COND_JLT  = 0x3,
+    COND_JGE  = 0x4,
+    COND_JLTU = 0x5,
+    COND_JGEU = 0x6,
+    COND_JCS  = 0x7,
+    COND_JCC  = 0x8,
+    COND_JN   = 0x9,
+    COND_JP   = 0xA,
+    COND_JVS  = 0xB,
+    COND_JVC  = 0xC,
+    COND_JLS  = 0xD
+} Condition;
+
+typedef enum {
+    EXC_INVALID_INSTR = 0x00,
+    EXC_MISALIGNED_PC = 0x01,
+    EXC_INVALID_MEM   = 0x02,
+    EXC_STACK_FAULT   = 0x03,
+    EXC_NMI           = 0xFF
+} Exception;
+
+typedef struct {
+    uint8_t opcode;
+    uint8_t rn, rd, rm;
+    uint16_t imm;
+    uint8_t cond;
+    bool is_absolute, is_register, is_signed, is_write, is_enabled;
+} DecodedInstr;
+
+typedef struct {
+    uint32_t r[16];
+    uint32_t pc;
+    uint32_t flags;
+
+    bool is_running;
+    uint8_t *memory;
+} Cpu;
+
+DecodedInstr decode(uint32_t raw) {
+    DecodedInstr instr = {0};
+
+    instr.opcode = (raw >> 26) & 0x3F;
+
+    // these are literally always in the same place
+    instr.is_signed = (raw >> 0) & 0x01;
+    instr.is_register = (raw >> 1) & 0x01;
+
+    if (instr.is_register) {
+        instr.rm = (raw >> 14) & 0x0F;
+
+        uint16_t reserved_check = (raw >> 2) & 0x0FFF;
+        if (reserved_check) {
+            instr.opcode = 0xFF;
+        }
+    } else {
+        instr.imm = (raw >> 2) & 0xFFFF;
     }
-    uint32_t instr = load32(cpu->ram, cpu->pc); cpu->pc += 4;
-    uint32_t opcode = (instr >> 26) & 0x3F;
 
-    switch (opcode) {
-        case OP_ADD: {
-            uint32_t rn = (instr >> 22) & 0xF;
-            uint32_t rd = (instr >> 18) & 0xF;
-            bool regmode = ((instr >> 1) & 1);
-            bool _signed = instr & 1;
-            uint32_t operand = regmode ? ((instr >> 14) & 0xF) : (instr & 0xFFFF);
-            uint32_t op2 = regmode ? cpu->registers[operand] : operand;
-            uint64_t res = (uint64_t)cpu->registers[rn] + (uint64_t)op2;
-            cpu->registers[rd] = (uint32_t)res;
-            // update flags here
-            break;
-        }
+    if (instr.opcode <= OP_CMP || (instr.opcode >= OP_LDR && instr.opcode <= OP_POP)) {
+        instr.rn = (raw >> 22) & 0x0F;
+        instr.rd = (raw >> 18) & 0x0F;
         
-        case OP_SUB: {
-            uint32_t rn = (instr >> 22) & 0xF;
-            uint32_t rd = (instr >> 18) & 0xF;
-            bool regmode = ((instr >> 1) & 1);
-            uint32_t operand = regmode ? ((instr >> 14) & 0xF) : (instr & 0xFFFF);
-            uint32_t op2 = regmode ? cpu->registers[operand] : operand;
-            uint64_t res = (uint64_t)cpu->registers[rn] - (uint64_t)op2;
-            cpu->registers[rd] = (uint32_t)res;
-            // update flags
-            break;
-        }
+    } else if (instr.opcode == OP_JXX || instr.opcode == OP_CALL || instr.opcode == OP_RET) {
+        instr.cond = (raw >> 22) & 0x0F;
+        instr.is_absolute = (raw >> 21) & 0x01;
         
-        case OP_PUSH: {
-            bool regmode = ((instr >> 1) & 1);
-            if (regmode) {
-                uint32_t rm = (instr >> 14) & 0xF;
-                if (cpu->registers[15] < 4) {
-                    fprintf(stderr, "STACK OVERFLOW!!\n");
-                    exit(1);
-                }
-                cpu->registers[15] -= 4;
-                store32(cpu->ram, cpu->registers[15], cpu->registers[rm]);
-            } else {
-                uint32_t mask = instr & 0xFFFF;
-                for (int r = 0; r < 16; r++) {
-                    if (mask & (1u << r)) {
-                        if (cpu->registers[15] < 4) {
-                            fprintf(stderr, "STACK OVERFLOW!!\n");
-                            exit(1);
-                        }
-                        cpu->registers[15] -= 4;
-                        store32(cpu->ram, cpu->registers[15], cpu->registers[r]);
-                    }
-                }
-            }
-            break;
+        uint8_t j_reserved = (raw >> 18) & 0x07;
+        if (j_reserved != 0) instr.opcode = 0xFF;
+        
+    } else if (instr.opcode == OP_FLAGS) {
+        instr.is_write = (raw >> 0) & 0x01;
+        
+        if (!instr.is_write) {
+            instr.rd = (raw >> 22) & 0x0F;
         }
-
-        case OP_POP: {
-            bool regmode = ((instr >> 1) & 1);
-            if (regmode) {
-                uint32_t rm = (instr >> 14) & 0xF;
-                if (cpu->registers[15] + 4 > cpu->ram->size) {
-                    fprintf(stderr, "stack underflow!!\n");
-                    exit(1);
-                }
-                cpu->registers[rm] = load32(cpu->ram, cpu->registers[15]);
-                cpu->registers[15] += 4;
-            } else {
-                uint32_t mask = instr & 0xFFFF;
-                for (int r = 15; r >= 0; r--) {
-                    if (mask & (1u << r)) {
-                        if (cpu->registers[15] + 4 > cpu->ram->size) {
-                            fprintf(stderr, "stack underflow!!\n");
-                            exit(1);
-                        }
-                        cpu->registers[r] = load32(cpu->ram, cpu->registers[15]);
-                        cpu->registers[15] += 4;
-                    }
-                }
-            }
-            break;
-        }
-
-        case OP_FLAGS: {
-            uint32_t rd = (instr >> 18) & 0xF;
-            cpu->registers[rd] = cpu->flags;
-            break;
-        }
-
-        case OP_HALT: {
-            set_flag(cpu, FLAG_RUNNING, false);
-            break;
-        }
-
-        default: {
-            fprintf(stderr, "Invalid opcode %d\n", opcode);
-            exit(1);
-        }
+    } else if (instr.opcode == OP_INTE) {
+        instr.is_enabled = (raw >> 25) & 0x01;
     }
+
+    return instr;
 }
 
-static void run(Cpu *cpu) {
-    set_flag(cpu, FLAG_RUNNING, true);
-    while (get_flag(cpu, FLAG_RUNNING)) {
-        step(cpu);
+int main(void) {
+    Cpu cpu = {0};
+    cpu.memory = (uint8_t*)calloc(1, 0x1000);
+
+    cpu.is_running = true;
+
+    while (cpu.is_running) {
+        // TODO: interrupts
+
+        uint32_t raw = cpu.memory[cpu.pc]; cpu.pc += 4;
+        if (!cpu.is_running) break; // tmp
+
+        DecodedInstr instr = decode(raw);
+
+        uint32_t op2 = instr.is_register ? cpu.r[instr.rm] : instr.imm;
+
+        switch (instr.opcode) {
+            case OP_ADD: {
+                cpu.r[instr.rd] = cpu.r[instr.rn] + op2;
+                // TODO: flags
+                break;
+            }
+
+            case OP_SUB:
+            case OP_CMP: {
+                uint32_t result = cpu.r[instr.rn] - op2;
+                if (instr.opcode == OP_SUB) cpu.r[instr.rd] = result;
+                // flags
+                break;
+            }
+
+            case OP_LUI: {
+                cpu.r[instr.rd] = (op2 & 0xFFFF) << 16;
+                break;
+            }
+
+            default: {
+                printf("FAULT: unknown opcode %d\n", instr.opcode);
+                return 1;
+            }
+        }
     }
-}
-
-int main(int argc, char **argv) {
-    Cpu *cpu = cpu_init(0x0);
-
-    uint32_t p = 0;
-    store32(cpu->ram, p, encode_a(OP_ADD, 0, 1, false, 5, false)); p += 4;
-    store32(cpu->ram, p, encode_a(OP_ADD, 0, 2, false, 7, false)); p += 4;
-    store32(cpu->ram, p, encode_a(OP_ADD, 1, 3, true, 2, false)); p += 4;
-    store32(cpu->ram, p, encode_m(OP_PUSH, 0, 0, true, 3, false)); p += 4;
-    store32(cpu->ram, p, encode_m(OP_POP, 0, 0, true, 4, false)); p += 4;
-    store32(cpu->ram, p, encode_a(OP_FLAGS, 0, 5, false, 0, false)); p += 4;
-    store32(cpu->ram, p, encode_a(OP_HALT, 0, 0, 0, 0, 0));
-
-    for (int i = 0; i < 16; i++) printf("R%02d = 0x%08X\n", i, cpu->registers[i]);
-    
-    run(cpu);
 }

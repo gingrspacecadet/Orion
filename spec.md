@@ -34,13 +34,14 @@ encoding types
 J-type: JMP, JE, JGE, CALL, etc  
 A-type: ADD, SUB, SHL etc  
 M-type: LDR, STR,  
+S-type: FLAGS, INTE,  
 
 A-types always update flags as they go through the ALU, which handles it.  
 
 J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) signed?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) signed?(1)  
 M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) signed?(1)  
-F-type: opcode(6) enabled?(1) reserved(25)
+S-type: specified below per-isntruction
 
 J-type decoding:  
 If `absolute?` is set, treat rm or imm (depending on `register?`) as an absolute jump (`PC = addr`), else treat like relative (`PC += offset`)
@@ -75,16 +76,15 @@ Instructions:
 |0x12  |RET     |J   |Pops PC       |
 |0x13  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
 |0x14  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
-|0x15-1F|reserved|||
-|0x20  |INTE    |F   |Sets the `IE` flag to `enabled`|
-|0x21  |FLAGS   |below|Copies the flag register to `rd`|
+|0x15-20|reserved|||
+|0x21  |FLAGS   |S   |Reads `flags` to `rd` OR writes `rm`/`imm` to `flags`|
 |0x22  |HALT    |x   |Pauses the cpu until an interrupt fires|
 |0x23  |ICALL   |J   |Calls the specified interrupt number in either `rm` or `imm`|
 |0x24  |IRET    |J   |`POP`s `FLAGS` then `PC`|
 |0x25-3F|reserved|||
 
 `FLAGS` encoding:
-opcode(6) register(4) read/write(1) reserved(21)
+opcode(6) (rd(4) | (rm(4) | imm(16))) reserved(4) register?(1) read/write?(1)
 
 J-type conditions:
 assemblers should prefer using these mnemonics, and encode `cond` accordingly  
@@ -164,7 +164,7 @@ On internal interrupts (`vec < 0x20`):
 Interrupt Controller Unit (ICU):  
 
 Currently only supports 32 possible hardware interrupts  
-MMIO address - 0x0000_0200
+MMIO address - 0x0000_0500
 - 0x00 - IRR (Interrupt Request Register): one bit per IRQ; set by the hardware when a device asserts an interrupt.
 - 0x04 - ISR (In-Service Register): one bit per IRQ; set when the ICU has dispatched an IRQ to the CPU. Cleared by EOI
 - 0x08 - IMR (Interrupt Mask Register): one bit per IRQ; software can mask unwanted interrupts and they get dropped.
