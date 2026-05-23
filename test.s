@@ -1,2 +1,2 @@
 label:
-    mov r1, {r2}
+    add r1, r2, #0xFFFF

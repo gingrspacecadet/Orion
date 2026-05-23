@@ -1,165 +1,144 @@
-#include <stdint.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
-
-typedef enum {
-    OP_ADD = 0x00,
-    OP_SUB = 0x01,
-    OP_MUL = 0x02,
-    OP_DIV = 0x03,
-    OP_SHL = 0x04,
-    OP_SHR = 0x05,
-    OP_AND = 0x06,
-    OP_OR = 0x07,
-    OP_NOT = 0x08,
-    OP_XOR = 0x09,
-    OP_LUI = 0x0A,
-    OP_CMP = 0x0B,
-    OP_LDR = 0x0C,
-    OP_STR = 0x0D,
-    OP_LDRB = 0x0E,
-    OP_STRB = 0x0F,
-    OP_JXX = 0x10,
-    OP_CALL = 0x11,
-    OP_RET = 0x12,
-    OP_PUSH = 0x13,
-    OP_POP = 0x14,
-
-    OP_INTE = 0x20,
-    OP_FLAGS = 0x21,
-    OP_HALT = 0x22,
-    OP_ICALL = 0x23,
-    OP_IRET = 0x24
-} Opcode;
-
-typedef enum {
-    COND_JMP  = 0x0,
-    COND_JEQ  = 0x1,
-    COND_JNE  = 0x2,
-    COND_JLT  = 0x3,
-    COND_JGE  = 0x4,
-    COND_JLTU = 0x5,
-    COND_JGEU = 0x6,
-    COND_JCS  = 0x7,
-    COND_JCC  = 0x8,
-    COND_JN   = 0x9,
-    COND_JP   = 0xA,
-    COND_JVS  = 0xB,
-    COND_JVC  = 0xC,
-    COND_JLS  = 0xD
-} Condition;
-
-typedef enum {
-    EXC_INVALID_INSTR = 0x00,
-    EXC_MISALIGNED_PC = 0x01,
-    EXC_INVALID_MEM   = 0x02,
-    EXC_STACK_FAULT   = 0x03,
-    EXC_NMI           = 0xFF
-} Exception;
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <inttypes.h>
+#include "isa.h"
 
 typedef struct {
     uint8_t opcode;
-    uint8_t rn, rd, rm;
+    uint8_t rn;
+    uint8_t rd;
+    bool is_reg;
+    bool is_signed;
     uint16_t imm;
+    uint8_t rm;
+
+    // J-type
     uint8_t cond;
-    bool is_absolute, is_register, is_signed, is_write, is_enabled;
-} DecodedInstr;
+    bool is_absolute;
 
-typedef struct {
-    uint32_t r[16];
-    uint32_t pc;
-    uint32_t flags;
+    // FLAGS
+    bool is_write;
+} Instr;
 
-    bool is_running;
-    uint8_t *memory;
-} Cpu;
+static uint8_t *load_file(const char *path, size_t *out_len) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { perror("fopen"); exit(1); }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz < 0) { perror("ftell"); exit(1); }
+    uint8_t *buf = malloc((size_t)sz);
+    if (!buf) { perror("malloc"); exit(1); }
+    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) { perror("fread"); exit(1); }
+    fclose(f);
+    *out_len = (size_t)sz;
+    return buf;
+}
 
-DecodedInstr decode(uint32_t raw) {
-    DecodedInstr instr = {0};
+static int opcode_type(uint8_t opcode) {
+    switch (opcode) {
+        case OP_ADD:
+        case OP_SUB:
+        case OP_MUL:
+        case OP_DIV:
+        case OP_SHL:
+        case OP_SHR:
+        case OP_AND:
+        case OP_OR:
+        case OP_NOT:
+        case OP_XOR:
+        case OP_LUI:
+        case OP_CMP: return TYPE_A;
 
-    instr.opcode = (raw >> 26) & 0x3F;
+        case OP_LDR:
+        case OP_STR:
+        case OP_LDRB:
+        case OP_STRB:
+        case OP_PUSH:
+        case OP_POP: return TYPE_M;
 
-    // these are literally always in the same place
-    instr.is_signed = (raw >> 0) & 0x01;
-    instr.is_register = (raw >> 1) & 0x01;
+        case OP_JXX:
+        case OP_CALL:
+        case OP_RET:
+        case OP_ICALL:
+        case OP_IRET: return TYPE_J;
 
-    if (instr.is_register) {
-        instr.rm = (raw >> 14) & 0x0F;
+        case OP_FLAGS: return TYPE_S;
 
-        uint16_t reserved_check = (raw >> 2) & 0x0FFF;
-        if (reserved_check) {
-            instr.opcode = 0xFF;
-        }
+        default: return -1;
+    }
+}
+
+static Instr decode(uint32_t word) {
+    Instr instr = {0};
+    instr.opcode = (word >> 26) & 0x3F;
+    
+    // same with all opcodes
+    instr.is_reg = (word >> 1) & 0x1;
+    instr.is_signed = word & 0x1;
+
+    if (instr.is_reg) {
+        instr.rm = (word >> 2) & 0xF;
     } else {
-        instr.imm = (raw >> 2) & 0xFFFF;
+        instr.imm = (word >> 2) & 0xFFFF;
     }
 
-    if (instr.opcode <= OP_CMP || (instr.opcode >= OP_LDR && instr.opcode <= OP_POP)) {
-        instr.rn = (raw >> 22) & 0x0F;
-        instr.rd = (raw >> 18) & 0x0F;
-        
-    } else if (instr.opcode == OP_JXX || instr.opcode == OP_CALL || instr.opcode == OP_RET) {
-        instr.cond = (raw >> 22) & 0x0F;
-        instr.is_absolute = (raw >> 21) & 0x01;
-        
-        uint8_t j_reserved = (raw >> 18) & 0x07;
-        if (j_reserved != 0) instr.opcode = 0xFF;
-        
-    } else if (instr.opcode == OP_FLAGS) {
-        instr.is_write = (raw >> 0) & 0x01;
-        
-        if (!instr.is_write) {
-            instr.rd = (raw >> 22) & 0x0F;
+    switch (opcode_type(instr.opcode)) {
+        case TYPE_M:
+        case TYPE_A: {
+            instr.rn = (word >> 22) & 0xF;
+            instr.rd = (word >> 18) & 0xF;
+            break;
         }
-    } else if (instr.opcode == OP_INTE) {
-        instr.is_enabled = (raw >> 25) & 0x01;
+
+        case TYPE_J: {
+            instr.cond = (word >> 22) & 0xF;
+            instr.is_absolute = (word >> 21) & 0x1;
+            // TODO: raise exception if `reserved` non-zero
+            break;
+        }
+
+        case TYPE_S: {
+            instr.is_write = word & 0x1;
+            if (instr.is_write) {
+                if (instr.is_reg) {
+                    instr.rm = (word >> 22) & 0x3F;
+                } else {
+                    instr.imm = (word >> 20) & 0xFFFF;
+                }
+            } else {
+                instr.rd = (word >> 22) & 0x3F;
+            }
+        }
+
+        default: break;
     }
 
     return instr;
 }
 
-int main(void) {
-    Cpu cpu = {0};
-    cpu.memory = (uint8_t*)calloc(1, 0x1000);
+static uint32_t load_le32(const uint8_t b[4]) {
+    return ((uint32_t)b[0]) |
+           ((uint32_t)b[1] << 8) |
+           ((uint32_t)b[2] << 16) |
+           ((uint32_t)b[3] << 24);
+}
 
-    cpu.is_running = true;
-
-    while (cpu.is_running) {
-        // TODO: interrupts
-
-        uint32_t raw = cpu.memory[cpu.pc]; cpu.pc += 4;
-        if (!cpu.is_running) break; // tmp
-
-        DecodedInstr instr = decode(raw);
-
-        uint32_t op2 = instr.is_register ? cpu.r[instr.rm] : instr.imm;
-
-        switch (instr.opcode) {
-            case OP_ADD: {
-                cpu.r[instr.rd] = cpu.r[instr.rn] + op2;
-                // TODO: flags
-                break;
-            }
-
-            case OP_SUB:
-            case OP_CMP: {
-                uint32_t result = cpu.r[instr.rn] - op2;
-                if (instr.opcode == OP_SUB) cpu.r[instr.rd] = result;
-                // flags
-                break;
-            }
-
-            case OP_LUI: {
-                cpu.r[instr.rd] = (op2 & 0xFFFF) << 16;
-                break;
-            }
-
-            default: {
-                printf("FAULT: unknown opcode %d\n", instr.opcode);
-                return 1;
-            }
-        }
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s out.bin\n", argv[0]);
+        return 1;
     }
+
+    const char *path = argv[1];
+
+    size_t imglen;
+    uint8_t *img = load_file(path, &imglen);
+
+    Instr i = decode(load_le32(img));
+    printf("OPC=0x%02X\n", i.opcode);
+    printf("0x%02X R%d, R%d, R%d\n", i.opcode, i.rd, i.rn, i.imm);
 }

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "isa.h"
 
 #define MAX_SYM 4096
 #define MAX_LINE 512
@@ -590,14 +591,14 @@ static void pass2(FILE *f, FILE *out) {
                         if (idx >= opn) die("%s:%d: malformed register list, missing '}'", srcpath, lineno);
                         char *sep = ops[idx++];
                         if (strcmp(sep, ",") == 0) {
-                            write_u32_le(out, encode_a(0x09, rd, rd, 1, 0, rd));
-                            uint32_t w = encode_a(0x00, rs, rd, 0, 1, 0);
+                            write_u32_le(out, encode_a(OP_XOR, rd, rd, 1, 0, rd));
+                            uint32_t w = encode_a(OP_ADD, rs, rd, 0, 1, 0);
                             write_u32_le(out, w); pc += 4;
                             emitted++;
                             continue;
                         } else if (strcmp(sep, "}") == 0) {
-                            write_u32_le(out, encode_a(0x09, rd, rd, 1, 0, rd));
-                            uint32_t w = encode_a(0x00, rs, rd, 0, 1, 0);
+                            write_u32_le(out, encode_a(OP_XOR, rd, rd, 1, 0, rd));
+                            uint32_t w = encode_a(OP_ADD, rs, rd, 0, 1, 0);
                             write_u32_le(out, w); pc += 4;
                             emitted++;
                             break;
@@ -620,7 +621,7 @@ static void pass2(FILE *f, FILE *out) {
             if (is_reg_token(dst) && is_reg_token(src)) {
                 int rd = reg_index(dst);
                 int rs = reg_index(src);
-                uint32_t word = encode_a(0x00, rs, rd, 0, 1, 0);
+                uint32_t word = encode_a(OP_ADD, rs, rd, 0, 1, 0);
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
             }
@@ -646,11 +647,11 @@ static void pass2(FILE *f, FILE *out) {
                 }
 
                 int rd = reg_index(dst);
-                uint32_t w_xor = encode_a(0x09, rd, rd, 1, 0, rd);
+                uint32_t w_xor = encode_a(OP_XOR, rd, rd, 1, 0, rd);
                 write_u32_le(out, w_xor);
                 pc += 4;
                 if (mask != 0) {
-                    uint32_t w_add = encode_a(0x00, rd, rd, 0, 1, (int64_t)mask);
+                    uint32_t w_add = encode_a(OP_ADD, rd, rd, 0, 1, (int64_t)mask);
                     write_u32_le(out, w_add);
                     pc += 4;
                 }
@@ -667,16 +668,16 @@ static void pass2(FILE *f, FILE *out) {
                 uint32_t high = (uint32_t)((uint64_t)(val) >> 16) & 0xFFFFu;
                 uint32_t low = (uint32_t)(val & 0xFFFFu);
                 if (high != 0) {
-                    uint32_t w_lui = encode_a(0x0A, 0, rd, 0, 1, (int64_t)high);
+                    uint32_t w_lui = encode_a(OP_LUI, 0, rd, 0, 1, (int64_t)high);
                     write_u32_le(out, w_lui);
                     pc += 4;
                 } else {
-                    uint32_t w_xor = encode_a(0x09, rd, rd, 1, 0, rd);
+                    uint32_t w_xor = encode_a(OP_XOR, rd, rd, 1, 0, rd);
                     write_u32_le(out, w_xor);
                     pc += 4;
                 }
                 if (low != 0) {
-                    uint32_t w_add = encode_a(0x00, rd, rd, 0, 1, (int64_t)low);
+                    uint32_t w_add = encode_a(OP_ADD, rd, rd, 0, 1, (int64_t)low);
                     write_u32_le(out, w_add);
                     pc += 4;
                 }
@@ -716,7 +717,7 @@ static void pass2(FILE *f, FILE *out) {
                 }
 
                 int rd = reg_index(dst);
-                uint32_t word = encode_m(0x0C, rn, rd, is_reg_off, 1, off);
+                uint32_t word = encode_m(OP_LDR, rn, rd, is_reg_off, 1, off);
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
             }
@@ -748,7 +749,7 @@ static void pass2(FILE *f, FILE *out) {
                     off = sign * off;
                 }
                 int rs = reg_index(src);
-                uint32_t word = encode_m(0x0D, rn, rs, is_reg_off, 1, off);
+                uint32_t word = encode_m(OP_STR, rn, rs, is_reg_off, 1, off);
                 write_u32_le(out, word);
                 pc += 4;
                 free_toks(toks, tn); free(raw); continue;
@@ -872,15 +873,15 @@ static void pass2(FILE *f, FILE *out) {
                 if (strcasecmp(mnem, "NOT") == 0) {
                     if (!is_reg_token(first)) die("invalid RD '%s'", first);
                     int rd = reg_index(first);
-                    word = encode_a(0x08, 0, rd, is_reg, signed_flag, imm);
+                    word = encode_a(OP_NOT, 0, rd, is_reg, signed_flag, imm);
                 } else if (strcasecmp(mnem, "LUI") == 0) {
                     if (!is_reg_token(first)) die("invalid RD '%s'", first);
                     int rd = reg_index(first);
-                    word = encode_a(0x0A, 0, rd, is_reg, signed_flag, imm);
+                    word = encode_a(OP_LUI, 0, rd, is_reg, signed_flag, imm);
                 } else if (strcasecmp(mnem, "CMP") == 0) {
                     if (!is_reg_token(first)) die("invalid RN '%s'", first);
                     int rn = reg_index(first);
-                    word = encode_a(0x0B, rn, 0, is_reg, signed_flag, imm);
+                    word = encode_a(OP_CMP, rn, 0, is_reg, signed_flag, imm);
                 }
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
@@ -975,7 +976,7 @@ static void pass2(FILE *f, FILE *out) {
             if (!is_reg_token(rdtok)) die("invalid RD '%s'", rdtok);
             int rd = reg_index(rdtok);
             if (tn == 2) {
-                uint32_t word = encode_s(0x21, rd, 0, 0, 0);
+                uint32_t word = encode_s(OP_FLAGS, rd, 0, 0, 0);
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
             } else {
@@ -996,7 +997,7 @@ static void pass2(FILE *f, FILE *out) {
                 else {
                     if (!eval_expr(op, &imm)) die("invalid FLAGS operand '%s'", op);
                 }
-                uint32_t word = encode_s(0x21, rd, is_reg, 1, imm);
+                uint32_t word = encode_s(OP_FLAGS, rd, is_reg, 1, imm);
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
             }

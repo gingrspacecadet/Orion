@@ -84,7 +84,7 @@ Instructions:
 |0x25-3F|reserved|||
 
 `FLAGS` encoding:
-opcode(6) (rd(4) | (rm(4) | imm(16))) reserved(4) register?(1) read/write?(1)
+opcode(6) (rd(4) | (rm(4) | imm(16))) reserved(4) register?(1) write?(1)
 
 J-type conditions:
 assemblers should prefer using these mnemonics, and encode `cond` accordingly  
