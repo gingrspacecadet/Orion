@@ -125,11 +125,13 @@ static int lookup_cond(const char *mnem, int *cond) {
 static int is_reg_token(const char *t) {
     if (t[0] != 'R' && t[0] != 'r') return 0;
     char *end;
+    if (strncmp(t + 1, "sp", 2) == 0) return 1;
     long v = strtol(t + 1, &end, 10);
     return (*end == 0 && v >= 0 && v <= 15);
 }
 
 static int reg_index(const char *t) {
+    if (strncmp(t + 1, "sp", 2) == 0) return 15;
     return atoi(t + 1);
 }
 
@@ -145,37 +147,83 @@ static int parse_number(const char *s, int64_t *out) {
     return 1;
 }
 
+static int eval_expr(const char *expr, int64_t *out);
+
+static int parse_dollar(const char *s, int64_t *out) {
+    if(!s || s[0] != '$') return 0;
+    const char *p = s + 1;
+    const char *q = p;
+    while (*q && *q != '+' && *q != '-') q++;
+    if (*q == '+' || *q == '-') {
+        char left[256], right[256];
+        size_t L = q - p;
+        if (L >= sizeof(left)) return 0;
+        strncpy(left, p, L); left[L] = 0;
+        strcpy(right, q + 1);
+        trim(left); trim(right);
+        uint32_t addr;
+        if (!find_sym(left, &addr)) return 0;
+        int64_t b;
+        if (!parse_number(right, &b) && !eval_expr(right, &b)) return 0;
+        *out = (q[0] == '+') ? (int64_t)addr + b : (int64_t)addr - b;
+        return 1;
+    } else {
+        char name[256];
+        strncpy(name, p, sizeof(name) - 1); name[sizeof(name) - 1] = 0;
+        trim(name);
+        uint32_t addr;
+        if (!find_sym(name, &addr)) return 0;
+        *out = (int64_t)addr;
+        return 1;
+    }
+}
+
 static int eval_expr(const char *expr, int64_t *out) {
-    const char *p = trim((char*)expr);
+    if (!expr) return 0;
+    char tmp[256];
+    strncpy(tmp, expr, sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+    char *t = trim(tmp);
+
+    if (t[0] == '$') {
+        return parse_dollar(t, out);
+    }
+
+    const char *p = t;
     while (*p && *p != '+' && *p != '-') p++;
     if (*p != '+' && *p != '-') {
         int64_t v;
-        if (parse_number(expr, &v)) { *out = v; return 1; }
+        if (parse_number(t, &v)) { *out = v; return 1; }
         uint32_t addr;
-        if (find_sym(expr, &addr)) { *out = addr; return 1; }
+        if (find_sym(t, &addr)) { *out = addr; return 1; }
         return 0;
     }
 
     char op = *p;
     char left[256], right[256];
-    size_t L = p - expr;
-    strncpy(left, expr, L); left[L] = 0;
-    strcpy(right, p + 1);
+    size_t L = p - t;
+    if (L >= sizeof(left)) return 0;
+    strncpy(left, t, L); left[L]=0;
+    strcpy(right, p+1);
     trim(left); trim(right);
+
     int64_t a, b;
-    int a_is_num = parse_number(left, &a);
-    int b_is_num = parse_number(right, &b);
-    if (!a_is_num) {
+    if (left[0] == '$') {
+        if (!parse_dollar(left, &a)) return 0;
+    } else if (!parse_number(left, &a)) {
         uint32_t addr;
         if (!find_sym(left, &addr)) return 0;
         a = addr;
     }
-    if (!b_is_num) {
+
+    if (right[0] == '$') {
+        if (!parse_dollar(right, &b)) return 0;
+    } else if (!parse_number(right, &b)) {
         uint32_t addr;
         if (!find_sym(right, &addr)) return 0;
         b = addr;
     }
-    *out = (op == '+') ? (a +  b) : (a - b);
+
+    *out = (op == '+') ? (a + b) : (a - b);
     return 1;
 }
 
@@ -468,6 +516,246 @@ static void pass2(FILE *f, FILE *out) {
             write_u32_le(out, word);
             pc += 4; free_toks(toks, tn); free(raw); continue;
         }
+        if (strcasecmp(mnem, "MOV") == 0) { // superpowerful pseudoinstruction
+            char *ops[MAX_TOKS]; int opn = 0;
+            int i = 1;
+            while (i < tn && opn < MAX_TOKS) {
+                if (strcmp(toks[i], ",") == 0) { i++; continue; }
+
+                if (strcmp(toks[i], "[") == 0 || toks[i][0] == '[') {
+                    char buf[256]; size_t pos = 0;
+                    int depth = 0;
+                    while (i < tn && pos + 1 < sizeof(buf)) {
+                        char tmp[128];
+                        strncpy(tmp, toks[i], sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+                        char *t = tmp;
+                        for (char *p = t; *p; ++p) if (*p == '[') depth++;
+                        for (char *p = t; *p; ++p) if (*p == ']') depth--;
+                        if (pos) buf[pos++] = ' ';
+                        size_t L = strlen(t);
+                        if (pos + L >= sizeof(buf)) die("%s:%d: operand too long", srcpath, lineno);
+                        memcpy(buf + pos, t, L); pos += L;
+                        i++;
+                        if (depth <= 0) break;
+                    }
+                    buf[pos] = 0;
+                    char *s = trim(buf);
+                    ops[opn++] = strdup(s);
+                    continue;
+                }
+
+                if (strcmp(toks[i], "{") == 0 || toks[i][0] == '{') {
+                    char buf[256]; size_t pos = 0;
+                    int depth = 0;
+                    while (i < tn && pos + 1 < sizeof(buf)) {
+                        char tmp[128];
+                        strncpy(tmp, toks[i], sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+                        char *t = tmp;
+                        for (char *p = t; *p; ++p) if (*p == '{') depth++;
+                        for (char *p = t; *p; ++p) if (*p == '}') depth--;
+                        if (pos) buf[pos++] = ' ';
+                        size_t L = strlen(t);
+                        if (pos + L >= sizeof(buf)) die("%s:%d: operand too long", srcpath, lineno);
+                        memcpy(buf + pos, t, L); pos += L;
+                        i++;
+                        if (depth <= 0) break;
+                    }
+                    buf[pos] = 0;
+                    char *s = trim(buf);
+                    ops[opn++] = strdup(s);
+                    continue;
+                }
+
+                ops[opn++] = strdup(trim(toks[i]));
+                i++;
+            }
+
+            char *dst = trim(ops[0]);
+            char *src = trim(ops[1]);
+
+            if (dst[0] == '{' || strcmp(ops[0], "{") == 0) {
+                if (!is_reg_token(src)) die("%s:%d: MOV source must be a register for MOV {..}, Rs", srcpath, lineno);
+
+                int rs = reg_index(src);
+
+                if (strcmp(ops[0], "{") == 0) {
+                    int idx = 1;
+                    int emitted = 0;
+                    if (idx >= opn) die("%s:%d: empty register list in MOV", srcpath, lineno);
+                    while (idx < opn) {
+                        char *regtok = ops[idx++];
+                        if (strcmp(regtok, "}") == 0) break;
+                        if (!is_reg_token(regtok)) die("%s:%d: expected register in list, got '%s'", srcpath, lineno, regtok);
+                        int rd = reg_index(regtok);
+                        if (idx >= opn) die("%s:%d: malformed register list, missing '}'", srcpath, lineno);
+                        char *sep = ops[idx++];
+                        if (strcmp(sep, ",") == 0) {
+                            write_u32_le(out, encode_a(0x09, rd, rd, 1, 0, rd));
+                            uint32_t w = encode_a(0x00, rs, rd, 0, 1, 0);
+                            write_u32_le(out, w); pc += 4;
+                            emitted++;
+                            continue;
+                        } else if (strcmp(sep, "}") == 0) {
+                            write_u32_le(out, encode_a(0x09, rd, rd, 1, 0, rd));
+                            uint32_t w = encode_a(0x00, rs, rd, 0, 1, 0);
+                            write_u32_le(out, w); pc += 4;
+                            emitted++;
+                            break;
+                        } else {
+                            die("%s:%d: expected ',' between registers in list, got '%s'", srcpath, lineno, sep);
+                        }
+                    }
+                    if (emitted == 0) die("%s:%d: empty register list in MOV", srcpath, lineno);
+                    free_toks(toks, tn);
+                    for (int k = 0; k < opn; ++k) free(ops[k]);
+                    free(raw);
+                    continue;
+                }
+
+                // If we reach here, the brace form wasn't recognized
+                for (int k = 0; k < opn; ++k) free(ops[k]);
+                // fall through to other MOV handling
+            }
+
+            if (is_reg_token(dst) && is_reg_token(src)) {
+                int rd = reg_index(dst);
+                int rs = reg_index(src);
+                uint32_t word = encode_a(0x00, rs, rd, 0, 1, 0);
+                write_u32_le(out, word);
+                pc += 4; free_toks(toks, tn); free(raw); continue;
+            }
+
+            if (is_reg_token(dst) && src[0] == '{') {
+                char inner[256];
+                size_t L = strlen(src);
+                if (L < 2 || src[L-1] != '}') die("%s:%d: malformed register list '%s'", srcpath, lineno, src);
+                strncpy(inner, src + 1, L - 2);
+                inner[L - 2] = 0;
+                char *p = trim(inner);
+                if (p[0] == 0) die("%s:%d: empty register list in MOV", srcpath, lineno);
+
+                uint32_t mask = 0;
+                char *tok = strtok(p, ",");
+                while (tok) {
+                    char *r = trim(tok);
+                    if (!is_reg_token(r)) die("%s:%d: expected register in list, got '%s'", srcpath, lineno, r);
+                    int ri = reg_index(r);
+                    if (ri < 0 || ri > 15) die("%s:%d: register out of range in list '%s'", srcpath, lineno, r);
+                    mask |= (1u << ri);
+                    tok = strtok(NULL, ",");
+                }
+
+                int rd = reg_index(dst);
+                uint32_t w_xor = encode_a(0x09, rd, rd, 1, 0, rd);
+                write_u32_le(out, w_xor);
+                pc += 4;
+                if (mask != 0) {
+                    uint32_t w_add = encode_a(0x00, rd, rd, 0, 1, (int64_t)mask);
+                    write_u32_le(out, w_add);
+                    pc += 4;
+                }
+
+                free_toks(toks, tn);
+                free(raw);
+                continue;
+            }
+
+            if (is_reg_token(dst) && !is_reg_token(src) && (src[0] == '#' || src[0] == '$')) {
+                int rd = reg_index(dst);
+                int64_t val;
+                if (!parse_number(src, &val) && !parse_dollar(src, &val) && !eval_expr(src, &val)) die("invalid immediate '%s'", src);
+                uint32_t high = (uint32_t)((uint64_t)(val) >> 16) & 0xFFFFu;
+                uint32_t low = (uint32_t)(val & 0xFFFFu);
+                if (high != 0) {
+                    uint32_t w_lui = encode_a(0x0A, 0, rd, 0, 1, (int64_t)high);
+                    write_u32_le(out, w_lui);
+                    pc += 4;
+                } else {
+                    uint32_t w_xor = encode_a(0x09, rd, rd, 1, 0, rd);
+                    write_u32_le(out, w_xor);
+                    pc += 4;
+                }
+                if (low != 0) {
+                    uint32_t w_add = encode_a(0x00, rd, rd, 0, 1, (int64_t)low);
+                    write_u32_le(out, w_add);
+                    pc += 4;
+                }
+                free_toks(toks, tn); free(raw); continue;
+            }
+
+            if (is_reg_token(dst) && src[0] == '[') {
+                int bidx = -1;
+                for (int i = 0; i < tn; i++) if (toks[i][0] == '[') { bidx = i; break; }
+                if (bidx == -1) die("malformed memory operand");
+                int close = -1;
+                for (int i = bidx + 1; i < tn; i++) if (toks[i][0] == ']') { close = i; break; }
+                if (close == -1) die("missing ']'");
+                if (bidx + 1 >= close) die("empty memory operand");
+
+                char *base_tok = trim(toks[bidx + 1]);
+                if (base_tok[0] == '[') base_tok = trim(base_tok + 1);
+                size_t Lb = strlen(base_tok);
+                if (Lb > 0 && base_tok[Lb - 1] == ']') { base_tok[Lb - 1] = 0; base_tok = trim(base_tok); }
+
+                if (!is_reg_token(base_tok)) die("expected base register in memory operand, got '%s'", base_tok);
+                int rn = reg_index(base_tok);
+                int is_reg_off = 0;
+                int64_t off = 0;
+
+                if (bidx + 2 < close) {
+                    char *opsep = trim(toks[bidx + 2]);
+                    if (!(opsep[0] == '+' || opsep[0] == '-')) die("expected '+' or '-' in memory operand, got '%s'", opsep);
+                    int sign = (opsep[0] == '+') ? 1 : -1;
+                    if (bidx + 3 >= close) die("missing offset after '%s'", opsep);
+                    char *offtok = trim(toks[bidx + 3]);
+                    size_t Lo = strlen(offtok);
+                    if (Lo > 0 && offtok[Lo - 1] == ']') { offtok[Lo - 1] = 0; offtok = trim(offtok); }
+                    if (is_reg_token(offtok)) { is_reg_off = 1; off = reg_index(offtok); }
+                    else if (!parse_number(offtok, &off) && !eval_expr(offtok, &off)) die("invalid offset '%s'", offtok);
+                    off = sign * off;
+                }
+
+                int rd = reg_index(dst);
+                uint32_t word = encode_m(0x0C, rn, rd, is_reg_off, 1, off);
+                write_u32_le(out, word);
+                pc += 4; free_toks(toks, tn); free(raw); continue;
+            }
+
+
+            if (is_reg_token(src) && dst[0] == '[') {
+                int bidx = -1;
+                for (int i = 1; i < tn; ++i) if (strcmp(toks[i], "[") == 0) { bidx = i; break; }
+                if (bidx == -1) die("malformed memory operand");
+                int close = -1;
+                for (int i = bidx+1; i < tn; ++i) if (strcmp(toks[i], "]") == 0) { close = i; break; }
+                if (close == -1) die("missing ']'");
+                if (bidx + 1 >= close) die("empty memory operand");
+                char *base_tok = trim(toks[bidx+1]);
+                if (!is_reg_token(base_tok)) die("expected base register in memory operand, got '%s'", base_tok);
+                int rn = reg_index(base_tok);
+                int is_reg_off = 0;
+                int64_t off = 0;
+                if (bidx + 2 < close) {
+                    char *opsep = trim(toks[bidx+2]);
+                    if (strcmp(opsep, "+") != 0 && strcmp(opsep, "-") != 0) die("expected '+' or '-' in memory operand, got '%s'", opsep);
+                    int sign = (opsep[0] == '+') ? 1 : -1;
+                    if (bidx + 3 >= close) die("missing offset after '%s'", opsep);
+                    char *offtok = trim(toks[bidx+3]);
+                    if (is_reg_token(offtok)) { is_reg_off = 1; off = reg_index(offtok); }
+                    else {
+                        if (!parse_number(offtok, &off) && !eval_expr(offtok, &off)) die("invalid offset '%s'", offtok);
+                    }
+                    off = sign * off;
+                }
+                int rs = reg_index(src);
+                uint32_t word = encode_m(0x0D, rn, rs, is_reg_off, 1, off);
+                write_u32_le(out, word);
+                pc += 4;
+                free_toks(toks, tn); free(raw); continue;
+            }
+
+            die("unknown MOV form");
+        }
         uint32_t opcode; int type;
         if (!lookup_opcode(mnem, &opcode, &type)) {
             die("unknown mnemonic '%s'", mnem);
@@ -515,8 +803,45 @@ static void pass2(FILE *f, FILE *out) {
                 } else {
                     if (op[0] != '{') die("malformed mask '%s'", op);
                     op = toks[2];
-                    if (!parse_number(op, &imm) && !eval_expr(op, &imm)) die("invalid push/pop mask '%s'", op);
-                    if (imm > 15) die("can only push/pop r0-15");
+                    if (is_reg_token(op)) {
+                        int idx =2;
+                        if (idx >= tn) die("empty mask");
+                        int found_close = 0;
+                        uint32_t mask = 0;
+                        int saw_any = 0;
+
+                        if (idx < tn && toks[idx][0] == '}') die("empty mask");
+                        if (idx < tn) {
+                            char *item = trim(toks[idx++]);
+                            if (!is_reg_token(item)) die("expected register in mask");
+                            int r = reg_index(item);
+                            if (r < 0 || r > 15) die("register out of range in mask");
+                            mask |= (1u << r);
+                            saw_any = 1;
+                        } else die("malformed mask");
+
+                        while (idx < tn) {
+                            char *sep = toks[idx++];
+                            if (sep[0] == '}') { found_close = 1; break; }
+                            if (sep[0] != ',') die("expected ',' in between mask registers");
+                            char *item = trim(toks[idx++]);
+                            if (item[0] == 0) continue;
+                            if (!is_reg_token(item)) die("Expected register in mask, got '%s'", item);
+                            int r = reg_index(item);
+                            if (r < 0 || r > 15) die("register out of range in mask '%s'", item);
+                            mask |= (1u << r);
+                            saw_any =1;
+                        }
+
+                        if (!found_close) die("malformed mask, missing '}'");
+                        if (!saw_any) die("empty register list in mask");
+
+                        imm = (int64_t)mask;
+                        is_reg = 0;
+                    } else {
+                        if (!parse_number(op, &imm) && !eval_expr(op, &imm)) die("invalid push/pop mask '%s'", op);
+                        if (imm > (1u << 15)) die("can only push/pop r0-15");
+                    }
                 }
                 uint32_t opcode_val = (strcasecmp(mnem, "PUSH") == 0) ? 0x13 : 0x14;
                 uint32_t word = encode_m(opcode_val, 0, 0, is_reg, 1, imm);

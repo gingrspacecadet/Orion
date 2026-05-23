@@ -1,1 +1,2 @@
-push {#0xF}
+label:
+    mov r1, {r2}
