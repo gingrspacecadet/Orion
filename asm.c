@@ -1,7 +1,13 @@
+#define _GNU_SOURCE
 #include "gin.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
 #define MAX_SYM 4096
 #define MAX_LINE 512
@@ -77,7 +83,7 @@ static OpInfo optab[] = {
     {"JXX", 0x10, TYPE_J}, {"CALL",0x11, TYPE_J}, {"RET",0x12, TYPE_J}, {"PUSH",0x13, TYPE_M},
     {"POP", 0x14, TYPE_M}, {"FLAGS",0x21, TYPE_S}, {"HALT",0x22, TYPE_X}, {"ICALL",0x23, TYPE_J},
     {"IRET",0x24, TYPE_J},
-    // condition mnemonics will be handled separately (JEQ, JNE, etc.)
+    // condition mnemonics are handled separately (JEQ, JNE, etc.)
     {NULL,0,0}
 };
 
@@ -132,7 +138,7 @@ static int parse_number(const char *s, int64_t *out) {
     if (*p != '#') return 0;
     char *end;
     errno = 0;
-    long long v = strtoll(p, &end, 0);
+    long long v = strtoll(p + 1, &end, 0);
     if (errno) return 0;
     if (*end != 0) return 0;
     *out = v;
@@ -201,7 +207,7 @@ static void free_toks(char *toks[], int n) {
 }
 
 static void write_u32_le(FILE *out, uint32_t v) {
-    uint8_t b[3];
+    uint8_t b[4];
     b[0] = v & 0xFF;
     b[1] = (v >> 8) & 0xFF;
     b[2] = (v >> 16) & 0xFF;
@@ -294,8 +300,19 @@ static void pass1(FILE *f) {
                 if (v % 4 != 0) die(".org must be word aligned");
                 pc = (uint32_t)v;
                 continue;
-            } else {
-                die("unknown directive");
+            }
+            else if (strncmp(line, ".byte", 5) == 0) { pc += 1; continue; }
+            else if (strncmp(line, ".word", 5) == 0) { pc += 4; continue; }
+            else if (strncmp(line, ".align", 6) == 0) {
+                char *arg = trim(line + 6);
+                int64_t v;
+                if (!eval_expr(arg, &v)) die("unknown symbol in .align");
+                uint32_t to_align = (uint32_t)v - (pc % (uint32_t)v);
+                pc += to_align;
+                continue;
+            }
+            else {
+                die("unknown directive '%s'", line);
             }
         }
         pc += 4;
@@ -318,7 +335,7 @@ static void pass2(FILE *f, FILE *out) {
             if (*rest == 0) { free(raw); continue; }
             line = rest;
         }
-        if (line[0] = '.') {
+        if (line[0] == '.') {
             if (strncmp(line, ".org", 4) == 0) {
                 char *arg = trim(line + 4);
                 int64_t v;
@@ -326,6 +343,36 @@ static void pass2(FILE *f, FILE *out) {
                 if (v % 4 != 0) die(".org must be word aligned");
                 pc = (uint32_t)v;
                 continue;
+            }
+            else if (strncmp(line, ".byte", 5) == 0) {
+                char *arg = trim(line + 5);
+                int64_t v;
+                if (!eval_expr(arg, &v)) die("unknown symbol in .byte");
+                fwrite(&v, 1, 1, out);
+                pc += 1;
+                continue;
+            }
+            else if (strncmp(line, ".word", 5) == 0) {
+                char *arg = trim(line + 5);
+                int64_t v;
+                if (!eval_expr(arg, &v)) die("unknown symbol in .word");
+                write_u32_le(out, (uint32_t)v);
+                pc += 4;
+                continue;
+            }
+            else if (strncmp(line, ".align", 6) == 0) {
+                char *arg = trim(line + 6);
+                int64_t v;
+                if (!eval_expr(arg, &v)) die("unknown symbol in .align");
+                uint32_t to_align = (uint32_t)v - (pc % (uint32_t)v);
+                for (uint32_t i = 0; i < to_align; i++) {
+                    fwrite("\0", 1, 1, out);
+                }
+                pc += to_align;
+                continue;
+            }
+            else {
+                die("unknown directive '%s'", line);
             }
         }
 
@@ -403,26 +450,106 @@ static void pass2(FILE *f, FILE *out) {
                 pc += 4; free_toks(toks, tn); free(raw); continue;
             }
 
-            if (tn < 4) die("expected 'MNEM RD, RN, OP'");
-            char *rdtok = toks[1];
-            char *comm = toks[2];
-            char *rntok = toks[3];
-            char *optok = (tn >= 5) ? toks[4] : NULL;
-            if (strcmp(comm, ",") != 0) {
-                size_t L = strlen(rdtok);
-                if (rdtok[L - 1] == ',') {
-                    rdtok[L - 1] = 0;
-                    rntok = toks[2];
-                    optok = (tn >= 4) ? toks[3] : NULL;
-                } else {
-                    die("expected comma after RD");
-                }
+            char *ops[MAX_TOKS];
+            int opn = 0;
+            for (int i = 1; i < tn && opn < MAX_TOKS; i++) {
+                if (strcmp(toks[i], ",") == 0) continue;
+                ops[opn++] = toks[i];
             }
+
+            if (strcasecmp(mnem, "LUI") == 0 || strcasecmp(mnem, "NOT") == 0 || strcasecmp(mnem, "CMP") == 0) {
+                if (opn != 2) die("expected '%s RD, OP'", mnem);
+                char *first = ops[0];
+                char *optok = ops[1];
+                if (!optok) die("missing operand");
+                int is_reg = 0;
+                int64_t imm = 0;
+                if (is_reg_token(optok)) { is_reg = 1; imm = reg_index(optok); }
+                else {
+                    if (!eval_expr(optok, &imm)) die("unknown symbol in operand '%s'", optok);
+                }
+                int signed_flag = 1;
+                uint32_t word = 0;
+                if (strcasecmp(mnem, "NOT") == 0) {
+                    if (!is_reg_token(first)) die("invalid RD '%s'", first);
+                    int rd = reg_index(first);
+                    word = encode_a(0x08, 0, rd, is_reg, signed_flag, imm);
+                } else if (strcasecmp(mnem, "LUI") == 0) {
+                    if (!is_reg_token(first)) die("invalid RD '%s'", first);
+                    int rd = reg_index(first);
+                    word = encode_a(0x0A, 0, rd, is_reg, signed_flag, imm);
+                } else if (strcasecmp(mnem, "CMP") == 0) {
+                    if (!is_reg_token(first)) die("invalid RN '%s'", first);
+                    int rn = reg_index(first);
+                    word = encode_a(0x0B, rn, 0, is_reg, signed_flag, imm);
+                }
+                write_u32_le(out, word);
+                pc += 4; free_toks(toks, tn); free(raw); continue;
+            }
+
+            if (type == TYPE_M && opn >= 3 && strcmp(ops[1], "[") == 0) {
+                char *rdtok = ops[0];
+                if (!is_reg_token(rdtok)) die("invalid RD '%s'", rdtok);
+                int rd = reg_index(rdtok);
+
+                int close_bracket = -1;
+                for (int i = 1; i < opn; i++) {
+                    if (strcmp(ops[i], "]") == 0) {
+                        close_bracket = i;
+                        break;
+                    }
+                }
+                if (close_bracket == -1) die("missing ] in memory addressing");
+
+                int rn = 0;
+                int64_t imm = 0;
+                int is_reg = 0;
+                int idx = 2;
+
+                if (idx < close_bracket && is_reg_token(ops[idx])) {
+                    rn = reg_index(ops[idx]);
+                    idx++;
+                }
+
+                if (idx < close_bracket && (strcmp(ops[idx], "+") == 0 || strcmp(ops[idx], "-") == 0)) {
+                    int is_add = (strcmp(ops[idx], "+") == 0);
+                    idx++;
+
+                    if (idx >= close_bracket) die("expected offset after + or -");
+
+                    if (is_reg_token(ops[idx])) {
+                        is_reg = 1;
+                        imm = reg_index(ops[idx]);
+                    } else {
+                        if (!eval_expr(ops[idx], &imm)) die("invalid offset '%s'", ops[idx]);
+                    }
+
+                    if (!is_add) imm = -imm;
+                } else if (idx == 2 && idx < close_bracket) {
+                    if (is_reg_token(ops[idx])) {
+                        is_reg = 1;
+                        imm = reg_index(ops[idx]);
+                    } else {
+                        if (!eval_expr(ops[idx], &imm)) die("invalid offset '%s'", ops[idx]);
+                    }
+                }
+
+                uint32_t opc = 0;
+                if (!lookup_opcode(mnem, &opc, &type)) die("unknown M-type '%s'", mnem);
+                int signed_flag = 1;
+                uint32_t word = encode_m(opc, rn, rd, is_reg, signed_flag, imm);
+                write_u32_le(out, word);
+                pc += 4; free_toks(toks, tn); free(raw); continue;
+            }
+
+            if (opn != 3) die("expected 'MNEM RD, RN, OP'");
+            char *rdtok = ops[0];
+            char *rntok = ops[1];
+            char *optok = ops[2];
             if (!is_reg_token(rdtok)) die("invalid RD '%s'", rdtok);
             if (!is_reg_token(rntok)) die("invalid RN '%s'", rntok);
             int rd = reg_index(rdtok);
             int rn = reg_index(rntok);
-            if (!optok) die("missing operand");
             int is_reg = 0;
             int64_t imm = 0;
             if (is_reg_token(optok)) { is_reg = 1; imm = reg_index(optok); }
@@ -432,17 +559,9 @@ static void pass2(FILE *f, FILE *out) {
             int signed_flag = 1;
             uint32_t word = 0;
             if (type == TYPE_A) {
-                if (strcasecmp(mnem, "NOT") == 0) {
-                    word = encode_a(0x08, 0, rd, is_reg, signed_flag, imm);
-                } else if (strcasecmp(mnem, "LUI") == 0) {
-                    word = encode_a(0x0A, 0, rd, is_reg, signed_flag, imm);
-                } else if (strcasecmp(mnem, "CMP") == 0) {
-                    word = encode_a(0x0B, rn, 0, is_reg, signed_flag, imm);
-                } else {
-                    uint32_t opc = 0;
-                    if (!lookup_opcode(mnem, &opc, &type)) die("unknown A-type '%s'", mnem);
-                    word = encode_a(opc, rn, rd, is_reg, signed_flag, imm);
-                }
+                uint32_t opc = 0;
+                if (!lookup_opcode(mnem, &opc, &type)) die("unknown A-type '%s'", mnem);
+                word = encode_a(opc, rn, rd, is_reg, signed_flag, imm);
             } else {
                 uint32_t opc = 0;
                 if (!lookup_opcode(mnem, &opc, &type)) die("unknown M-type '%s'", mnem);
