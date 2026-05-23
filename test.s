@@ -1,3 +1,1 @@
-.byte #0x12
-.align #4
-.word #0x3456
+push {#0xF}

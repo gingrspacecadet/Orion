@@ -146,7 +146,7 @@ static int parse_number(const char *s, int64_t *out) {
 }
 
 static int eval_expr(const char *expr, int64_t *out) {
-    const char *p = expr;
+    const char *p = trim((char*)expr);
     while (*p && *p != '+' && *p != '-') p++;
     if (*p != '+' && *p != '-') {
         int64_t v;
@@ -197,7 +197,9 @@ static int tokenise(char *line, char *toks[], int max) {
         int len = p - start;
         char *tok = xmalloc(len + 1);
         strncpy(tok, start, len); tok[len] = 0;
-        toks[n++] = tok;
+        char *tt = trim(tok);
+        toks[n++] = strdup(tt);
+        free(tok);
     }
     return n;
 }
@@ -206,7 +208,25 @@ static void free_toks(char *toks[], int n) {
     for (int i = 0; i < n; i++) free(toks[i]);
 }
 
+// ensure the output file has been padded with zeros up to 'pc' before writing
+static void ensure_out_pos(FILE *out, uint32_t pc) {
+    long cur = ftell(out);
+    if (cur < 0) die("ftell failed");
+    if ((uint32_t)cur > pc) {
+        // writing backwards would overwrite; this is an error for flat binary mode
+        die("assembler attempted to write at 0x%08x but file pos is 0x%08lx",
+            srcpath, lineno, pc, cur);
+    }
+    // pad with zeros
+    while ((uint32_t)cur < pc) {
+        uint8_t z = 0;
+        if (fwrite(&z, 1, 1, out) != 1) die("failed to write padding");
+        cur++;
+    }
+}
+
 static void write_u32_le(FILE *out, uint32_t v) {
+    ensure_out_pos(out, pc);
     uint8_t b[4];
     b[0] = v & 0xFF;
     b[1] = (v >> 8) & 0xFF;
@@ -301,14 +321,51 @@ static void pass1(FILE *f) {
                 pc = (uint32_t)v;
                 continue;
             }
-            else if (strncmp(line, ".byte", 5) == 0) { pc += 1; continue; }
-            else if (strncmp(line, ".word", 5) == 0) { pc += 4; continue; }
+            if (strncmp(line, ".byte", 5) == 0) {
+                char *arg = trim(line + 5);
+                // count comma-separated entries
+                char *p = arg;
+                while (*p) {
+                    char tok[256]; int i = 0;
+                    while (*p && *p != ',') tok[i++] = *p++;
+                    tok[i] = 0;
+                    if (*p == ',') p++;
+                    char *tt = trim(tok);
+                    if (tt[0] == 0) die("empty .byte element");
+                    int64_t v;
+                    if (!eval_expr(tt, &v)) die("unknown symbol in .byte '%s'", tt);
+                    pc += 1;
+                }
+                continue;
+            }
+            else if (strncmp(line, ".word", 5) == 0) {
+                char *arg = trim(line + 5);
+                char *p = arg;
+                while (*p) {
+                    char tok[256]; int i = 0;
+                    while (*p && *p != ',') tok[i++] = *p++;
+                    tok[i] = 0;
+                    if (*p == ',') p++;
+                    char *tt = trim(tok);
+                    if (tt[0] == 0) die("empty .word element");
+                    int64_t v;
+                    if (!eval_expr(tt, &v)) die("unknown symbol in .word '%s'", tt);
+                    // optional: require word alignment in pass1
+                    if (pc % 4 != 0) die(".word requires word-aligned address (pc=0x%08x)", pc);
+                    pc += 4;
+                }
+                continue;
+            }
             else if (strncmp(line, ".align", 6) == 0) {
                 char *arg = trim(line + 6);
-                int64_t v;
-                if (!eval_expr(arg, &v)) die("unknown symbol in .align");
-                uint32_t to_align = (uint32_t)v - (pc % (uint32_t)v);
-                pc += to_align;
+                int64_t n;
+                if (!eval_expr(arg, &n)) die("invalid .align argument '%s'", arg);
+                if (n <= 0) die(".align requires positive power-of-two");
+                // check power of two
+                if ((n & (n - 1)) != 0) die(".align argument must be power of two");
+                // compute new pc
+                uint32_t mask = (uint32_t)(n - 1);
+                pc = (pc + mask) & ~mask;
                 continue;
             }
             else {
@@ -344,31 +401,52 @@ static void pass2(FILE *f, FILE *out) {
                 pc = (uint32_t)v;
                 continue;
             }
+            else if (strncmp(line, ".align", 6) == 0) {
+                char *arg = trim(line + 6);
+                int64_t n;
+                if (!eval_expr(arg, &n)) die("invalid .align argument '%s'", arg);
+                if (n <= 0 || (n & (n - 1)) != 0) die(".align requires positive power-of-two");
+                uint32_t mask = (uint32_t)(n - 1);
+                pc = (pc + mask) & ~mask;
+                free(raw);
+                continue;
+            }
             else if (strncmp(line, ".byte", 5) == 0) {
                 char *arg = trim(line + 5);
-                int64_t v;
-                if (!eval_expr(arg, &v)) die("unknown symbol in .byte");
-                fwrite(&v, 1, 1, out);
-                pc += 1;
+                char *p = arg;
+                while (*p) {
+                    char tok[256]; int i = 0;
+                    while (*p && *p != ',') tok[i++] = *p++;
+                    tok[i] = 0;
+                    if (*p == ',') p++;
+                    char *tt = trim(tok);
+                    int64_t v;
+                    if (!eval_expr(tt, &v)) die("invalid .byte '%s'", tt);
+                    if (v < 0 || v > 0xFF) die(".byte value out of range 0..0xFF: %" PRId64, v);
+                    uint8_t b = (uint8_t)v & 0xFF;
+                    ensure_out_pos(out, pc);
+                    fwrite(&b, 1, 1, out);
+                    pc += 1;
+                }
+                free(raw);
                 continue;
             }
             else if (strncmp(line, ".word", 5) == 0) {
                 char *arg = trim(line + 5);
-                int64_t v;
-                if (!eval_expr(arg, &v)) die("unknown symbol in .word");
-                write_u32_le(out, (uint32_t)v);
-                pc += 4;
-                continue;
-            }
-            else if (strncmp(line, ".align", 6) == 0) {
-                char *arg = trim(line + 6);
-                int64_t v;
-                if (!eval_expr(arg, &v)) die("unknown symbol in .align");
-                uint32_t to_align = (uint32_t)v - (pc % (uint32_t)v);
-                for (uint32_t i = 0; i < to_align; i++) {
-                    fwrite("\0", 1, 1, out);
+                char *p = arg;
+                while (*p) {
+                    char tok[256]; int i = 0;
+                    while (*p && *p != ',') tok[i++] = *p++;
+                    tok[i] = 0;
+                    if (*p == ',') p++;
+                    char *tt = trim(tok);
+                    int64_t v;
+                    if (!eval_expr(tt, &v)) die("invalid .word '%s'", tt);
+                    if (pc % 4 != 0) die(".word requires word-aligned address (pc=0x%08x)", pc);
+                    write_u32_le(out, (uint32_t)v);
+                    pc += 4;
                 }
-                pc += to_align;
+                free(raw);
                 continue;
             }
             else {
@@ -435,14 +513,10 @@ static void pass2(FILE *f, FILE *out) {
                 if (is_reg_token(op)) {
                     is_reg = 1; imm = reg_index(op);
                 } else {
-                    char tmp[256];
-                    strcpy(tmp, op);
-                    if (tmp[0] == '{' && tmp[strlen(tmp) - 1] == '}') {
-                        tmp[strlen(tmp) - 1] = 0;
-                        memmove(tmp, tmp + 1, strlen(tmp));
-                    }
-                    if (!eval_expr(tmp, &imm)) die("invalid push/pop mask '%s'", op);
-                    is_reg = 0;
+                    if (op[0] != '{') die("malformed mask '%s'", op);
+                    op = toks[2];
+                    if (!parse_number(op, &imm) && !eval_expr(op, &imm)) die("invalid push/pop mask '%s'", op);
+                    if (imm > 15) die("can only push/pop r0-15");
                 }
                 uint32_t opcode_val = (strcasecmp(mnem, "PUSH") == 0) ? 0x13 : 0x14;
                 uint32_t word = encode_m(opcode_val, 0, 0, is_reg, 1, imm);
