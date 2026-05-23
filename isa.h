@@ -1,5 +1,5 @@
-#ifndef OPCODES_H
-#define OPCODES_H
+#ifndef ISA_H
+#define ISA_H
 
 typedef enum {
     OP_ADD = 0x00,
@@ -52,7 +52,8 @@ typedef enum {
     TYPE_A,
     TYPE_M,
     TYPE_J,
-    TYPE_S
+    TYPE_S,
+    TYPE_X
 } OpcodeType;
 
 #define OPCODE_SHIFT    36

@@ -77,26 +77,26 @@ static Instr decode(uint32_t word) {
     instr.opcode = (word >> 26) & 0x3F;
     
     // same with all opcodes
-    instr.is_reg = (word >> 1) & 0x1;
-    instr.is_signed = word & 0x1;
+    instr.is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK;
+    instr.is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK;
 
     if (instr.is_reg) {
-        instr.rm = (word >> 2) & 0xF;
+        instr.rm = (word >> IMM_RM_SHIFT) & RM_MASK;
     } else {
-        instr.imm = (word >> 2) & 0xFFFF;
+        instr.imm = (word >> IMM_RM_SHIFT) & IMM_MASK;
     }
 
     switch (opcode_type(instr.opcode)) {
         case TYPE_M:
         case TYPE_A: {
-            instr.rn = (word >> 22) & 0xF;
-            instr.rd = (word >> 18) & 0xF;
+            instr.rn = (word >> RN_SHIFT) & RN_MASK;
+            instr.rd = (word >> RD_SHIFT) & RD_MASK;
             break;
         }
 
         case TYPE_J: {
-            instr.cond = (word >> 22) & 0xF;
-            instr.is_absolute = (word >> 21) & 0x1;
+            instr.cond = (word >> COND_SHIFT) & COND_MASK;
+            instr.is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
             // TODO: raise exception if `reserved` non-zero
             break;
         }
@@ -105,12 +105,12 @@ static Instr decode(uint32_t word) {
             instr.is_write = word & 0x1;
             if (instr.is_write) {
                 if (instr.is_reg) {
-                    instr.rm = (word >> 22) & 0x3F;
+                    instr.rm = (word >> 10) & 0x3F;
                 } else {
-                    instr.imm = (word >> 20) & 0xFFFF;
+                    instr.imm = (word >> 10) & 0xFFFF;
                 }
             } else {
-                instr.rd = (word >> 22) & 0x3F;
+                instr.rd = (word >> 10) & 0x3F;
             }
         }
 

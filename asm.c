@@ -62,14 +62,6 @@ static int find_sym(const char *name, uint32_t *out) {
     return 0;
 }
 
-enum {
-    TYPE_A,
-    TYPE_M,
-    TYPE_J,
-    TYPE_S,
-    TYPE_X
-};
-
 typedef struct {
     const char *mnem;
     uint32_t code;
