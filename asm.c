@@ -659,15 +659,9 @@ static void pass2(FILE *f, FILE *out) {
                 if (!parse_number(src, &val) && !parse_dollar(src, &val) && !eval_expr(src, &val)) die("invalid immediate '%s'", src);
                 uint32_t high = (uint32_t)((uint64_t)(val) >> 16) & 0xFFFFu;
                 uint32_t low = (uint32_t)(val & 0xFFFFu);
-                if (high != 0) {
-                    uint32_t w_lui = encode_a(OP_LUI, 0, rd, 0, 1, (int64_t)high);
-                    write_u32_le(out, w_lui);
-                    pc += 4;
-                } else {
-                    uint32_t w_xor = encode_a(OP_XOR, rd, rd, 1, 0, rd);
-                    write_u32_le(out, w_xor);
-                    pc += 4;
-                }
+                uint32_t w_lui = encode_a(OP_LUI, 0, rd, 0, 1, (int64_t)high);
+                write_u32_le(out, w_lui);
+                pc += 4;
                 if (low != 0) {
                     uint32_t w_add = encode_a(OP_ADD, rd, rd, 0, 1, (int64_t)low);
                     write_u32_le(out, w_add);

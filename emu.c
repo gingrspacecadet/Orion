@@ -127,6 +127,187 @@ static uint32_t load_le32(const uint8_t b[4]) {
            ((uint32_t)b[3] << 24);
 }
 
+static void store_le32(uint8_t b[4], const uint32_t v) {
+    b[0] = (uint8_t)(v);
+    b[1] = (uint8_t)(v >> 8);
+    b[2] = (uint8_t)(v >> 16);
+    b[3] = (uint8_t)(v >> 24);
+}
+
+typedef uint32_t Register;
+
+typedef struct {
+    Register r[16];
+    
+    Register pc;
+    Register flags;
+
+    bool running;
+
+    uint8_t *memory;
+} Cpu;
+
+static void push32(Cpu *cpu, const uint32_t v) {
+    cpu->r[SP] -= 4;
+    store_le32(&cpu->memory[cpu->r[SP]], v);
+}
+
+static uint32_t pop32(Cpu *cpu) {
+    uint32_t v = load_le32(&cpu->memory[cpu->r[SP]]);
+    cpu->r[SP] += 4;    // TODO: raise_exception on OOB SP
+    return v;
+}
+
+static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
+    uint32_t target = (d.is_reg
+        ? cpu->r[d.rm]
+        : (d.is_signed
+            ? (int32_t)((int16_t)d.imm)
+            : (uint32_t)d.imm
+        )
+    );
+    target += (d.is_absolute
+        ? 0
+        : cpu->pc + 4
+    );
+    return target;
+}
+
+static inline void set_flag(Cpu *cpu, int flag, bool v) {
+    if (v) cpu->flags |= (1u << flag);
+    else cpu->flags &= ~(1u << flag);
+}
+
+static void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
+    uint64_t sum = (uint64_t)a + (uint64_t)b;
+
+    set_flag(cpu, FLAG_Z, res == 0);
+    set_flag(cpu, FLAG_N, (res >> 31) & 1u);
+    set_flag(cpu, FLAG_C, (sum >> 32) & 1u);
+    set_flag(cpu, FLAG_V, ((((~(a ^ b)) & (a ^ res)) >> 31 ) & 1u ));
+}
+
+static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
+    set_flag(cpu, FLAG_Z, res == 0);
+    set_flag(cpu, FLAG_N, (res >> 31) & 1u);
+    set_flag(cpu, FLAG_C, a < b);
+    set_flag(cpu, FLAG_V, ((((a ^ b) & (a ^ res)) >> 31 ) & 1u ));
+}
+
+static void step(Cpu *cpu) {
+    uint32_t word = load_le32(&cpu->memory[cpu->pc]);
+
+    Instr d = decode(word);
+
+    bool update_pc = true;
+
+    switch (d.opcode) {
+        case OP_ADD: {
+            cpu->r[d.rd] = cpu->r[d.rn] + (d.is_reg ? d.rm : d.imm);
+            // TODO: flags
+            break;
+        }
+
+        case OP_SUB: {
+            cpu->r[d.rd] = cpu->r[d.rn] - (d.is_reg ? d.rm : d.imm);
+            break;
+        }
+
+        case OP_XOR: {
+            cpu->r[d.rd] = cpu->r[d.rn] ^ (d.is_reg ? d.rm : d.imm);
+            break;
+        }
+
+        case OP_LDR: {
+            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)d.imm : d.imm));
+            cpu->r[d.rd] = load_le32(&cpu->memory[addr]);
+            break;
+        }
+
+        case OP_LDRB: {
+            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
+            cpu->r[d.rd] = cpu->memory[addr];
+            break;
+        }
+
+        case OP_STR: {
+            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
+            store_le32(&cpu->memory[addr], cpu->r[d.rd]);
+            break;
+        }
+
+        case OP_STRB: {
+            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
+            cpu->memory[addr] = cpu->r[d.rd];
+            break;
+        }
+
+        case OP_LUI: {
+            cpu->r[d.rd] = d.imm << 16;
+            break;
+        }
+
+        case OP_JXX: {
+            uint32_t target = compute_jmp_target(cpu, d);
+            cpu->pc = target;
+            update_pc = false;
+            break;
+        }
+
+        case OP_CALL: {
+            push32(cpu, cpu->pc + 4);
+            cpu->pc = compute_jmp_target(cpu, d);
+            update_pc = false;
+            break;
+        }
+
+        case OP_RET: {
+            cpu->pc = pop32(cpu);
+            update_pc = false;
+            break;
+        }
+
+        case OP_PUSH: {
+            if (d.is_reg) {
+                push32(cpu, cpu->r[d.rm]);
+            }
+            else {
+                for (int i = 0; i < 16; i++) {
+                    bool push = (cpu->r[d.imm] >> i) & 0x1;
+                    if (push) push32(cpu, cpu->r[i]);
+                }
+            }
+            break;
+        }
+
+        case OP_POP: {
+            if (d.is_reg) {
+                cpu->r[d.rm] = pop32(cpu);
+            }
+            else {
+                for (int i = 15; i >= 0; i--) {
+                    bool pop = (cpu->r[d.imm] >> i) & 0x1;
+                    if (pop) cpu->r[i] = pop32(cpu); 
+                }
+            }
+            break;
+        }
+
+        case OP_HALT: {
+            cpu->running = false;
+            break;
+        }
+
+        default: {
+            // TODO: raise_exception(cpu, EX_INVALID_OPCODE);
+            printf("INVALID OPCODE 0x%02X\n", d.opcode);
+            exit(1);
+        }
+    }
+
+    if (update_pc) cpu->pc += 4;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s out.bin\n", argv[0]);
@@ -138,7 +319,14 @@ int main(int argc, char **argv) {
     size_t imglen;
     uint8_t *img = load_file(path, &imglen);
 
-    Instr i = decode(load_le32(img));
-    printf("OPC=0x%02X\n", i.opcode);
-    printf("0x%02X R%d, R%d, R%d\n", i.opcode, i.rd, i.rn, i.imm);
+    Cpu cpu = {0};
+    cpu.memory = img;
+    cpu.running = true;
+    while (cpu.running) {
+        step(&cpu);
+    }
+    for (int i = 0; i < 16; i++) {
+        printf("R%d: 0x%08X\t", i, cpu.r[i]);
+    }
+    putc('\n', stdout);
 }

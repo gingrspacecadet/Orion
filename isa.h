@@ -82,4 +82,12 @@ typedef enum {
 
 #define SP              15
 
+typedef enum {
+    FLAG_C,
+    FLAG_V,
+    FLAG_Z,
+    FLAG_N,
+    FLAG_IE,
+} Flags;
+
 #endif
