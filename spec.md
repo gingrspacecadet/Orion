@@ -41,7 +41,7 @@ A-types always update flags as they go through the ALU, which handles it.
 J-type: opcode(6) cond(4) absolute?(1) reserved(3) (rm(4) | imm(16)) register?(1) signed?(1)  
 A-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) signed?(1)  
 M-type: opcode(6) rn(4) rd(4) (rm(4) | imm(16)) register?(1) signed?(1)  
-S-type: specified below per-isntruction
+S-type: specified below per-instruction
 
 J-type decoding:  
 If `absolute?` is set, treat rm or imm (depending on `register?`) as an absolute jump (`PC = addr`), else treat like relative (`PC += offset`)

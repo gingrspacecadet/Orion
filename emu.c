@@ -121,18 +121,86 @@ static Instr decode(uint32_t word) {
     return instr;
 }
 
-static uint32_t load_le32(const uint8_t b[4]) {
-    return ((uint32_t)b[0]) |
-           ((uint32_t)b[1] << 8) |
-           ((uint32_t)b[2] << 16) |
-           ((uint32_t)b[3] << 24);
+#define PAGE_SIZE   4096
+
+typedef struct {
+    uint8_t data[PAGE_SIZE];
+} MemPage;
+
+typedef struct MemNode {
+    uint32_t page_num;
+    MemPage *page;
+    struct MemNode *next;
+} MemNode;
+
+typedef struct {
+    MemNode *page_table;
+    struct {
+        MemPage *page;
+        uint32_t addr;
+    } cache;
+} Memory;
+
+static MemPage *get_page(Memory *mem, uint32_t addr, bool create) {
+    uint32_t page_num = addr / PAGE_SIZE;
+    MemNode *n = mem->page_table;
+    while (n) {
+        if (n->page_num == page_num) return n->page;
+        n = n->next;
+    }
+    
+    if (!create) return NULL;
+
+    MemPage *p = calloc(1, sizeof(MemPage));
+    MemNode *new_node = malloc(sizeof(MemNode));
+    new_node->page_num = page_num;
+    new_node->page = p;
+    new_node->next = mem->page_table;
+    mem->page_table = new_node;
+    return p;
 }
 
-static void store_le32(uint8_t b[4], const uint32_t v) {
-    b[0] = (uint8_t)(v);
-    b[1] = (uint8_t)(v >> 8);
-    b[2] = (uint8_t)(v >> 16);
-    b[3] = (uint8_t)(v >> 24);
+void mem_init(Memory *mem) {
+    mem->page_table = NULL;
+}
+
+void mem_write8(Memory *mem, uint32_t addr, uint8_t v) {
+    MemPage *p = get_page(mem, addr, true);
+    uint32_t offset = addr % PAGE_SIZE;
+    p->data[offset] = v;
+}
+
+uint8_t mem_read8(Memory *mem, uint32_t addr) {
+    uint32_t page_num = addr / PAGE_SIZE;
+    uint32_t cache_num = mem->cache.addr / PAGE_SIZE;
+
+    MemPage *p;
+
+    if (mem->cache.page && cache_num == page_num) {
+        p = mem->cache.page;
+    } else {
+        p = get_page(mem, addr, false);
+        mem->cache.page = p;
+        mem->cache.addr = page_num * PAGE_SIZE;
+    }
+
+    if (!p) return 0;
+    uint32_t offset = addr % PAGE_SIZE;
+    return p->data[offset];
+}
+
+uint32_t mem_load_le32(Memory *mem, uint32_t addr) {
+    return ((uint32_t)mem_read8(mem, addr)) |
+           ((uint32_t)mem_read8(mem, addr + 1) << 8) |
+           ((uint32_t)mem_read8(mem, addr + 2) << 16) |
+           ((uint32_t)mem_read8(mem, addr + 3) << 24);
+}
+
+void mem_store_le32(Memory *mem, uint32_t addr, const uint32_t v) {
+    mem_write8(mem, addr, v);
+    mem_write8(mem, addr + 1, v >> 8);
+    mem_write8(mem, addr + 2, v >> 16);
+    mem_write8(mem, addr + 3, v >> 24);
 }
 
 typedef uint32_t Register;
@@ -145,16 +213,16 @@ typedef struct {
 
     bool running;
 
-    uint8_t *memory;
+    Memory memory;
 } Cpu;
 
 static void push32(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
-    store_le32(&cpu->memory[cpu->r[SP]], v);
+    mem_store_le32(&cpu->memory, cpu->r[SP], v);
 }
 
 static uint32_t pop32(Cpu *cpu) {
-    uint32_t v = load_le32(&cpu->memory[cpu->r[SP]]);
+    uint32_t v = mem_load_le32(&cpu->memory, cpu->r[SP]);
     cpu->r[SP] += 4;    // TODO: raise_exception on OOB SP
     return v;
 }
@@ -200,7 +268,7 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 }
 
 static void step(Cpu *cpu) {
-    uint32_t word = load_le32(&cpu->memory[cpu->pc]);
+    uint32_t word = mem_load_le32(&cpu->memory, cpu->pc);
 
     Instr d = decode(word);
 
@@ -240,25 +308,25 @@ static void step(Cpu *cpu) {
 
         case OP_LDR: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)d.imm : d.imm));
-            cpu->r[d.rd] = load_le32(&cpu->memory[addr]);
+            cpu->r[d.rd] = mem_load_le32(&cpu->memory, addr);
             break;
         }
 
         case OP_LDRB: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            cpu->r[d.rd] = cpu->memory[addr];
+            cpu->r[d.rd] = mem_load_le32(&cpu->memory, addr);
             break;
         }
 
         case OP_STR: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            store_le32(&cpu->memory[addr], cpu->r[d.rd]);
+            mem_store_le32(&cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
         case OP_STRB: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            cpu->memory[addr] = cpu->r[d.rd];
+            mem_write8(&cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
@@ -359,7 +427,11 @@ int main(int argc, char **argv) {
     uint8_t *img = load_file(path, &imglen);
 
     Cpu cpu = {0};
-    cpu.memory = img;
+    cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
+    mem_init(&cpu.memory);
+    for (size_t i = 0; i < imglen; i++) {
+        mem_write8(&cpu.memory, i, img[i]);
+    }
     cpu.running = true;
     while (cpu.running) {
         step(&cpu);
@@ -367,5 +439,5 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 16; i++) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);
     }
-    putc('\n', stdout);
+    putc('\n', stdout);    
 }
