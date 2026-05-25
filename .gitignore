@@ -2,3 +2,5 @@ a.out
 *.o
 asm
 emu
+disasm
+out.bin

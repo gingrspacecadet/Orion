@@ -88,6 +88,6 @@ typedef enum {
     FLAG_Z,
     FLAG_N,
     FLAG_IE,
-} Flags;
+} Flag;
 
 #endif

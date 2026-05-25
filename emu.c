@@ -112,6 +112,7 @@ static Instr decode(uint32_t word) {
             } else {
                 instr.rd = (word >> 10) & 0x3F;
             }
+            break;
         }
 
         default: break;
@@ -173,9 +174,13 @@ static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
     return target;
 }
 
-static inline void set_flag(Cpu *cpu, int flag, bool v) {
+static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
     if (v) cpu->flags |= (1u << flag);
     else cpu->flags &= ~(1u << flag);
+}
+
+static inline bool get_flag(Cpu *cpu, Flag flag) {
+    return cpu->flags & (1u << flag);
 }
 
 static void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
@@ -203,18 +208,33 @@ static void step(Cpu *cpu) {
 
     switch (d.opcode) {
         case OP_ADD: {
-            cpu->r[d.rd] = cpu->r[d.rn] + (d.is_reg ? d.rm : d.imm);
-            // TODO: flags
+            uint32_t a = cpu->r[d.rn];
+            uint32_t b = (d.is_reg ? cpu->r[d.rm] : d.imm);
+            uint32_t res = a + b;
+            cpu->r[d.rd] = res;
+            update_flags_add(cpu, a, b, res);
             break;
         }
 
         case OP_SUB: {
-            cpu->r[d.rd] = cpu->r[d.rn] - (d.is_reg ? d.rm : d.imm);
+            uint32_t a = cpu->r[d.rn];
+            uint32_t b = (d.is_reg ? cpu->r[d.rm] : d.imm);
+            uint32_t res = a - b;
+            cpu->r[d.rd] = res;
+            update_flags_sub(cpu, a, b, res);
             break;
         }
 
         case OP_XOR: {
-            cpu->r[d.rd] = cpu->r[d.rn] ^ (d.is_reg ? d.rm : d.imm);
+            cpu->r[d.rd] = cpu->r[d.rn] ^ (d.is_reg ? cpu->r[d.rm] : d.imm);
+            break;
+        }
+
+        case OP_CMP: {
+            uint32_t a = cpu->r[d.rn];
+            uint32_t b = (d.is_reg ? cpu->r[d.rm] : d.imm);
+            uint32_t res = a - b;
+            update_flags_sub(cpu, a, b, res);
             break;
         }
 
@@ -249,8 +269,27 @@ static void step(Cpu *cpu) {
 
         case OP_JXX: {
             uint32_t target = compute_jmp_target(cpu, d);
-            cpu->pc = target;
-            update_pc = false;
+            bool jump = false;
+            switch (d.cond) {
+                case COND_JEQ: if (get_flag(cpu, FLAG_Z)) jump = true; break;
+                case COND_JNE: if (!get_flag(cpu, FLAG_Z)) jump = true; break;
+                case COND_JLT: if (get_flag(cpu, FLAG_N) != get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JGE: if (get_flag(cpu, FLAG_N) == get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JLTU: if (!get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JGEU: if (get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JCS: if (get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JCC: if (!get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JN: if (get_flag(cpu, FLAG_N)) jump = true; break;
+                case COND_JP: if (!get_flag(cpu, FLAG_N)) jump = true; break;
+                case COND_JVS: if (get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JVC: if (!get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JLS: if (!get_flag(cpu, FLAG_C)) jump = true; break;
+                default: break;
+            }
+            if (jump) {
+                cpu->pc = target;
+                update_pc = false;
+            }
             break;
         }
 

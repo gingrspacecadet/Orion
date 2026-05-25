@@ -155,7 +155,7 @@ static int parse_dollar(const char *s, int64_t *out) {
         strcpy(right, q + 1);
         trim(left); trim(right);
         uint32_t addr;
-        if (!find_sym(left, &addr)) return 0;
+        if (!find_sym(left, &addr)) die("unknown symbol '%s'", left);
         int64_t b;
         if (!parse_number(right, &b) && !eval_expr(right, &b)) return 0;
         *out = (q[0] == '+') ? (int64_t)addr + b : (int64_t)addr - b;
@@ -165,7 +165,7 @@ static int parse_dollar(const char *s, int64_t *out) {
         strncpy(name, p, sizeof(name) - 1); name[sizeof(name) - 1] = 0;
         trim(name);
         uint32_t addr;
-        if (!find_sym(name, &addr)) return 0;
+        if (!find_sym(name, &addr)) die("unknown symbol '%s'", name);
         *out = (int64_t)addr;
         return 1;
     }
@@ -413,6 +413,97 @@ static void pass1(FILE *f) {
                 die("unknown directive '%s'", line);
             }
         }
+
+        char *toks[MAX_TOKS];
+        int tn = tokenise(line, toks, MAX_TOKS);
+        if (tn == 0) continue;
+        char *mnem = toks[0];
+        if (strcasecmp(mnem, "MOV") == 0) {
+            int opn = 0;
+            char *ops[MAX_TOKS];
+            int i = 1;
+            while (i < tn && opn < MAX_TOKS) {
+                if (strcmp(toks[i], ",") == 0) { i++; continue; }
+                if (strcmp(toks[i], "[") == 0 || toks[i][0] == '[') {
+                    char buf[256]; size_t pos = 0;
+                    int depth = 0;
+                    while (i < tn && pos + 1 < sizeof(buf)) {
+                        char tmp[128];
+                        strncpy(tmp, toks[i], sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+                        char *t = tmp;
+                        for (char *p = t; *p; ++p) if (*p == '[') depth++;
+                        for (char *p = t; *p; ++p) if (*p == ']') depth--;
+                        if (pos) buf[pos++] = ' ';
+                        size_t L = strlen(t);
+                        if (pos + L >= sizeof(buf)) die("%s:%d: operand too long", srcpath, lineno);
+                        memcpy(buf + pos, t, L); pos += L;
+                        i++;
+                        if (depth <= 0) break;
+                    }
+                    buf[pos] = 0;
+                    ops[opn++] = strdup(trim(buf));
+                    continue;
+                }
+                if (strcmp(toks[i], "{") == 0 || toks[i][0] == '{') {
+                    char buf[256]; size_t pos = 0;
+                    int depth = 0;
+                    while (i < tn && pos + 1 < sizeof(buf)) {
+                        char tmp[128];
+                        strncpy(tmp, toks[i], sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+                        char *t = tmp;
+                        for (char *p = t; *p; ++p) if (*p == '{') depth++;
+                        for (char *p = t; *p; ++p) if (*p == '}') depth--;
+                        if (pos) buf[pos++] = ' ';
+                        size_t L = strlen(t);
+                        if (pos + L >= sizeof(buf)) die("%s:%d: operand too long", srcpath, lineno);
+                        memcpy(buf + pos, t, L); pos += L;
+                        i++;
+                        if (depth <= 0) break;
+                    }
+                    buf[pos] = 0;
+                    ops[opn++] = strdup(trim(buf));
+                    continue;
+                }
+                ops[opn++] = strdup(trim(toks[i]));
+                i++;
+            }
+            uint32_t size = 0;
+            char *dst = trim(ops[0]);
+            char *src = trim(ops[1]);
+            if (dst[0] == '{' || strcmp(ops[0], "{") == 0) {
+                int idx = 1;
+                while (idx < opn) {
+                    char *regtok = ops[idx++];
+                    if (strcmp(regtok, "}") == 0) break;
+                    if (!is_reg_token(regtok)) die("%s:%d: expected register in list, got '%s'", srcpath, lineno, regtok);
+                    idx++;
+                    size += 8;
+                }
+            } else if (is_reg_token(dst) && is_reg_token(src)) {
+                size = 8;
+            } else if (is_reg_token(dst) && src[0] == '{') {
+                size = 8;
+            } else if (is_reg_token(dst) && !is_reg_token(src) && (src[0] == '#' || src[0] == '$' || src[0] == '0')) {
+                int64_t val;
+                if (src[0] == '#') {
+                    if (!parse_number(src, &val)) val = 1;
+                } else if (src[0] == '$') {
+                    if (!parse_dollar(src, &val) && !eval_expr(src, &val)) val = 1;
+                } else {
+                    if (!eval_expr(src, &val)) val = 1;
+                }
+                size = ((val & 0xFFFFu) == 0) ? 4 : 8;
+            } else if (src[0] == '[' || dst[0] == '[') {
+                size = 4;
+            } else {
+                size = 4;
+            }
+            pc += size;
+            for (int k = 0; k < opn; ++k) free(ops[k]);
+            free_toks(toks, tn);
+            continue;
+        }
+
         pc += 4;
     }
 }
@@ -613,6 +704,7 @@ static void pass2(FILE *f, FILE *out) {
             if (is_reg_token(dst) && is_reg_token(src)) {
                 int rd = reg_index(dst);
                 int rs = reg_index(src);
+                write_u32_le(out, encode_a(OP_XOR, rd, rd, 1, 0, rd)); pc += 4;
                 uint32_t word = encode_a(OP_ADD, rs, rd, 0, 1, 0);
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
