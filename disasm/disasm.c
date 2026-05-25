@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
     size_t imglen;
     uint8_t *img = load_file(argv[1], &imglen);
 
-    for (int i = 0; i < imglen; i += 4) {
+    for (size_t i = 0; i < imglen; i += 4) {
         Instr d = decode(load_le32(&img[i]));
 
         switch (d.opcode) {

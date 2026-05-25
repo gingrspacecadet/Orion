@@ -1,14 +1,20 @@
+.SUFFIXES:
+
+include template.mk
+
+CC := gcc -I.
+CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-unused-function -Wno-sign-compare
+LDFLAGS :=
+
+BUILD := build
+
+TARGETS := asm disasm emu
+
 .Phony: all
-all: asm emu disasm
+all: $(TARGETS)
 
-.Phony: asm
-asm: asm.c
-	gcc -g -o asm asm.c
+.Phony: clean
+clean:
+	@rm -rf $(BUILD)
 
-.Phony: emu
-emu: emu.c
-	gcc -g -o emu emu.c
-
-.Phony: disasm
-disasm: disasm.c
-	gcc -g -o disasm disasm.c
+$(foreach t,$(TARGETS),$(eval $(call program_TEMPLATE,$(t))))

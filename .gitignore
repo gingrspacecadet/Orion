@@ -1,6 +1,2 @@
-a.out
-*.o
-asm
-emu
-disasm
+build/
 out.bin

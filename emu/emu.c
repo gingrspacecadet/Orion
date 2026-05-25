@@ -189,14 +189,14 @@ uint8_t mem_read8(Memory *mem, uint32_t addr) {
     return p->data[offset];
 }
 
-uint32_t mem_load_le32(Memory *mem, uint32_t addr) {
+uint32_t mem_read_32(Memory *mem, uint32_t addr) {
     return ((uint32_t)mem_read8(mem, addr)) |
            ((uint32_t)mem_read8(mem, addr + 1) << 8) |
            ((uint32_t)mem_read8(mem, addr + 2) << 16) |
            ((uint32_t)mem_read8(mem, addr + 3) << 24);
 }
 
-void mem_store_le32(Memory *mem, uint32_t addr, const uint32_t v) {
+void mem_write_32(Memory *mem, uint32_t addr, const uint32_t v) {
     mem_write8(mem, addr, v);
     mem_write8(mem, addr + 1, v >> 8);
     mem_write8(mem, addr + 2, v >> 16);
@@ -218,11 +218,11 @@ typedef struct {
 
 static void push32(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
-    mem_store_le32(&cpu->memory, cpu->r[SP], v);
+    mem_write_32(&cpu->memory, cpu->r[SP], v);
 }
 
 static uint32_t pop32(Cpu *cpu) {
-    uint32_t v = mem_load_le32(&cpu->memory, cpu->r[SP]);
+    uint32_t v = mem_read_32(&cpu->memory, cpu->r[SP]);
     cpu->r[SP] += 4;    // TODO: raise_exception on OOB SP
     return v;
 }
@@ -268,7 +268,7 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 }
 
 static void step(Cpu *cpu) {
-    uint32_t word = mem_load_le32(&cpu->memory, cpu->pc);
+    uint32_t word = mem_read_32(&cpu->memory, cpu->pc);
 
     Instr d = decode(word);
 
@@ -308,19 +308,19 @@ static void step(Cpu *cpu) {
 
         case OP_LDR: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)d.imm : d.imm));
-            cpu->r[d.rd] = mem_load_le32(&cpu->memory, addr);
+            cpu->r[d.rd] = mem_read_32(&cpu->memory, addr);
             break;
         }
 
         case OP_LDRB: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            cpu->r[d.rd] = mem_load_le32(&cpu->memory, addr);
+            cpu->r[d.rd] = mem_read_32(&cpu->memory, addr);
             break;
         }
 
         case OP_STR: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            mem_store_le32(&cpu->memory, addr, cpu->r[d.rd]);
+            mem_write_32(&cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
