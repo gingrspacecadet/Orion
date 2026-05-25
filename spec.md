@@ -140,8 +140,8 @@ CPU Exceptions:
 |Invalid instruction|0x0|A general error thrown by the decoder if it fails to properly decode an instruction|
 |Misaligned PC|0x1|Thrown when PC is not a multiple of 4|
 |Invalid memory access|0x2|Thrown when an instruction attempts to access a memory location that does not exist|
-|Stack under/overflow|0x3|Thrown when trying to pop past memory maximum or push past 0x0|
-|reserved|0x4-0x1F||
+|Stack under/overflow|0x3/4|Thrown when trying to pop past memory maximum or push past 0x0|
+|reserved|0x5-0x1F||
 |Interrupt entry|0x20-0xFE|Not a cpu exception, and infact a hardware interrupt|
 |Non-maskable Interrupt|0xFF|Thrown by the ICU, self-explanatory|
 

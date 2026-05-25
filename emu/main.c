@@ -5,6 +5,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include "isa.h"
+#include "mem.h"
 
 typedef struct {
     uint8_t opcode;
@@ -121,88 +122,6 @@ static Instr decode(uint32_t word) {
     return instr;
 }
 
-#define PAGE_SIZE   4096
-
-typedef struct {
-    uint8_t data[PAGE_SIZE];
-} MemPage;
-
-typedef struct MemNode {
-    uint32_t page_num;
-    MemPage *page;
-    struct MemNode *next;
-} MemNode;
-
-typedef struct {
-    MemNode *page_table;
-    struct {
-        MemPage *page;
-        uint32_t addr;
-    } cache;
-} Memory;
-
-static MemPage *get_page(Memory *mem, uint32_t addr, bool create) {
-    uint32_t page_num = addr / PAGE_SIZE;
-    MemNode *n = mem->page_table;
-    while (n) {
-        if (n->page_num == page_num) return n->page;
-        n = n->next;
-    }
-    
-    if (!create) return NULL;
-
-    MemPage *p = calloc(1, sizeof(MemPage));
-    MemNode *new_node = malloc(sizeof(MemNode));
-    new_node->page_num = page_num;
-    new_node->page = p;
-    new_node->next = mem->page_table;
-    mem->page_table = new_node;
-    return p;
-}
-
-void mem_init(Memory *mem) {
-    mem->page_table = NULL;
-}
-
-void mem_write8(Memory *mem, uint32_t addr, uint8_t v) {
-    MemPage *p = get_page(mem, addr, true);
-    uint32_t offset = addr % PAGE_SIZE;
-    p->data[offset] = v;
-}
-
-uint8_t mem_read8(Memory *mem, uint32_t addr) {
-    uint32_t page_num = addr / PAGE_SIZE;
-    uint32_t cache_num = mem->cache.addr / PAGE_SIZE;
-
-    MemPage *p;
-
-    if (mem->cache.page && cache_num == page_num) {
-        p = mem->cache.page;
-    } else {
-        p = get_page(mem, addr, false);
-        mem->cache.page = p;
-        mem->cache.addr = page_num * PAGE_SIZE;
-    }
-
-    if (!p) return 0;
-    uint32_t offset = addr % PAGE_SIZE;
-    return p->data[offset];
-}
-
-uint32_t mem_read_32(Memory *mem, uint32_t addr) {
-    return ((uint32_t)mem_read8(mem, addr)) |
-           ((uint32_t)mem_read8(mem, addr + 1) << 8) |
-           ((uint32_t)mem_read8(mem, addr + 2) << 16) |
-           ((uint32_t)mem_read8(mem, addr + 3) << 24);
-}
-
-void mem_write_32(Memory *mem, uint32_t addr, const uint32_t v) {
-    mem_write8(mem, addr, v);
-    mem_write8(mem, addr + 1, v >> 8);
-    mem_write8(mem, addr + 2, v >> 16);
-    mem_write8(mem, addr + 3, v >> 24);
-}
-
 typedef uint32_t Register;
 
 typedef struct {
@@ -213,18 +132,58 @@ typedef struct {
 
     bool running;
 
-    Memory memory;
+    Memory *memory;
 } Cpu;
 
-static void push32(Cpu *cpu, const uint32_t v) {
-    cpu->r[SP] -= 4;
-    mem_write_32(&cpu->memory, cpu->r[SP], v);
+static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
+    if (v) cpu->flags |= (1u << flag);
+    else cpu->flags &= ~(1u << flag);
 }
 
-static uint32_t pop32(Cpu *cpu) {
-    uint32_t v = mem_read_32(&cpu->memory, cpu->r[SP]);
-    cpu->r[SP] += 4;    // TODO: raise_exception on OOB SP
-    return v;
+static inline bool get_flag(Cpu *cpu, Flag flag) {
+    return cpu->flags & (1u << flag);
+}
+
+static void push32_nocheck(Cpu *cpu, const uint32_t v) {
+    cpu->r[SP] -= 4;
+    mem_write_32(cpu->memory, cpu->r[SP], v);
+}
+
+static void raise_exception(Cpu *cpu, Exception e) {
+    set_flag(cpu, FLAG_IE, false);
+
+    // build the exception frame
+    // to avoid recursive exceptions
+    // dont check sp bounds and hope
+    push32_nocheck(cpu, cpu->flags);
+    push32_nocheck(cpu, cpu->pc);
+    push32_nocheck(cpu, e);
+    push32_nocheck(cpu, mem_read_32(cpu->memory, cpu->pc));
+    uint32_t target = mem_read_32(cpu->memory, IHVT_BASE + (e * 4));
+    printf("exception occurred, jumping from 0x%08X to 0x%08X\n", cpu->pc, target);
+    cpu->pc = target;
+}
+
+[[nodiscard]]
+static bool push32(Cpu *cpu, const uint32_t v) {
+    if (cpu->r[SP] <= 4) {
+        raise_exception(cpu, EX_STACK_OVERFLOW);
+        return false;
+    }
+    cpu->r[SP] -= 4;
+    mem_write_32(cpu->memory, cpu->r[SP], v);
+    return true;
+}
+
+[[nodiscard]]
+static bool pop32(Cpu *cpu, uint32_t *out) {
+    if (cpu->r[SP] >= UINT32_MAX - 4) {
+        raise_exception(cpu, EX_STACK_UNDERFLOW);
+        return false;
+    }
+    *out = mem_read_32(cpu->memory, cpu->r[SP]);
+    cpu->r[SP] += 4;
+    return true;
 }
 
 static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
@@ -240,15 +199,6 @@ static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
         : cpu->pc + 4
     );
     return target;
-}
-
-static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
-    if (v) cpu->flags |= (1u << flag);
-    else cpu->flags &= ~(1u << flag);
-}
-
-static inline bool get_flag(Cpu *cpu, Flag flag) {
-    return cpu->flags & (1u << flag);
 }
 
 static void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
@@ -268,7 +218,7 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 }
 
 static void step(Cpu *cpu) {
-    uint32_t word = mem_read_32(&cpu->memory, cpu->pc);
+    uint32_t word = mem_read_32(cpu->memory, cpu->pc);
 
     Instr d = decode(word);
 
@@ -308,25 +258,25 @@ static void step(Cpu *cpu) {
 
         case OP_LDR: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)d.imm : d.imm));
-            cpu->r[d.rd] = mem_read_32(&cpu->memory, addr);
+            cpu->r[d.rd] = mem_read_32(cpu->memory, addr);
             break;
         }
 
         case OP_LDRB: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            cpu->r[d.rd] = mem_read_32(&cpu->memory, addr);
+            cpu->r[d.rd] = mem_read_32(cpu->memory, addr);
             break;
         }
 
         case OP_STR: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            mem_write_32(&cpu->memory, addr, cpu->r[d.rd]);
+            mem_write_32(cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
         case OP_STRB: {
             uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            mem_write8(&cpu->memory, addr, cpu->r[d.rd]);
+            mem_write8(cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
@@ -362,26 +312,26 @@ static void step(Cpu *cpu) {
         }
 
         case OP_CALL: {
-            push32(cpu, cpu->pc + 4);
+            if (!push32(cpu, cpu->pc + 4)) return;
             cpu->pc = compute_jmp_target(cpu, d);
             update_pc = false;
             break;
         }
 
         case OP_RET: {
-            cpu->pc = pop32(cpu);
+            if (!pop32(cpu, &cpu->pc)) return;
             update_pc = false;
             break;
         }
 
         case OP_PUSH: {
             if (d.is_reg) {
-                push32(cpu, cpu->r[d.rm]);
+                if (!push32(cpu, cpu->r[d.rm])) return;;
             }
             else {
                 for (int i = 0; i < 16; i++) {
                     bool push = (cpu->r[d.imm] >> i) & 0x1;
-                    if (push) push32(cpu, cpu->r[i]);
+                    if (push) if (!push32(cpu, cpu->r[i])) return;
                 }
             }
             break;
@@ -389,12 +339,12 @@ static void step(Cpu *cpu) {
 
         case OP_POP: {
             if (d.is_reg) {
-                cpu->r[d.rm] = pop32(cpu);
+                if (!pop32(cpu, &cpu->r[d.rm])) return;
             }
             else {
                 for (int i = 15; i >= 0; i--) {
                     bool pop = (cpu->r[d.imm] >> i) & 0x1;
-                    if (pop) cpu->r[i] = pop32(cpu); 
+                    if (pop) if (!pop32(cpu, &cpu->r[i])) return;
                 }
             }
             break;
@@ -428,9 +378,9 @@ int main(int argc, char **argv) {
 
     Cpu cpu = {0};
     cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
-    mem_init(&cpu.memory);
+    cpu.memory = mem_init();
     for (size_t i = 0; i < imglen; i++) {
-        mem_write8(&cpu.memory, i, img[i]);
+        mem_write8(cpu.memory, i, img[i]);
     }
     cpu.running = true;
     while (cpu.running) {

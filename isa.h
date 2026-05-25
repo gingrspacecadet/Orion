@@ -90,4 +90,15 @@ typedef enum {
     FLAG_IE,
 } Flag;
 
+typedef enum {
+    EX_INVALID_INSTR,
+    EX_MISALIGNED_PC,
+    EX_INVALID_MEM_ACCESS,
+    EX_STACK_UNDERFLOW,
+    EX_STACK_OVERFLOW,
+    EX_NON_MASKABLE_INT = 0xFF,
+} Exception;
+
+#define IHVT_BASE   0x00000100
+
 #endif
