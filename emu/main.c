@@ -149,18 +149,16 @@ static void push32_nocheck(Cpu *cpu, const uint32_t v) {
     mem_write_32(cpu->memory, cpu->r[SP], v);
 }
 
-static void raise_exception(Cpu *cpu, Exception e) {
-    set_flag(cpu, FLAG_IE, false);
-
+static void raise_exception(Cpu *cpu, uint8_t e) {
     // build the exception frame
     // to avoid recursive exceptions
     // dont check sp bounds and hope
     push32_nocheck(cpu, cpu->flags);
+    set_flag(cpu, FLAG_IE, false);
     push32_nocheck(cpu, cpu->pc);
     push32_nocheck(cpu, e);
     push32_nocheck(cpu, mem_read_32(cpu->memory, cpu->pc));
-    uint32_t target = mem_read_32(cpu->memory, IHVT_BASE + (e * 4));
-    printf("exception occurred, jumping from 0x%08X to 0x%08X\n", cpu->pc, target);
+    uint32_t target = mem_read_32(cpu->memory, IHVT_BASE + ((uint32_t)e * 4));
     cpu->pc = target;
 }
 
