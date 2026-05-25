@@ -256,7 +256,7 @@ static void ensure_out_pos(FILE *out, uint32_t pc) {
     if ((uint32_t)cur > pc) {
         // writing backwards would overwrite; this is an error for flat binary mode
         die("assembler attempted to write at 0x%08x but file pos is 0x%08lx",
-            srcpath, lineno, pc, cur);
+            pc, cur);
     }
     // pad with zeros
     while ((uint32_t)cur < pc) {
@@ -389,9 +389,6 @@ static void pass1(FILE *f) {
                     if (*p == ',') p++;
                     char *tt = trim(tok);
                     if (tt[0] == 0) die("empty .word element");
-                    int64_t v;
-                    if (!eval_expr(tt, &v)) die("unknown symbol in .word '%s'", tt);
-                    // optional: require word alignment in pass1
                     if (pc % 4 != 0) die(".word requires word-aligned address (pc=0x%08x)", pc);
                     pc += 4;
                 }
@@ -595,7 +592,7 @@ static void pass2(FILE *f, FILE *out) {
             write_u32_le(out, word);
             pc += 4; free_toks(toks, tn); free(raw); continue;
         }
-        if (strcasecmp(mnem, "RET") == 0) {
+        if (strcasecmp(mnem, "RET") == 0 || strcasecmp(mnem, "IRET") == 0) {
             uint32_t word = (0x12u << 26);
             write_u32_le(out, word);
             pc += 4; free_toks(toks, tn); free(raw); continue;
