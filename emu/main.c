@@ -393,6 +393,7 @@ int main(int argc, char **argv) {
     }
     for (int i = 0; i < 16; i++) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);
+        if (i == 7) putc('\n', stdout);
     }
     putc('\n', stdout);    
 }
