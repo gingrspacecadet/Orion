@@ -187,17 +187,30 @@ int main(int argc, char **argv) {
             default: printf("<unknown>"); break;
         }
 
-        printf(" r%d, ", d.rd);
-        printf("r%d, ", d.rn);
-        if (d.is_reg) {
-            printf("r%d", d.rm);
-        } else {
-            if (d.is_signed) {
-                printf("%" PRId16, d.imm);
+        if (d.opcode == OP_PUSH || d.opcode == OP_POP) {
+            if (d.is_reg) {
+                printf(" r%d", d.rm);
             } else {
-                printf("%" PRIu16, d.imm);
+                if (d.is_signed) {
+                    printf(" %" PRId16, d.imm);
+                } else {
+                    printf(" %" PRIu16, d.imm);
+                }
+            }
+        } else {
+            printf(" r%d, ", d.rd);
+            printf("r%d, ", d.rn);
+            if (d.is_reg) {
+                printf("r%d", d.rm);
+            } else {
+                if (d.is_signed) {
+                    printf("%" PRId16, d.imm);
+                } else {
+                    printf("%" PRIu16, d.imm);
+                }
             }
         }
+        
         printf("\n");
     }
 }

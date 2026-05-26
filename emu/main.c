@@ -146,7 +146,7 @@ static inline bool get_flag(Cpu *cpu, Flag flag) {
 
 static void push32_nocheck(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
-    mem_write_32(cpu->memory, cpu->r[SP], v);
+    mem_write32(cpu->memory, cpu->r[SP], v);
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
@@ -157,8 +157,8 @@ static void raise_exception(Cpu *cpu, uint8_t e) {
     set_flag(cpu, FLAG_IE, false);
     push32_nocheck(cpu, cpu->pc);
     push32_nocheck(cpu, e);
-    push32_nocheck(cpu, mem_read_32(cpu->memory, cpu->pc));
-    uint32_t target = mem_read_32(cpu->memory, IHVT_BASE + ((uint32_t)e * 4));
+    push32_nocheck(cpu, mem_read32(cpu->memory, cpu->pc));
+    uint32_t target = mem_read32(cpu->memory, IHVT_BASE + ((uint32_t)e * 4));
     cpu->pc = target;
 }
 
@@ -169,7 +169,7 @@ static bool push32(Cpu *cpu, const uint32_t v) {
         return false;
     }
     cpu->r[SP] -= 4;
-    mem_write_32(cpu->memory, cpu->r[SP], v);
+    mem_write32(cpu->memory, cpu->r[SP], v);
     return true;
 }
 
@@ -179,7 +179,7 @@ static bool pop32(Cpu *cpu, uint32_t *out) {
         raise_exception(cpu, EX_STACK_UNDERFLOW);
         return false;
     }
-    *out = mem_read_32(cpu->memory, cpu->r[SP]);
+    *out = mem_read32(cpu->memory, cpu->r[SP]);
     cpu->r[SP] += 4;
     return true;
 }
@@ -215,8 +215,10 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     set_flag(cpu, FLAG_V, ((((a ^ b) & (a ^ res)) >> 31 ) & 1u ));
 }
 
+#define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
+
 static void step(Cpu *cpu) {
-    uint32_t word = mem_read_32(cpu->memory, cpu->pc);
+    uint32_t word = mem_read32(cpu->memory, cpu->pc);
 
     Instr d = decode(word);
 
@@ -225,7 +227,7 @@ static void step(Cpu *cpu) {
     switch (d.opcode) {
         case OP_ADD: {
             uint32_t a = cpu->r[d.rn];
-            uint32_t b = (d.is_reg ? cpu->r[d.rm] : d.imm);
+            uint32_t b = get_rm_or_imm(d);
             uint32_t res = a + b;
             cpu->r[d.rd] = res;
             update_flags_add(cpu, a, b, res);
@@ -234,7 +236,7 @@ static void step(Cpu *cpu) {
 
         case OP_SUB: {
             uint32_t a = cpu->r[d.rn];
-            uint32_t b = (d.is_reg ? cpu->r[d.rm] : d.imm);
+            uint32_t b = get_rm_or_imm(d);
             uint32_t res = a - b;
             cpu->r[d.rd] = res;
             update_flags_sub(cpu, a, b, res);
@@ -242,44 +244,49 @@ static void step(Cpu *cpu) {
         }
 
         case OP_XOR: {
-            cpu->r[d.rd] = cpu->r[d.rn] ^ (d.is_reg ? cpu->r[d.rm] : d.imm);
+            cpu->r[d.rd] = cpu->r[d.rn] ^ get_rm_or_imm(d);
+            break;
+        }
+
+        case OP_OR: {
+            cpu->r[d.rd] = cpu->r[d.rn] | get_rm_or_imm(d);
             break;
         }
 
         case OP_CMP: {
             uint32_t a = cpu->r[d.rn];
-            uint32_t b = (d.is_reg ? cpu->r[d.rm] : d.imm);
+            uint32_t b = get_rm_or_imm(d);
             uint32_t res = a - b;
             update_flags_sub(cpu, a, b, res);
             break;
         }
 
         case OP_LDR: {
-            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)d.imm : d.imm));
-            cpu->r[d.rd] = mem_read_32(cpu->memory, addr);
+            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
+            cpu->r[d.rd] = mem_read32(cpu->memory, addr);
             break;
         }
 
         case OP_LDRB: {
-            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            cpu->r[d.rd] = mem_read_32(cpu->memory, addr);
+            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
+            cpu->r[d.rd] = mem_read8(cpu->memory, addr);
             break;
         }
 
         case OP_STR: {
-            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
-            mem_write_32(cpu->memory, addr, cpu->r[d.rd]);
+            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
+            mem_write32(cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
         case OP_STRB: {
-            uint32_t addr = cpu->r[d.rn] + (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm));
+            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
             mem_write8(cpu->memory, addr, cpu->r[d.rd]);
             break;
         }
 
         case OP_LUI: {
-            cpu->r[d.rd] = d.imm << 16;
+            cpu->r[d.rd] = (uint32_t)(get_rm_or_imm(d)) << 16;
             break;
         }
 
@@ -324,7 +331,7 @@ static void step(Cpu *cpu) {
 
         case OP_PUSH: {
             if (d.is_reg) {
-                if (!push32(cpu, cpu->r[d.rm])) return;;
+                if (!push32(cpu, cpu->r[d.rm])) return;
             }
             else {
                 for (int i = 0; i < 16; i++) {

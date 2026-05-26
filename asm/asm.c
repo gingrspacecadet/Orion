@@ -119,12 +119,14 @@ static int is_reg_token(const char *t) {
     if (t[0] != 'R' && t[0] != 'r') return 0;
     char *end;
     if (strncmp(t + 1, "sp", 2) == 0) return 1;
+    if (strncmp(t + 1, "fp", 2) == 0) return 1;
     long v = strtol(t + 1, &end, 10);
     return (*end == 0 && v >= 0 && v <= 15);
 }
 
 static int reg_index(const char *t) {
     if (strncmp(t + 1, "sp", 2) == 0) return 15;
+    if (strncmp(t + 1, "fp", 2) == 0) return 14;
     return atoi(t + 1);
 }
 
@@ -701,8 +703,7 @@ static void pass2(FILE *f, FILE *out) {
             if (is_reg_token(dst) && is_reg_token(src)) {
                 int rd = reg_index(dst);
                 int rs = reg_index(src);
-                write_u32_le(out, encode_a(OP_XOR, rd, rd, 1, 0, rd)); pc += 4;
-                uint32_t word = encode_a(OP_ADD, rs, rd, 0, 1, 0);
+                uint32_t word = encode_a(OP_OR, rs, rd, 1, 0, rs);
                 write_u32_le(out, word);
                 pc += 4; free_toks(toks, tn); free(raw); continue;
             }
@@ -748,9 +749,15 @@ static void pass2(FILE *f, FILE *out) {
                 if (!parse_number(src, &val) && !parse_dollar(src, &val) && !eval_expr(src, &val)) die("invalid immediate '%s'", src);
                 uint32_t high = (uint32_t)((uint64_t)(val) >> 16) & 0xFFFFu;
                 uint32_t low = (uint32_t)(val & 0xFFFFu);
-                uint32_t w_lui = encode_a(OP_LUI, 0, rd, 0, 1, (int64_t)high);
-                write_u32_le(out, w_lui);
-                pc += 4;
+                if (high != 0) {
+                    uint32_t w_lui = encode_a(OP_LUI, 0, rd, 0, 1, (int64_t)high);
+                    write_u32_le(out, w_lui);
+                    pc += 4;
+                } else {
+                    uint32_t w_xor = encode_a(OP_XOR, rd, rd, 1, 0, rd);
+                    write_u32_le(out, w_xor);
+                    pc += 4;
+                }
                 if (low != 0) {
                     uint32_t w_add = encode_a(OP_ADD, rd, rd, 0, 1, (int64_t)low);
                     write_u32_le(out, w_add);
@@ -858,11 +865,15 @@ static void pass2(FILE *f, FILE *out) {
                 
                 int64_t v;
                 if (!parse_number(src, &v)) die("invalid number '%s'", src);
-                write_u32_le(out, encode_m(OP_PUSH, 0, 0, 1, 0, 0)); pc += 4;
-                write_u32_le(out, encode_a(OP_LUI, 0, 0, 0, 1, (int32_t)(v) >> 16)); pc += 4;
+                write_u32_le(out, encode_m(OP_PUSH, 0, 0, 1, 0, 12)); pc += 4;
+                if ((int32_t)(v) >> 16 != 0) {
+                    write_u32_le(out, encode_a(OP_LUI, 0, 0, 0, 1, (int32_t)(v) >> 16)); pc += 4;
+                } else {
+                    write_u32_le(out, encode_a(OP_XOR, 0, 0, 1, 0, 0)); pc += 4;
+                }
                 write_u32_le(out, encode_a(OP_ADD, 0, 0, 0, 0, (uint16_t)v)); pc += 4;
                 write_u32_le(out, encode_m(OP_STR, rn, 0, is_reg_off, 1, off)); pc += 4;
-                write_u32_le(out, encode_m(OP_POP, 0, 0, 1, 0, 0)); pc += 4;
+                write_u32_le(out, encode_m(OP_POP, 0, 0, 1, 0, 12)); pc += 4;
                 free_toks(toks, tn); free(raw); continue;
             }
 

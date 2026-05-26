@@ -73,14 +73,14 @@ uint8_t mem_read8(Memory *mem, uint32_t addr) {
     return p->data[offset];
 }
 
-uint32_t mem_read_32(Memory *mem, uint32_t addr) {
+uint32_t mem_read32(Memory *mem, uint32_t addr) {
     return ((uint32_t)mem_read8(mem, addr)) |
            ((uint32_t)mem_read8(mem, addr + 1) << 8) |
            ((uint32_t)mem_read8(mem, addr + 2) << 16) |
            ((uint32_t)mem_read8(mem, addr + 3) << 24);
 }
 
-void mem_write_32(Memory *mem, uint32_t addr, const uint32_t v) {
+void mem_write32(Memory *mem, uint32_t addr, const uint32_t v) {
     mem_write8(mem, addr, v);
     mem_write8(mem, addr + 1, v >> 8);
     mem_write8(mem, addr + 2, v >> 16);
