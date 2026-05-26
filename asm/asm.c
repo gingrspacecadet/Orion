@@ -830,7 +830,43 @@ static void pass2(FILE *f, FILE *out) {
                 free_toks(toks, tn); free(raw); continue;
             }
 
-            die("unknown MOV form");
+            if (src[0] == '#' && dst[0] == '[') {
+                int bidx = -1;
+                for (int i = 1; i < tn; ++i) if (strcmp(toks[i], "[") == 0) { bidx = i; break; }
+                if (bidx == -1) die("malformed memory operand");
+                int close = -1;
+                for (int i = bidx+1; i < tn; ++i) if (strcmp(toks[i], "]") == 0) { close = i; break; }
+                if (close == -1) die("missing ']'");
+                if (bidx + 1 >= close) die("empty memory operand");
+                char *base_tok = trim(toks[bidx+1]);
+                if (!is_reg_token(base_tok)) die("expected base register in memory operand, got '%s'", base_tok);
+                int rn = reg_index(base_tok);
+                int is_reg_off = 0;
+                int64_t off = 0;
+                if (bidx + 2 < close) {
+                    char *opsep = trim(toks[bidx+2]);
+                    if (strcmp(opsep, "+") != 0 && strcmp(opsep, "-") != 0) die("expected '+' or '-' in memory operand, got '%s'", opsep);
+                    int sign = (opsep[0] == '+') ? 1 : -1;
+                    if (bidx + 3 >= close) die("missing offset after '%s'", opsep);
+                    char *offtok = trim(toks[bidx+3]);
+                    if (is_reg_token(offtok)) { is_reg_off = 1; off = reg_index(offtok); }
+                    else {
+                        if (!parse_number(offtok, &off) && !eval_expr(offtok, &off)) die("invalid offset '%s'", offtok);
+                    }
+                    off = sign * off;
+                }
+                
+                int64_t v;
+                if (!parse_number(src, &v)) die("invalid number '%s'", src);
+                write_u32_le(out, encode_m(OP_PUSH, 0, 0, 1, 0, 0)); pc += 4;
+                write_u32_le(out, encode_a(OP_LUI, 0, 0, 0, 1, (int32_t)(v) >> 16)); pc += 4;
+                write_u32_le(out, encode_a(OP_ADD, 0, 0, 0, 0, (uint16_t)v)); pc += 4;
+                write_u32_le(out, encode_m(OP_STR, rn, 0, is_reg_off, 1, off)); pc += 4;
+                write_u32_le(out, encode_m(OP_POP, 0, 0, 1, 0, 0)); pc += 4;
+                free_toks(toks, tn); free(raw); continue;
+            }
+
+            die("unknown MOV form (mov %s, %s)", dst, src);
         }
         uint32_t opcode; int type;
         if (!lookup_opcode(mnem, &opcode, &type)) {
