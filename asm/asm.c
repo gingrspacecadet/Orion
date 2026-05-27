@@ -232,25 +232,46 @@ static int eval_expr(const char *expr, int64_t *out) {
 static int tokenise(char *line, char *toks[], int max) {
     int n = 0;
     char *p = line;
+
     while (*p && n < max) {
         while (*p && isspace((unsigned char)*p)) p++;
         if (!*p) break;
-        if (*p == ';') break;   // comment
+        if (*p == ';') break;
+
         if (*p == '[' || *p == ']' || *p == '{' || *p == '}' || *p == ',') {
-            char tmp[2] = {*p, 0};
+            char tmp[2] = { *p, 0 };
             toks[n++] = strdup(tmp);
             p++;
             continue;
         }
+
         char *start = p;
-        while (*p && !isspace((unsigned char)*p) && *p != ',' && *p != '[' && *p != ']' && *p != '{' && *p != '}') p++;
+
+        while (*p) {
+            int after_quote = (p > start && *(p - 1) == '\'');
+
+            if (isspace((unsigned char)*p) && !after_quote)
+                break;
+                
+            if ((*p == ',' || *p == '[' || *p == ']' ||
+                 *p == '{' || *p == '}') && !after_quote)
+                break;
+
+            p++;
+        }
+
         int len = p - start;
+        if (len <= 0) continue;
+
         char *tok = xmalloc(len + 1);
-        strncpy(tok, start, len); tok[len] = 0;
+        strncpy(tok, start, len);
+        tok[len] = 0;
+
         char *tt = trim(tok);
         toks[n++] = strdup(tt);
         free(tok);
     }
+
     return n;
 }
 

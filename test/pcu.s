@@ -36,9 +36,9 @@ found_device:
     str r9, [r8]
     add r9, r0, #'o'
     str r9, [r8]
-    add r9, r0, #0x2C
+    add r9, r0, #','
     str r9, [r8]
-    add r9, r0, #0x20
+    add r9, r0, #' '
     str r9, [r8]
     add r9, r0, #'w'
     str r9, [r8]
@@ -52,7 +52,7 @@ found_device:
     str r9, [r8]
     add r9, r0, #'!'
     str r9, [r8]
-    add r9, r0, #0xA
+    add r9, r0, #0xA ; no escape literals yet
     str r9, [r8]
 halt_sys:
     halt
