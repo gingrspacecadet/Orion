@@ -3,11 +3,11 @@
 
 uint32_t pcu_internal_read(void *state, uint32_t offset, uint8_t size) {
     PcuDevice *pcu = (PcuDevice *)state;
-    int slot = offset / PCU_SLOT_SIZE;
-    int reg_offset = offset % PCU_SLOT_SIZE;
+    int slot = offset / sizeof(PcuSlot);
+    int reg_offset = offset % sizeof(PcuSlot);
 
     if (slot >= PCU_MAX_DEVICES) return 0;
-    PcuSlotRegisters *regs = &pcu->slots[slot];
+    PcuSlot *regs = &pcu->slots[slot];
 
     switch (reg_offset) {
         case 0x00:  return regs->device_id;
@@ -20,11 +20,11 @@ uint32_t pcu_internal_read(void *state, uint32_t offset, uint8_t size) {
 
 void pcu_internal_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
     PcuDevice *pcu = (PcuDevice *)state;
-    int slot = offset / PCU_SLOT_SIZE;
-    int reg_offset = offset % PCU_SLOT_SIZE;
+    int slot = offset / sizeof(PcuSlot);
+    int reg_offset = offset % sizeof(PcuSlot);
 
     if (slot >= PCU_MAX_DEVICES) return;
-    PcuSlotRegisters *regs = &pcu->slots[slot];
+    PcuSlot *regs = &pcu->slots[slot];
 
     if (reg_offset == 0x04) {
         regs->base_addr = value;

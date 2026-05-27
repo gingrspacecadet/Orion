@@ -1,4 +1,6 @@
 .org #0x0
+halt
+
 __entry:
 mov r1, #0xF
 halt

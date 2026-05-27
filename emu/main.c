@@ -8,6 +8,7 @@
 #include "mem.h"
 #include "bus.h"
 #include "pcu.h"
+#include "icu.h"
 
 typedef struct {
     uint8_t opcode;
@@ -134,6 +135,8 @@ typedef struct {
 
     bool running;
 
+    bool int_pin;
+
     Memory *memory;
     Bus *bus;   // sits on top of `memory`
 } Cpu;
@@ -221,6 +224,13 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
 static void step(Cpu *cpu) {
+    if (cpu->int_pin && get_flag(cpu, FLAG_IE)) {
+        set_flag(cpu, FLAG_IE, false);
+        push32(cpu, cpu->r[SP]);
+        cpu->r[SP] = 0x00000020;    // TODO: it is a vector table silly
+        return;
+    }
+
     uint32_t word = bus_read32(cpu->bus, cpu->pc);
 
     Instr d = decode(word);
@@ -420,11 +430,18 @@ int main(int argc, char **argv) {
 
     // the pcu itself
     pcu.slots[0].device_id      = 0x12340500;
-    pcu.slots[0].component_size = PCU_MAX_DEVICES * PCU_SLOT_SIZE;
+    pcu.slots[0].component_size = PCU_MAX_DEVICES * sizeof(PcuSlot);
     pcu.slots[0].base_addr      = 0x00001000;
 
     bus_register_device(cpu.bus, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
     bus_update_mapping(cpu.bus, 0, 0x00001000);
+
+    IcuDevice icu = {0};
+    icu.cpu_int_pin = &cpu.int_pin; // wire up the ICU to the cpu!
+
+    bus_register_device(cpu.bus, sizeof(IcuDevice), &icu, icu_read, icu_write);
+    bus_update_mapping(cpu.bus, 1, 0x00002000);
+
     
     // a sample UART device
     pcu.slots[1].device_id      = 0x00010200;
@@ -436,7 +453,7 @@ int main(int argc, char **argv) {
 
     // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
-        bus_write8(cpu.bus, i, img[i]);
+        mem_write8(cpu.memory, i, img[i]);
     }
     cpu.running = true;
     while (cpu.running) {
@@ -449,6 +466,6 @@ int main(int argc, char **argv) {
     putc('\n', stdout);
 
     for (int i = 0; i < cpu.bus->device_count; i++) {
-        printf("bus device %d address %lu\n", i, cpu.bus->devices[i].base_addr);
+        printf("bus device %d address %u\n", i, cpu.bus->devices[i].base_addr);
     }
 }

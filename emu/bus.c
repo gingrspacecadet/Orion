@@ -23,8 +23,11 @@ bool bus_register_device(Bus *bus, uint32_t size, void *state, device_read_cb re
 void bus_update_mapping(Bus *bus, int slot, uint32_t new_base) {
     if (slot >= 0 && slot < bus->device_count) {
         BusDevice *dev = &bus->devices[slot];
-        uint32_t mask = ~(dev->size - 1);
-        dev->base_addr = new_base & mask;
+        if (dev->size > 0) {
+            dev->base_addr = (new_base / dev->size) * dev->size;
+        } else {
+            dev->base_addr = new_base;
+        }
     }
 }
 
@@ -34,8 +37,8 @@ static BusDevice* find_device(Bus *bus, uint32_t addr) {
 
         if (dev->base_addr == 0) continue;
 
-        uint32_t mask = ~(dev->size - 1);
-        if ((addr & mask) == dev->base_addr) {
+        // Clean, foolproof range check
+        if (addr >= dev->base_addr && addr < (dev->base_addr + dev->size)) {
             return dev;
         }
     }
