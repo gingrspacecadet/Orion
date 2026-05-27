@@ -131,13 +131,20 @@ static int reg_index(const char *t) {
 }
 
 static int parse_number(const char *s, int64_t *out) {
-    const char *p = s;
-    if (*p != '#') return 0;
-    char *end;
+    if (s[0] != '#')
+        return 0;
+
+    if (s[1] == '\'' && s[3] == '\'' && s[4] == '\0') {
+        *out = (unsigned char)s[2];
+        return 1;
+    }
+
     errno = 0;
-    long long v = strtoll(p + 1, &end, 0);
-    if (errno) return 0;
-    if (*end != 0) return 0;
+    char *end;
+    long long v = strtoll(s + 1, &end, 0);
+    if (errno || *end != '\0')
+        return 0;
+
     *out = v;
     return 1;
 }
