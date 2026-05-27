@@ -74,8 +74,8 @@ Instructions:
 |0x10   |JXX     |J   |Jumps to addr |
 |0x11  |CALL    |J   |Pushes PC and jumps to addr|
 |0x12  |RET     |J   |Pops PC       |
-|0x13  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Stores at `SP`, then decrements by 4|
-|0x14  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Increments by 4, then loads from `SP`|
+|0x13  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Decrements by 4, then stores at `SP`|
+|0x14  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Loads from `SP`, then increments|
 |0x15-20|reserved|||
 |0x21  |FLAGS   |S   |Reads `flags` to `rd` OR writes `rm`/`imm` to `flags`|
 |0x22  |HALT    |x   |Pauses the cpu until an interrupt fires|
