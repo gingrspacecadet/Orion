@@ -7,11 +7,11 @@ Bus *bus_init(Memory *mem) {
     return bus;
 }
 
-bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_cb read, device_write_cb write) {
+bool bus_register_device(Bus *bus, uint32_t size, void *state, device_read_cb read, device_write_cb write) {
     if (bus->device_count >= MAX_DEVICES) return false;
 
     BusDevice *dev = &bus->devices[bus->device_count++];
-    dev->base_addr = base;
+    dev->base_addr = 0;
     dev->size = size;
     dev->state = state;
     dev->read = read;
@@ -20,10 +20,22 @@ bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, de
     return true;
 }
 
+void bus_update_mapping(Bus *bus, int slot, uint32_t new_base) {
+    if (slot >= 0 && slot < bus->device_count) {
+        BusDevice *dev = &bus->devices[slot];
+        uint32_t mask = ~(dev->size - 1);
+        dev->base_addr = new_base & mask;
+    }
+}
+
 static BusDevice* find_device(Bus *bus, uint32_t addr) {
     for (int i = 0; i < bus->device_count; i++) {
         BusDevice *dev = &bus->devices[i];
-        if (addr >= dev->base_addr && addr < dev->base_addr + dev->size) {
+
+        if (dev->base_addr == 0) continue;
+
+        uint32_t mask = ~(dev->size - 1);
+        if ((addr & mask) == dev->base_addr) {
             return dev;
         }
     }

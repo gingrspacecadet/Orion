@@ -25,7 +25,8 @@ typedef struct {
 } Bus;
 
 Bus *bus_init(Memory *mem);
-bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_cb read, device_write_cb write);
+bool bus_register_device(Bus *bus, uint32_t size, void *state, device_read_cb read, device_write_cb write);
+void bus_update_mapping(Bus *bus, int slot, uint32_t new_base);
 
 uint8_t bus_read8(Bus *bus, uint32_t addr);
 uint32_t bus_read32(Bus *bus, uint32_t addr);

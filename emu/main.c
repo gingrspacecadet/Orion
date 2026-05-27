@@ -7,6 +7,7 @@
 #include "isa.h"
 #include "mem.h"
 #include "bus.h"
+#include "pcu.h"
 
 typedef struct {
     uint8_t opcode;
@@ -133,7 +134,8 @@ typedef struct {
 
     bool running;
 
-    Bus *bus;
+    Memory *memory;
+    Bus *bus;   // sits on top of `memory`
 } Cpu;
 
 static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
@@ -254,6 +256,21 @@ static void step(Cpu *cpu) {
             break;
         }
 
+        case OP_SHL: {
+            cpu->r[d.rd] = cpu->r[d.rn] << get_rm_or_imm(d);
+            break;
+        }
+
+        case OP_SHR: {
+            cpu->r[d.rd] = cpu->r[d.rn] >> get_rm_or_imm(d);
+            break;
+        }
+
+        case OP_AND: {
+            cpu->r[d.rd] = cpu->r[d.rn] & get_rm_or_imm(d);
+            break;
+        }
+
         case OP_CMP: {
             uint32_t a = cpu->r[d.rn];
             uint32_t b = get_rm_or_imm(d);
@@ -295,6 +312,7 @@ static void step(Cpu *cpu) {
             uint32_t target = compute_jmp_target(cpu, d);
             bool jump = false;
             switch (d.cond) {
+                case COND_JMP: jump = true; break;
                 case COND_JEQ: if (get_flag(cpu, FLAG_Z)) jump = true; break;
                 case COND_JNE: if (!get_flag(cpu, FLAG_Z)) jump = true; break;
                 case COND_JLT: if (get_flag(cpu, FLAG_N) != get_flag(cpu, FLAG_V)) jump = true; break;
@@ -371,6 +389,15 @@ static void step(Cpu *cpu) {
     if (update_pc) cpu->pc += 4;
 }
 
+void uart_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
+    putchar(value & 0xFF);
+    fflush(stdout);
+}
+
+uint32_t uart_read(void *state, uint32_t offset, uint8_t size) {
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s out.bin\n", argv[0]);
@@ -384,7 +411,28 @@ int main(int argc, char **argv) {
 
     Cpu cpu = {0};
     cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
-    cpu.bus = bus_init(mem_init());
+    cpu.memory = mem_init();
+    cpu.bus = bus_init(cpu.memory);
+
+    // initialise the PCU hardware state
+    PcuDevice pcu = {0};
+    pcu.bus = cpu.bus;
+
+    // the pcu itself
+    pcu.slots[0].device_id      = 0x12340500;
+    pcu.slots[0].component_size = PCU_MAX_DEVICES * PCU_SLOT_SIZE;
+    pcu.slots[0].base_addr      = 0x00001000;
+
+    bus_register_device(cpu.bus, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
+    bus_update_mapping(cpu.bus, 0, 0x00001000);
+    
+    // a sample UART device
+    pcu.slots[1].device_id      = 0x00010200;
+    pcu.slots[1].component_size = 0x00000100;
+    pcu.slots[1].base_addr      = 0;
+
+    bus_register_device(cpu.bus, pcu.slots[1].component_size, NULL, uart_read, uart_write);
+
 
     // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
@@ -399,4 +447,8 @@ int main(int argc, char **argv) {
         if (i == 7) putc('\n', stdout);
     }
     putc('\n', stdout);
+
+    for (int i = 0; i < cpu.bus->device_count; i++) {
+        printf("bus device %d address %lu\n", i, cpu.bus->devices[i].base_addr);
+    }
 }
