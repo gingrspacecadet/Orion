@@ -197,3 +197,25 @@ Exception/Interrupt stack frames
 
 Internal exception entry (vec < 0x20): push Flags, PC, error code, offending instruction, then `PC = IHVT[vec]`
 External interrupt (vec >= 0x20): if `IE==1` or `vec=0xFF`: clear IE, push Flags, push PC, then `PC = IHVT[vec]`.
+
+Peripheral Configuration Unit (PCU)
+
+Dedficated hardware block that sits at a permanently hardcoded slice of memory (`0x0000_1000`).
+Consists of 16 "Devices"
+Each device is 16 bytes
+|Offset|Name|Description|
+|------|----|-----------|
+|`0x00`|Device ID register (RO)|Hardcoded 32 bit number unique to the device type. Split into Vendor(12), Class(8), Device(8), and Revision(4) fields.|
+|`0x04`|Base Address register (RW)|Contains the address for the memory mapping. BIOS sets this to `0` (unmapped) on system reset.|
+|`0x08`|Component Size register (RO)|Hardcoded value representing how many bytes of address space the device requires|
+|`0x0C`|Reserved|For potential future updates|
+
+PCU Device Class IDs
+|ID|Meaning|
+|--|-------|
+|`0x00`|Reserved|
+|`0x01`|Mass storage|
+|`0x02`|Network/comms|
+|`0x03`|Display/graphics|
+|`0x04`|Input|
+|`0x05`|System infrastructure (ICU, timers, etc)|

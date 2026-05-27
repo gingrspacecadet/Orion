@@ -17,10 +17,6 @@ typedef struct MemNode {
 
 typedef struct Memory {
     MemNode *page_table;
-    struct {
-        MemPage *page;
-        uint32_t addr;
-    } cache;
 } Memory;
 
 static MemPage *get_page(Memory *mem, uint32_t addr, bool create) {
@@ -55,18 +51,7 @@ void mem_write8(Memory *mem, uint32_t addr, uint8_t v) {
 }
 
 uint8_t mem_read8(Memory *mem, uint32_t addr) {
-    uint32_t page_num = addr / PAGE_SIZE;
-    uint32_t cache_num = mem->cache.addr / PAGE_SIZE;
-
-    MemPage *p;
-
-    if (mem->cache.page && cache_num == page_num) {
-        p = mem->cache.page;
-    } else {
-        p = get_page(mem, addr, false);
-        mem->cache.page = p;
-        mem->cache.addr = page_num * PAGE_SIZE;
-    }
+    MemPage *p = get_page(mem, addr, false);
 
     if (!p) return 0;
     uint32_t offset = addr % PAGE_SIZE;

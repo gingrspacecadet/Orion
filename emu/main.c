@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include "isa.h"
 #include "mem.h"
+#include "bus.h"
 
 typedef struct {
     uint8_t opcode;
@@ -132,7 +133,7 @@ typedef struct {
 
     bool running;
 
-    Memory *memory;
+    Bus *bus;
 } Cpu;
 
 static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
@@ -146,7 +147,7 @@ static inline bool get_flag(Cpu *cpu, Flag flag) {
 
 static void push32_nocheck(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
-    mem_write32(cpu->memory, cpu->r[SP], v);
+    bus_write32(cpu->bus, cpu->r[SP], v);
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
@@ -157,8 +158,8 @@ static void raise_exception(Cpu *cpu, uint8_t e) {
     set_flag(cpu, FLAG_IE, false);
     push32_nocheck(cpu, cpu->pc);
     push32_nocheck(cpu, e);
-    push32_nocheck(cpu, mem_read32(cpu->memory, cpu->pc));
-    uint32_t target = mem_read32(cpu->memory, IHVT_BASE + ((uint32_t)e * 4));
+    push32_nocheck(cpu, bus_read32(cpu->bus, cpu->pc));
+    uint32_t target = bus_read32(cpu->bus, IHVT_BASE + ((uint32_t)e * 4));
     cpu->pc = target;
 }
 
@@ -169,7 +170,7 @@ static bool push32(Cpu *cpu, const uint32_t v) {
         return false;
     }
     cpu->r[SP] -= 4;
-    mem_write32(cpu->memory, cpu->r[SP], v);
+    bus_write32(cpu->bus, cpu->r[SP], v);
     return true;
 }
 
@@ -179,7 +180,7 @@ static bool pop32(Cpu *cpu, uint32_t *out) {
         raise_exception(cpu, EX_STACK_UNDERFLOW);
         return false;
     }
-    *out = mem_read32(cpu->memory, cpu->r[SP]);
+    *out = bus_read32(cpu->bus, cpu->r[SP]);
     cpu->r[SP] += 4;
     return true;
 }
@@ -218,7 +219,7 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
 static void step(Cpu *cpu) {
-    uint32_t word = mem_read32(cpu->memory, cpu->pc);
+    uint32_t word = bus_read32(cpu->bus, cpu->pc);
 
     Instr d = decode(word);
 
@@ -263,25 +264,25 @@ static void step(Cpu *cpu) {
 
         case OP_LDR: {
             uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            cpu->r[d.rd] = mem_read32(cpu->memory, addr);
+            cpu->r[d.rd] = bus_read32(cpu->bus, addr);
             break;
         }
 
         case OP_LDRB: {
             uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            cpu->r[d.rd] = mem_read8(cpu->memory, addr);
+            cpu->r[d.rd] = bus_read8(cpu->bus, addr);
             break;
         }
 
         case OP_STR: {
             uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            mem_write32(cpu->memory, addr, cpu->r[d.rd]);
+            bus_write32(cpu->bus, addr, cpu->r[d.rd]);
             break;
         }
 
         case OP_STRB: {
             uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            mem_write8(cpu->memory, addr, cpu->r[d.rd]);
+            bus_write8(cpu->bus, addr, cpu->r[d.rd]);
             break;
         }
 
@@ -383,9 +384,11 @@ int main(int argc, char **argv) {
 
     Cpu cpu = {0};
     cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
-    cpu.memory = mem_init();
+    cpu.bus = bus_init(mem_init());
+
+    // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
-        mem_write8(cpu.memory, i, img[i]);
+        bus_write8(cpu.bus, i, img[i]);
     }
     cpu.running = true;
     while (cpu.running) {
@@ -395,5 +398,5 @@ int main(int argc, char **argv) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);
         if (i == 7) putc('\n', stdout);
     }
-    putc('\n', stdout);    
+    putc('\n', stdout);
 }
