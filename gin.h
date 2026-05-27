@@ -8,6 +8,7 @@
 
 // all functions, macros, and variables that begin with __gin_ are not indended for your use. please do not use them
 
+#define _GNU_SOURCE
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,31 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
+#undef _GNU_SOURCE
+
+static inline void *xmalloc(size_t size) {
+    void *ptr = malloc(size);
+    if (!ptr) {
+        fprintf(stderr, "xmalloc: failed to allocate %zu bytes\n", size);
+        exit(1);
+    }
+    return ptr;
+}
+
+static inline void *xcalloc(size_t size) {
+    void *ptr = xmalloc(size);
+    memset(ptr, 0, size);
+    return ptr;
+}
+
+static inline void *xrealloc(void *ptr, size_t size) {
+    ptr = realloc(ptr, size);
+    if (!ptr) {
+        fprintf(stderr, "xrealloc: failed to reallocate %zu bytes\n", size);
+        exit(1);
+    }
+    return ptr;
+}
 
 // template instantiation logic
 
@@ -51,11 +77,7 @@ typedef struct { \
 static N##_array N##_array_empty = {}; \
 static inline N##_array N##_array_init(void) { \
     N##_array v = {}; \
-    v.data = (T*)calloc(1, sizeof(T)); \
-    if (!v.data) { \
-        fprintf(stderr, #N "_array_init: malloc failed\n"); \
-        exit(1); \
-    } \
+    v.data = (T*)xcalloc(sizeof(T)); \
     v.len = 0; \
     v.cap = 1; \
     v.alive = true; \
@@ -203,8 +225,8 @@ static inline void N##_hashmap_put(N##_hashmap *hm, const char *key, T value) { 
         } \
         e = e->next; \
     } \
-    N##_entry *ne = (N##_entry*)malloc(sizeof(N##_entry)); \
-    ne->key = strdup(key); \
+    N##_entry *ne = (N##_entry*)xmalloc(sizeof(N##_entry)); \
+    ne->key = xstrdup(key); \
     ne->value = value; \
     ne->next = hm->buckets[h]; \
     hm->buckets[h] = ne; \
@@ -239,7 +261,6 @@ static inline int N##_hashmap_remove(N##_hashmap *hm, const char *key) { \
     } \
     return 0; \
 }
-
 
 // better strings! they are ptr+len pairs
 
@@ -298,7 +319,7 @@ static inline bool string_contains(String str, String needle) {
 }
 
 // in-place cstring formatter
-static char *format(char *msg, ...) {
+static inline char *format(char *msg, ...) {
     char *buf;
     va_list args;
     va_start(args, msg);
@@ -319,23 +340,14 @@ typedef struct {
 #define __GIN_ARENA_BLOCK_SIZE (1024 * 1024)
 
 static inline Arena *arena_create() {
-    Arena *a = malloc(sizeof(Arena));
+    Arena *a = xmalloc(sizeof(Arena));
     if (!a) {
         exit(1);
     }
     a->block_size = __GIN_ARENA_BLOCK_SIZE;
     a->block_count = 1;
-    a->blocks = malloc(sizeof(void*));
-    if (!a->blocks) {
-        free(a);
-        exit(1);
-    }
-    a->blocks[0] = malloc(a->block_size);
-    if (!a->blocks[0]) {
-        free(a->blocks);
-        free(a);
-        exit(1);
-    }
+    a->blocks = xmalloc(sizeof(void*));
+    a->blocks[0] = xmalloc(a->block_size);
     a->current_index = 0;
     return a;
 }
@@ -347,10 +359,7 @@ static inline void *arena_alloc(Arena *a, size_t size) {
         if (!a->blocks) {
             exit(1);
         }
-        a->blocks[a->block_count - 1] = malloc(a->block_size);
-        if (!a->blocks[a->block_count - 1]) {
-            exit(1);
-        }
+        a->blocks[a->block_count - 1] = xmalloc(a->block_size);
         a->current_index = 0;
     }
 
@@ -378,28 +387,4 @@ static inline void arena_destroy(Arena *a) {
     }
     free(a->blocks);
     free(a);
-}
-
-void *xmalloc(size_t size) {
-    void *ptr = malloc(size);
-    if (!ptr) {
-        fprintf(stderr, "xmalloc: failed to allocate %zu bytes\n", size);
-        exit(1);
-    }
-    return ptr;
-}
-
-void *xcalloc(size_t size) {
-    void *ptr = xmalloc(size);
-    memset(ptr, 0, size);
-    return ptr;
-}
-
-void *xrealloc(void *ptr, size_t size) {
-    ptr = realloc(ptr, size);
-    if (!ptr) {
-        fprintf(stderr, "xrealloc: failed to reallocate %zu bytes\n", size);
-        exit(1);
-    }
-    return ptr;
 }
