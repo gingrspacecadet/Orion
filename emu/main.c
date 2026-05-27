@@ -433,14 +433,12 @@ int main(int argc, char **argv) {
     pcu.slots[0].component_size = PCU_MAX_DEVICES * sizeof(PcuSlot);
     pcu.slots[0].base_addr      = 0x00001000;
 
-    bus_register_device(cpu.bus, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
-    bus_update_mapping(cpu.bus, 0, 0x00001000);
+    bus_register_device(cpu.bus, 0x00001000, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
 
     IcuDevice icu = {0};
     icu.cpu_int_pin = &cpu.int_pin; // wire up the ICU to the cpu!
 
-    bus_register_device(cpu.bus, sizeof(IcuDevice), &icu, icu_read, icu_write);
-    bus_update_mapping(cpu.bus, 1, 0x00002000);
+    bus_register_device(cpu.bus, 0x00002000, sizeof(IcuDevice), &icu, icu_read, icu_write);
 
     
     // a sample UART device
@@ -448,7 +446,7 @@ int main(int argc, char **argv) {
     pcu.slots[1].component_size = 0x00000100;
     pcu.slots[1].base_addr      = 0;
 
-    bus_register_device(cpu.bus, pcu.slots[1].component_size, NULL, uart_read, uart_write);
+    bus_register_device(cpu.bus, 0, pcu.slots[1].component_size, NULL, uart_read, uart_write);
 
 
     // TODO: ideally, this would be done by the ROM image
