@@ -433,6 +433,8 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     }
 }
 
+
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s out.bin\n", argv[0]);
@@ -454,25 +456,23 @@ int main(int argc, char **argv) {
     pcu.bus = cpu.bus;
 
     // the pcu itself
-    pcu.slots[0].device_id      = 0x12340500;
+    pcu.slots[0].device_id      = MAKE_DEVICE_ID(0x123, 0x05, 0, 0);
     pcu.slots[0].component_size = PCU_MAX_DEVICES * sizeof(PcuSlot);
     pcu.slots[0].base_addr      = 0x00001000;
 
     bus_register_device(cpu.bus, 0x00001000, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
-
-    IcuDevice icu = {0};
-    icu.cpu_int_pin = &cpu.int_pin; // wire up the ICU to the cpu!
-
-    bus_register_device(cpu.bus, 0x00002000, sizeof(IcuDevice), &icu, icu_read, icu_write);
-
     
     // a sample UART device
-    pcu.slots[1].device_id      = 0x00010200;
+    pcu.slots[1].device_id      = MAKE_DEVICE_ID(0x123, 0x02, 0x1, 0);
     pcu.slots[1].component_size = 0x00000100;
     pcu.slots[1].base_addr      = 0;
 
     bus_register_device(cpu.bus, 0, pcu.slots[1].component_size, NULL, uart_read, uart_write);
+    
+    IcuDevice icu = {0};
+    icu.cpu_int_pin = &cpu.int_pin; // wire up the ICU to the cpu!
 
+    bus_register_device(cpu.bus, 0x00002000, sizeof(IcuDevice), &icu, icu_read, icu_write);
 
     // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
@@ -495,6 +495,18 @@ int main(int argc, char **argv) {
     putc('\n', stdout);
 
     for (int i = 0; i < cpu.bus->device_count; i++) {
-        printf("bus device %d address %u\n", i, cpu.bus->devices[i].base_addr);
+        printf("bus device %d address 0x%08X\n", i, cpu.bus->devices[i].base_addr);
+    }
+
+    for (int i = 0; i < 16; i++) {
+        if (pcu.slots[i].device_id == 0) continue;
+
+        PcuSlot dev = pcu.slots[i];
+        uint16_t vendor = (dev.device_id >> 20) & 0xFFF;
+        uint8_t class = (dev.device_id >> 12) & 0xFF;
+        uint8_t device = (dev.device_id >> 4) & 0xFF;
+        uint8_t revision = dev.device_id & 0xF;
+
+        printf("pcu device %d address 0x%08X, vendor 0x%03X, class 0x%02X, device 0x%02X, revision 0x%01X\n", i, dev.base_addr, vendor, class, device, revision);
     }
 }
