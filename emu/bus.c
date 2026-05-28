@@ -39,7 +39,6 @@ static BusDevice* find_device(Bus *bus, uint32_t addr) {
 
         if (dev->base_addr == 0) continue;
 
-        // Clean, foolproof range check
         if (addr >= dev->base_addr && addr < (dev->base_addr + dev->size)) {
             return dev;
         }

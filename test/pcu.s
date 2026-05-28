@@ -1,3 +1,4 @@
+.org #0x00001000
 __entry:
     add r1, r1, #0x1000
     add r3, r3, #16

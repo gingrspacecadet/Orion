@@ -9,6 +9,7 @@
 #include "bus.h"
 #include "pcu.h"
 #include "icu.h"
+#include "hw_timer.h"
 
 typedef struct {
     uint8_t opcode;
@@ -156,6 +157,8 @@ static void push32_nocheck(Cpu *cpu, const uint32_t v) {
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
+    printf("exception %d\n", e); exit(1);
+
     // build the exception frame
     // to avoid recursive exceptions
     // dont check sp bounds and hope
@@ -328,7 +331,7 @@ static void step(Cpu *cpu) {
                 case COND_JP: if (!get_flag(cpu, FLAG_N)) jump = true; break;
                 case COND_JVS: if (get_flag(cpu, FLAG_V)) jump = true; break;
                 case COND_JVC: if (!get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JLS: if (!get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JLS: if (!get_flag(cpu, FLAG_C) || get_flag(cpu, FLAG_Z)) jump = true; break;
                 default: break;
             }
             if (jump) {
@@ -356,6 +359,10 @@ static void step(Cpu *cpu) {
                 if (!push32(cpu, cpu->r[d.rm])) return;
             }
             else {
+                if (d.imm & 1u) {
+                    raise_exception(cpu, EX_INVALID_INSTR);
+                    return;
+                }
                 for (int i = 0; i < 16; i++) {
                     bool push = (d.imm >> i) & 0x1;
                     if (push) if (!push32(cpu, cpu->r[i])) return;
@@ -369,6 +376,10 @@ static void step(Cpu *cpu) {
                 if (!pop32(cpu, &cpu->r[d.rm])) return;
             }
             else {
+                if (d.imm & 1u) {
+                    raise_exception(cpu, EX_INVALID_INSTR);
+                    return;
+                }
                 for (int i = 15; i >= 0; i--) {
                     bool pop = (d.imm >> i) & 0x1;
                     if (pop) if (!pop32(cpu, &cpu->r[i])) return;
@@ -413,6 +424,8 @@ static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
     return idx;
 }
 
+#define IHVT_BASE   0x00010000
+
 static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     uint32_t active_irqs = icu->irr & ~(icu->imr);
 
@@ -421,7 +434,8 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
         icu->isr |= (1u << irq);
         icu->irr &= ~(1u << irq);
 
-        // Keep the hardware pin synchronized with the new register states!
+        // printf("intercepted irq\n"); return;
+
         *icu->cpu_int_pin = ((icu->irr & ~icu->imr) != 0);
 
         if (!push32(cpu, cpu->flags)) return;
@@ -429,11 +443,9 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
         if (!push32(cpu, cpu->pc)) return;
 
         uint8_t vec = icu->vec[irq];
-        cpu->pc = bus_read32(cpu->bus, 0x0100 + (vec * 4));
+        cpu->pc = bus_read32(cpu->bus, IHVT_BASE + (vec * 4));
     }
 }
-
-
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -447,9 +459,12 @@ int main(int argc, char **argv) {
     uint8_t *img = load_file(path, &imglen);
 
     Cpu cpu = {0};
+    cpu.pc = 0x00001000;
     cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
     cpu.memory = mem_init();
     cpu.bus = bus_init(cpu.memory);
+
+    TimerPool timer_pool = {0};
 
     // initialise the PCU hardware state
     PcuDevice pcu = {0};
@@ -458,9 +473,9 @@ int main(int argc, char **argv) {
     // the pcu itself
     pcu.slots[0].device_id      = MAKE_DEVICE_ID(0x123, 0x05, 0, 0);
     pcu.slots[0].component_size = PCU_MAX_DEVICES * sizeof(PcuSlot);
-    pcu.slots[0].base_addr      = 0x00001000;
+    pcu.slots[0].base_addr      = 0x00010600;
 
-    bus_register_device(cpu.bus, 0x00001000, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
+    bus_register_device(cpu.bus, 0x00010600, pcu.slots[0].component_size, &pcu, pcu_internal_read, pcu_internal_write);
     
     // a sample UART device
     pcu.slots[1].device_id      = MAKE_DEVICE_ID(0x123, 0x02, 0x1, 0);
@@ -472,7 +487,11 @@ int main(int argc, char **argv) {
     IcuDevice icu = {0};
     icu.cpu_int_pin = &cpu.int_pin; // wire up the ICU to the cpu!
 
-    bus_register_device(cpu.bus, 0x00002000, sizeof(IcuDevice), &icu, icu_read, icu_write);
+    bus_register_device(cpu.bus, 0x00010400, sizeof(IcuDevice), &icu, icu_read, icu_write);
+
+    // TODO: register this as a bus device
+    HwTimer system_timer;
+    hw_timer_init(&system_timer, &timer_pool, icu_get_irq_line(&icu, 0));
 
     // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
@@ -483,7 +502,9 @@ int main(int argc, char **argv) {
         // first, step the cpu
         step(&cpu);
 
-        // then tick all the peripherals
+        // then handle timer pool
+        timer_pool.virtual_time += 1;   // TODO: make this more accurate
+        timer_run_expired(&timer_pool);
 
         // then check for interrupts
         icu_check_and_fire(&cpu, &icu);

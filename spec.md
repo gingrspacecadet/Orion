@@ -7,7 +7,7 @@ Private PC and flags registers
 
 SP and PC are both stored as byte addresses, but must be word-aligned.
 
-PC always points to the next instruction to be processed.  
+PC always points to the current instruction being executed.  
 
 the Flags register - a private register containing all the status flags of the cpu.
 |Bit|Flag name|Desc|
@@ -16,7 +16,7 @@ the Flags register - a private register containing all the status flags of the c
 |1|Overflow (V)|Set when the last alu operation's result overflows a int32_t|
 |2|Zero (Z)|Set when the last alu operation resulted in exactly 0|
 |3|Negative (N)|Set when the last alu operation's result's MSB was set|
-|4|Interrupts Enabled(IE)|Set manually using the `INTE` instruction. When false, external interrupts are ignored|
+|4|Interrupts Enabled(IE)|Set manually. When false, external interrupts are ignored|
 
 fixed 32-bit instructions.
 
@@ -34,7 +34,7 @@ encoding types
 J-type: JMP, JE, JGE, CALL, etc  
 A-type: ADD, SUB, SHL etc  
 M-type: LDR, STR,  
-S-type: FLAGS, INTE,  
+S-type: FLAGS,   
 
 A-types always update flags as they go through the ALU, which handles it.  
 
@@ -103,7 +103,7 @@ assemblers should prefer using these mnemonics, and encode `cond` accordingly
 |0xA|JP|`N == 0`|
 |0xB|JVS|`V == 1`|
 |0xC|JVC|`V == 0`|
-|0xD|JLS|`C == 0`|
+|0xD|JLS|`C == 0 \|\| Z == 1`|
 |0xE|reserved||
 |0xF|reserved||
 
@@ -131,7 +131,6 @@ Exact opcode spec table
 |RET |            |Pops from SP|Increments by 4|Out-of-bounds target|
 |PUSH|            |         |On single-register, decrements by 4. On bitmask, decrements by 4 for every set bit|Pushing SP|
 |POP |            |         |On single-register, increments by 4. On bitmask, increments by 4 for every set bit|Popping SP|
-|INTE|IE          |         |         |Any `reserved` bits set|
 |FLAGS|           |         |         |           |
 
 CPU Exceptions:
@@ -219,3 +218,15 @@ PCU Device Class IDs
 |`0x03`|Display/graphics|
 |`0x04`|Input|
 |`0x05`|System infrastructure (ICU, timers, etc)|
+
+Memory Mapping
+
+|Start addr|End addr|Size|Name|Desc|
+|----------|--------|----|----|----|
+|`0x00000000`|`0x00000FFF`|4KB|Zero page|Strictly unmapped. Any read/write attempts here trigger bus fault|
+|`0x00001000`|`0x0000FFFF`|60KB|Boot ROM|Contains the boot code, and the hardware reset vector `0x00001000`|
+|`0x00010000`|`0x000103FF`|1KB|IHVT||
+|`0x00010400`|`0x000104FF`|256B|ICU|Fixed control registers for int management|
+|`0x00010500`|`0x000105FF`|256B|Timers|Fixed hardware tick counters|
+|`0x00010600`|`0x0001FFFF`|62.5KB|PCU||
+|`0x00020000`|`0xFFFFFFFF`|~4.3GB|System RAM||

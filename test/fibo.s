@@ -1,3 +1,4 @@
+.org #0x00001000
 __entry:
     mov r0, #5
     mov r1, #1
