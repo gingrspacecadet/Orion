@@ -99,6 +99,6 @@ typedef enum {
     EX_NON_MASKABLE_INT = 0xFF,
 } Exception;
 
-#define IHVT_BASE   0x00000100
+#define IHVT_BASE   0x00010000
 
 #endif

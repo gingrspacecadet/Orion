@@ -1,4 +1,5 @@
 #include "isa.h"
+#include <string.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -138,6 +139,8 @@ int main(int argc, char **argv) {
 
     for (size_t i = 0; i < imglen; i += 4) {
         Instr d = decode(load_le32(&img[i]));
+        Instr zero = {0};
+        if (memcmp(&d, &zero, sizeof(d)) == 0) continue;
 
         switch (d.opcode) {
             case OP_ADD: printf("add"); break;
