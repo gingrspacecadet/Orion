@@ -57,3 +57,22 @@ void icu_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
         // TODO: throw exception
     }
 }
+
+static void icu_set_irq_line_level(void *state, int pin, bool level) {
+    IcuDevice *icu = (IcuDevice *)state;
+    if (level) {
+        icu_raise_irq(icu, pin);
+    } else {
+        icu_lower_irq(icu, pin);
+    }
+}
+
+IrqLine icu_get_irq_line(IcuDevice *icu, int irq_num) {
+    IrqLine line = {0};
+    if (irq_num >= 0 && irq_num < 32) {
+        line.set_level = icu_set_irq_line_level;
+        line.state = icu;
+        line.pin = irq_num;
+    }
+    return line;
+}

@@ -7,15 +7,15 @@
 
 #define MAX_DEVICES 32
 
-typedef uint32_t (*device_read_cb)(void *state, uint32_t offset, uint8_t size);
-typedef void     (*device_write_cb)(void *state, uint32_t offset, uint32_t value, uint8_t size);
+typedef uint32_t (*device_read_fn)(void *state, uint32_t offset, uint8_t size);
+typedef void     (*device_write_fn)(void *state, uint32_t offset, uint32_t value, uint8_t size);
 
 typedef struct {
     uint32_t base_addr;
     uint32_t size;
     void *state;
-    device_read_cb read;
-    device_write_cb write;
+    device_read_fn read;
+    device_write_fn write;
 } BusDevice;
 
 typedef struct {
@@ -25,7 +25,7 @@ typedef struct {
 } Bus;
 
 Bus *bus_init(Memory *mem);
-bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_cb read, device_write_cb write);
+bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_fn read, device_write_fn write);
 void bus_update_mapping(Bus *bus, int slot, uint32_t new_base);
 
 uint8_t bus_read8(Bus *bus, uint32_t addr);

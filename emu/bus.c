@@ -7,7 +7,7 @@ Bus *bus_init(Memory *mem) {
     return bus;
 }
 
-bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_cb read, device_write_cb write) {
+bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_fn read, device_write_fn write) {
     if (bus->device_count >= MAX_DEVICES) return false;
 
     BusDevice *dev = &bus->devices[bus->device_count++];
