@@ -224,13 +224,6 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
 static void step(Cpu *cpu) {
-    if (cpu->int_pin && get_flag(cpu, FLAG_IE)) {
-        set_flag(cpu, FLAG_IE, false);
-        push32(cpu, cpu->r[SP]);
-        cpu->r[SP] = 0x00000020;    // TODO: it is a vector table silly
-        return;
-    }
-
     uint32_t word = bus_read32(cpu->bus, cpu->pc);
 
     Instr d = decode(word);
@@ -364,7 +357,7 @@ static void step(Cpu *cpu) {
             }
             else {
                 for (int i = 0; i < 16; i++) {
-                    bool push = (cpu->r[d.imm] >> i) & 0x1;
+                    bool push = (d.imm >> i) & 0x1;
                     if (push) if (!push32(cpu, cpu->r[i])) return;
                 }
             }
@@ -377,7 +370,7 @@ static void step(Cpu *cpu) {
             }
             else {
                 for (int i = 15; i >= 0; i--) {
-                    bool pop = (cpu->r[d.imm] >> i) & 0x1;
+                    bool pop = (d.imm >> i) & 0x1;
                     if (pop) if (!pop32(cpu, &cpu->r[i])) return;
                 }
             }
@@ -406,6 +399,38 @@ void uart_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
 
 uint32_t uart_read(void *state, uint32_t offset, uint8_t size) {
     return 0;
+}
+
+static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
+    uint8_t highest = 0;
+    uint8_t idx = 0xFF;
+    for (int i = 0; i < 32; i++) {
+        if (active & (1u << i) && icu->prio[i] > highest) {
+            highest = icu->prio[i];
+            idx = i;
+        }
+    }
+    return idx;
+}
+
+static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
+    uint32_t active_irqs = icu->irr & ~(icu->imr);
+
+    if (active_irqs != 0 && cpu->flags & FLAG_IE) {
+        uint8_t irq = find_highest_priority(icu, active_irqs);
+        icu->isr |= (1u << irq);
+        icu->irr &= ~(1u << irq);
+
+        // Keep the hardware pin synchronized with the new register states!
+        *icu->cpu_int_pin = ((icu->irr & ~icu->imr) != 0);
+
+        if (!push32(cpu, cpu->flags)) return;
+        cpu->flags &= ~FLAG_IE; 
+        if (!push32(cpu, cpu->pc)) return;
+
+        uint8_t vec = icu->vec[irq];
+        cpu->pc = bus_read32(cpu->bus, 0x0100 + (vec * 4));
+    }
 }
 
 int main(int argc, char **argv) {
@@ -455,7 +480,13 @@ int main(int argc, char **argv) {
     }
     cpu.running = true;
     while (cpu.running) {
+        // first, step the cpu
         step(&cpu);
+
+        // then tick all the peripherals
+
+        // then check for interrupts
+        icu_check_and_fire(&cpu, &icu);
     }
     for (int i = 0; i < 16; i++) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);

@@ -164,7 +164,7 @@ On internal interrupts (`vec < 0x20`):
 Interrupt Controller Unit (ICU):  
 
 Currently only supports 32 possible hardware interrupts  
-MMIO address - 0x0000_0500
+MMIO address - `0x0000_2000`
 - 0x00 - IRR (Interrupt Request Register): one bit per IRQ; set by the hardware when a device asserts an interrupt.
 - 0x04 - ISR (In-Service Register): one bit per IRQ; set when the ICU has dispatched an IRQ to the CPU. Cleared by EOI
 - 0x08 - IMR (Interrupt Mask Register): one bit per IRQ; software can mask unwanted interrupts and they get dropped.

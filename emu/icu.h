@@ -4,13 +4,22 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define ICU_REG_ISR     0x00
-#define ICU_REG_IER     0x04
-#define ICU_REG_IACK    0x08
+#define ICU_IRR     0x00
+#define ICU_ISR     0x04
+#define ICU_IMR     0x08
+#define ICU_PRIO    0x0C
+#define ICU_VEC     0x2C
+#define ICU_EOI     0x4C
+#define ICU_DEF     0x50
 
 typedef struct {
+    uint32_t irr;
     uint32_t isr;
-    uint32_t ier;
+    uint32_t imr;
+    uint8_t prio[32];
+    uint8_t vec[32];
+    uint32_t eoi;
+    uint32_t def;
     bool *cpu_int_pin;
 } IcuDevice;
 
