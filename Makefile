@@ -19,8 +19,8 @@ $$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
 
 endef
 
-CC := gcc -I. -g
-CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-unused-function -Wno-sign-compare -Wno-unused-parameter
+CC := gcc -g
+CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Iinclude
 LDFLAGS :=
 
 BUILD := build

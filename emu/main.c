@@ -403,13 +403,6 @@ static void step(Cpu *cpu) {
     if (update_pc) cpu->pc += 4;
 }
 
-void uart_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
-    if (offset == 0x00) {
-        putchar(value & 0xFF);
-        fflush(stdout);
-    }
-}
-
 #include <unistd.h>
 #include <termios.h>
 #include <sys/select.h>
@@ -476,6 +469,13 @@ uint32_t uart_read(void *state, uint32_t offset, uint8_t size) {
         return stat;
     }
     return 0;
+}
+
+void uart_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
+    if (offset == 0x00) {
+        putchar(value & 0xFF);
+        fflush(stdout);
+    }
 }
 
 static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
@@ -549,7 +549,7 @@ int main(int argc, char **argv) {
     bus_register_device(cpu.bus, 0, pcu.slots[1].component_size, NULL, uart_read, uart_write);
     
     IcuDevice icu = {0};
-    icu.cpu_int_pin = &cpu.int_pin; // wire up the ICU to the cpu!
+    icu.cpu_int_pin = &cpu.int_pin;
 
     bus_register_device(cpu.bus, 0x00010400, sizeof(IcuDevice), &icu, icu_read, icu_write);
 

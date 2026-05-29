@@ -8,6 +8,9 @@
 
 // all functions, macros, and variables that begin with __gin_ are not indended for your use. please do not use them
 
+#ifndef __GIN_H
+#define __GIN_H
+
 #define _GNU_SOURCE
 #include <stddef.h>
 #include <stdlib.h>
@@ -388,3 +391,5 @@ static inline void arena_destroy(Arena *a) {
     free(a->blocks);
     free(a);
 }
+
+#endif

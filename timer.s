@@ -1,6 +1,6 @@
 .org #0x00001000
 __entry:
-    mov r1, #350
+    mov r1, #1000000
 
 loop:
     sub r1, r1, #1

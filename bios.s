@@ -16,19 +16,20 @@ echo_loop:
     ldrb r5, r2, #0 
 
     ; just for shiggles, capitalise lowercase letters
-    cmp r5, #'a'
+    cmp r5, #0x61
     jlt $transmit
     
-    cmp r5, #'z'
+    cmp r5, #0x7A
     jge $transmit
     
     sub r5, r5, #0x20
+    and r5, r5, #0xFF
 
 transmit:
     ; write the char back to ram
     strb r5, r2, #0
 
-    cmp r5, #'Q'
+    cmp r5, #0x51
     jne $echo_loop
 
 __exit:
