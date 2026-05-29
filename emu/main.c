@@ -10,6 +10,7 @@
 #include "pcu.h"
 #include "icu.h"
 #include "hw_timer.h"
+#include "uart.h"
 
 typedef struct {
     uint8_t opcode;
@@ -157,8 +158,6 @@ static void push32_nocheck(Cpu *cpu, const uint32_t v) {
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
-    printf("exception %d\n", e); exit(1);
-
     // build the exception frame
     // to avoid recursive exceptions
     // dont check sp bounds and hope
@@ -394,87 +393,12 @@ static void step(Cpu *cpu) {
         }
 
         default: {
-            // TODO: raise_exception(cpu, EX_INVALID_OPCODE);
-            printf("INVALID OPCODE 0x%02X\n", d.opcode);
-            exit(1);
+            raise_exception(cpu, EX_INVALID_INSTR);
+            return;
         }
     }
 
     if (update_pc) cpu->pc += 4;
-}
-
-#include <unistd.h>
-#include <termios.h>
-#include <sys/select.h>
-#include <stdio.h>
-
-static struct termios oldt, newt;
-static int termios_initialized = 0;
-
-static void restore_termios(void) {
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-}
-
-static void init_termios(void) {
-    if (termios_initialized)
-        return;
-
-    termios_initialized = 1;
-
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-
-    // Disable canonical mode and echo
-    newt.c_lflag &= ~(ICANON | ECHO);
-
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-
-    atexit(restore_termios);
-}
-
-int host_stdin_has_char(void) {
-    init_termios();
-
-    fd_set set;
-    struct timeval tv = {0, 0};
-
-    FD_ZERO(&set);
-    FD_SET(STDIN_FILENO, &set);
-
-    return select(STDIN_FILENO + 1, &set, NULL, NULL, &tv) > 0;
-}
-
-int host_get_char(void) {
-    init_termios();
-
-    unsigned char c;
-    if (read(STDIN_FILENO, &c, 1) == 1)
-        return c;
-
-    return -1;
-}
-
-uint32_t uart_read(void *state, uint32_t offset, uint8_t size) {
-    if (offset == 0x00) {
-        if (host_stdin_has_char()) {
-            return host_get_char();
-        }
-        return 0;
-    }
-    if (offset == 0x04) {
-        uint32_t stat = 0;
-        if (host_stdin_has_char()) stat |= 0x1;
-        stat |= 0x2;
-        return stat;
-    }
-    return 0;
-}
-
-void uart_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
-    if (offset == 0x00) {
-        putchar(value & 0xFF);
-        fflush(stdout);
-    }
 }
 
 static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
@@ -496,8 +420,6 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
         uint8_t irq = find_highest_priority(icu, active_irqs);
         icu->isr |= (1u << irq);
         icu->irr &= ~(1u << irq);
-
-        // printf("intercepted irq\n"); return;
 
         *icu->cpu_int_pin = ((icu->irr & ~icu->imr) != 0);
 
