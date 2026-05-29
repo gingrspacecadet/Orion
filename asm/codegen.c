@@ -1,4 +1,8 @@
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 #include "parser.h"
 #include "isa.h"
 #include "obj.h"
@@ -19,6 +23,17 @@ int symbol_count = 0;
 ObjReloc reloc_table[MAX_RELOCS];
 int reloc_count = 0;
 uint32_t pc = 0;
+
+typedef enum {
+    FMT_NONE,           // HALT, RET, IRET
+    FMT_RD_RN_RM,       // ADD rd, rn, rm  / SUB rd, rn, imm
+    FMT_RD_IMM,         // LUI rd, imm
+    FMT_RN_IMMRM,       // CMP rn, rm/imm
+    FMT_MEM_ACCESS,     // LDR rd, [rn + offset] / STR rd, [rn + offset]
+    FMT_STACK,          // PUSH / POP handling
+    FMT_SYS,            // FLAGS rd, imm
+    FMT_JUMP,            // JXX target / CALL target
+} OpFormat;
 
 static uint32_t encode_a(uint32_t opcode, int rn, int rd, bool is_reg, bool is_signed, int64_t immrm) {
     uint32_t w = 0;
@@ -46,7 +61,6 @@ static uint32_t encode_j(uint32_t opcode, int cond, bool absolute, bool is_reg, 
     w |= (opcode & 0x3F) << 26;
     w |= (cond & 0xF) << 22;
     if (absolute) w |= 1u << 21;
-    // reserved bits left zero
     if (is_reg) {
         uint32_t rm = (uint32_t)immrm & 0xF;
         w |= (rm & 0xF) << 2;
@@ -90,18 +104,24 @@ typedef struct {
     const char *mnem;
     uint32_t code;
     int type;
+    OpFormat format;
 } OpInfo;
 
 static OpInfo optab[] = {
-    {"ADD", 0x00, TYPE_A}, {"SUB", 0x01, TYPE_A}, {"MUL", 0x02, TYPE_A}, {"DIV", 0x03, TYPE_A},
-    {"SHL", 0x04, TYPE_A}, {"SHR", 0x05, TYPE_A}, {"AND", 0x06, TYPE_A}, {"OR", 0x07, TYPE_A},
-    {"NOT", 0x08, TYPE_A}, {"XOR", 0x09, TYPE_A}, {"LUI", 0x0A, TYPE_A}, {"CMP", 0x0B, TYPE_A},
-    {"LDR", 0x0C, TYPE_M}, {"STR", 0x0D, TYPE_M}, {"LDRB",0x0E, TYPE_M}, {"STRB",0x0F, TYPE_M},
-    {"JXX", 0x10, TYPE_J}, {"CALL",0x11, TYPE_J}, {"RET",0x12, TYPE_J}, {"PUSH",0x13, TYPE_M},
-    {"POP", 0x14, TYPE_M}, {"FLAGS",0x21, TYPE_S}, {"HALT",0x22, TYPE_X}, {"ICALL",0x23, TYPE_J},
-    {"IRET",0x24, TYPE_J},
-    // condition mnemonics are handled separately (JEQ, JNE, etc.)
-    {NULL,0,0}
+    {"ADD", 0x00, TYPE_A, FMT_RD_RN_RM},   {"SUB", 0x01, TYPE_A, FMT_RD_RN_RM},
+    {"MUL", 0x02, TYPE_A, FMT_RD_RN_RM},   {"DIV", 0x03, TYPE_A, FMT_RD_RN_RM},
+    {"SHL", 0x04, TYPE_A, FMT_RD_RN_RM},   {"SHR", 0x05, TYPE_A, FMT_RD_RN_RM},
+    {"AND", 0x06, TYPE_A, FMT_RD_RN_RM},   {"OR",  0x07, TYPE_A, FMT_RD_RN_RM},
+    {"NOT", 0x08, TYPE_A, FMT_RD_RN_RM},   {"XOR", 0x09, TYPE_A, FMT_RD_RN_RM},
+    {"LUI", 0x0A, TYPE_A, FMT_RD_IMM},     {"CMP", 0x0B, TYPE_A, FMT_RN_IMMRM},
+    {"LDR", 0x0C, TYPE_M, FMT_MEM_ACCESS}, {"STR", 0x0D, TYPE_M, FMT_MEM_ACCESS},
+    {"LDRB",0x0E, TYPE_M, FMT_MEM_ACCESS}, {"STRB",0x0F, TYPE_M, FMT_MEM_ACCESS},
+    {"JXX", 0x10, TYPE_J, FMT_JUMP},       {"CALL",0x11, TYPE_J, FMT_JUMP},
+    {"RET", 0x12, TYPE_J, FMT_NONE},       {"PUSH",0x13, TYPE_M, FMT_STACK},
+    {"POP", 0x14, TYPE_M, FMT_STACK},      {"FLAGS",0x21, TYPE_S, FMT_SYS},
+    {"HALT",0x22, TYPE_X, FMT_NONE},       {"ICALL",0x23, TYPE_J, FMT_JUMP},
+    {"IRET",0x24, TYPE_J, FMT_NONE},
+    {NULL,0,0,FMT_NONE}
 };
 
 static struct { const char *mnem; int val; } condtab[] = {
@@ -111,18 +131,20 @@ static struct { const char *mnem; int val; } condtab[] = {
     {NULL, -1}
 };
 
-static int lookup_opcode(const char *mnem, uint32_t *opcode, int *type) {
+static int lookup_opcode(const char *mnem, uint32_t *opcode, int *type, OpFormat *format) {
     for (int i = 0; optab[i].mnem; i++) {
         if (strcasecmp(optab[i].mnem, mnem) == 0) {
             *opcode = optab[i].code;
             *type = optab[i].type;
+            *format = optab[i].format;
             return 1;
         }
     }
     for (int i = 0; condtab[i].mnem; i++) {
         if (strcasecmp(condtab[i].mnem, mnem) == 0) {
-            *opcode = 0x10;
+            *opcode = 0x10; // OP_JXX
             *type = TYPE_J;
+            *format = FMT_JUMP;
             return 1;
         }
     }
@@ -176,6 +198,7 @@ void codegen(instr_array *instrs) {
             exit(1);
         }
 
+        // Handle pseudoinstruction 'MOV'
         if (strcasecmp(instr.mnemonic, "mov") == 0) {
             Operand dst = instr.ops[0];
             Operand src = instr.ops[1];
@@ -189,7 +212,6 @@ void codegen(instr_array *instrs) {
                 uint32_t high = (uint32_t)((uint64_t)src.val >> 16) & 0xFFFF;
                 uint32_t low = (uint32_t)src.val & 0xFFFF;
 
-                // micro-optimisation: use `xor` as it is cheaper than `lui`
                 if (high != 0)
                     write_text_u32(encode_a(OP_LUI, 0, dst.reg, false, true, high));
                 else
@@ -234,61 +256,119 @@ void codegen(instr_array *instrs) {
             exit(1);
         }
 
-        // just a plain instruction
         uint32_t opcode;
         int type;
-        if (!lookup_opcode(instr.mnemonic, &opcode, &type)) {
+        OpFormat format;
+        if (!lookup_opcode(instr.mnemonic, &opcode, &type, &format)) {
             fprintf(stderr, "Assembler Error (Line %d): Unknown instruction '%s'\n", instr.line_num, instr.mnemonic);
             exit(1);
         }
 
-        if (type == TYPE_J) {
-            int cond = 0;
-            lookup_cond(instr.mnemonic, &cond);
+        int rn = 0;
+        int rd = 0;
+        bool is_reg = false;
+        int64_t immrm = 0;
 
-
-            Operand target = instr.ops[0];
-
-            if (target.mode == AM_LABEL) {
-                reloc_table[reloc_count++] = (ObjReloc){
-                    .patch_offset = text_ptr,
-                    .patch_type = RELOC_PC_REL,
-                };
-                strncpy(reloc_table[reloc_count - 1].symbol_name, target.label, 31);
-
-                write_text_u32(encode_j(opcode, cond, false, false, true, 0));
-            } else {
-                write_text_u32(encode_j(opcode, cond, false, (target.mode == AM_REG), true, target.val));
+        switch (format) {
+            case FMT_NONE: {
+                if (type == TYPE_X) {
+                    write_text_u32((opcode & 0x3F) << 26);
+                } else if (type == TYPE_J) {
+                    write_text_u32(encode_j(opcode, 0, false, false, false, 0));
+                }
+                break;
             }
-            continue;
+
+            case FMT_RD_RN_RM: {
+                rd = instr.ops[0].reg;
+                rn = instr.ops[1].reg;
+                Operand src2 = instr.ops[2];
+                is_reg = (src2.mode == AM_REG);
+                immrm = is_reg ? src2.reg : src2.val;
+
+                write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                break;
+            }
+
+            case FMT_RD_IMM: {
+                rd = instr.ops[0].reg;
+                rn = 0;
+                is_reg = (instr.ops[1].mode == AM_REG);
+                immrm = is_reg ? instr.ops[1].reg : instr.ops[1].val;
+
+                write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                break;
+            }
+
+            case FMT_RN_IMMRM: {
+                rd = 0;
+                rn = instr.ops[0].reg;
+                is_reg = (instr.ops[1].mode == AM_REG);
+                immrm = is_reg ? instr.ops[1].reg : instr.ops[1].val;
+
+                write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                break;
+            }
+
+            case FMT_MEM_ACCESS: {
+                if (instr.ops[0].mode == AM_REG && instr.ops[1].mode == AM_MEM) {
+                    rd = instr.ops[0].reg;
+                    rn = instr.ops[1].reg; 
+                    is_reg = instr.ops[1].is_reg_offset;
+                    immrm = instr.ops[1].val;
+                } else if (instr.ops[0].mode == AM_MEM && instr.ops[1].mode == AM_REG) {
+                    rd = instr.ops[1].reg;
+                    rn = instr.ops[0].reg;
+                    is_reg = instr.ops[0].is_reg_offset;
+                    immrm = instr.ops[0].val;
+                } else {
+                    rd = instr.ops[0].reg;
+                    rn = instr.ops[1].reg;
+                    is_reg = (instr.ops[2].mode == AM_REG);
+                    immrm = is_reg ? instr.ops[2].reg : instr.ops[2].val;
+                }
+
+                write_text_u32(encode_m(opcode, rn, rd, is_reg, true, immrm));
+                break;
+            }
+
+            case FMT_STACK: {
+                Operand op = instr.ops[0];
+                is_reg = (op.mode == AM_REG);
+                immrm = is_reg ? op.reg : op.val;
+                
+                write_text_u32(encode_m(opcode, 0, 0, is_reg, true, immrm));
+                break;
+            }
+
+            case FMT_SYS: {
+                rd = instr.ops[0].reg;
+                Operand src = instr.ops[1];
+                is_reg = (src.mode == AM_REG);
+                immrm = is_reg ? src.reg : src.val;
+
+                write_text_u32(encode_s(opcode, rd, is_reg, true, immrm));
+                break;
+            }
+
+            case FMT_JUMP: {
+                int cond = 0;
+                lookup_cond(instr.mnemonic, &cond);
+                Operand target = instr.ops[0];
+
+                if (target.mode == AM_LABEL) {
+                    reloc_table[reloc_count++] = (ObjReloc){
+                        .patch_offset = text_ptr,
+                        .patch_type = RELOC_PC_REL,
+                        .symbol_name = ""
+                    };
+                    strncpy(reloc_table[reloc_count - 1].symbol_name, target.label, 31);
+                    write_text_u32(encode_j(opcode, cond, false, false, true, 0));
+                } else {
+                    write_text_u32(encode_j(opcode, cond, false, (target.mode == AM_REG), true, target.val));
+                }
+                break;
+            }
         }
-
-        if (type == TYPE_A || type == TYPE_M) {
-            int rn = instr.ops[1].reg;
-            int rd = instr.ops[0].reg;
-            Operand src2 = instr.ops[2];
-            int is_reg = (src2.mode == AM_REG);
-            int64_t immrm = is_reg ? src2.reg : src2.val;
-
-            write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
-            continue;
-        }
-
-        if (type == TYPE_S) {
-            int rd = instr.ops[0].reg;
-            Operand src = instr.ops[1];
-            int is_reg = (src.mode == AM_REG);
-            int64_t immrm = is_reg ? src.reg : src.val;
-            write_text_u32(encode_s(opcode, rd, is_reg, true, immrm));
-            continue;
-        }
-
-        if (type == TYPE_X) {
-            write_text_u32((opcode &0x3F) << 26);
-            continue;
-        }
-
-        fprintf(stderr, "Assembler Error (Line %d): Unknown encoding for instruction '%s'\n", instr.line_num, instr.mnemonic);
-        exit(1);
     }
 }

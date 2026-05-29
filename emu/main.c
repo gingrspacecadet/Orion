@@ -203,7 +203,7 @@ static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
     );
     target += (d.is_absolute
         ? 0
-        : cpu->pc + 4
+        : cpu->pc
     );
     return target;
 }
@@ -454,7 +454,6 @@ int host_get_char(void) {
     return -1;
 }
 
-
 uint32_t uart_read(void *state, uint32_t offset, uint8_t size) {
     if (offset == 0x00) {
         if (host_stdin_has_char()) {
@@ -559,7 +558,7 @@ int main(int argc, char **argv) {
 
     // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
-        mem_write8(cpu.memory, i, img[i]);
+        mem_write8(cpu.memory, 0x1000 + i, img[i]);
     }
     cpu.running = true;
     while (cpu.running) {

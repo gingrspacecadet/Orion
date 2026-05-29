@@ -5,18 +5,21 @@ __entry:
     str r2, [r1]    ; store at BAR config
 
 transmit:
-    ldrb r3, [r2 + #0x4]    ; load the status register from UART
-    and r3, r3, #1         ; mask for ready
-    cmp r3, #0
-    jne $read
-    jmp $transmit
-
-read:
-    ldr r3, [r2]    ; load the data from UART register
-    cmp r3, #-1
-    jeq $transmit
-    strb [r2], r3
-    jmp $transmit
+    ; write the char back to ram
+    mov r3, #0x48 strb [r3], r2
+    mov r3, #0x65 strb [r3], r2
+    mov r3, #0x6C strb [r3], r2
+    mov r3, #0x6C strb [r3], r2
+    mov r3, #0x6F strb [r3], r2
+    mov r3, #0x2C strb [r3], r2
+    mov r3, #0x20 strb [r3], r2
+    mov r3, #0x77 strb [r3], r2
+    mov r3, #0x6F strb [r3], r2
+    mov r3, #0x72 strb [r3], r2
+    mov r3, #0x6C strb [r3], r2
+    mov r3, #0x64 strb [r3], r2
+    mov r3, #0x21 strb [r3], r2
+    mov r3, #0x0A strb [r3], r2
 
 __exit:
     halt

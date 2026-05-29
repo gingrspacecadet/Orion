@@ -138,9 +138,19 @@ int main(int argc, char **argv) {
     uint8_t *img = load_file(argv[1], &imglen);
 
     for (size_t i = 0; i < imglen; i += 4) {
-        Instr d = decode(load_le32(&img[i]));
-        Instr zero = {0};
-        if (memcmp(&d, &zero, sizeof(d)) == 0) continue;
+        uint32_t raw = load_le32(&img[i]);
+
+        if (raw == 0) {
+            size_t zeros = 0;
+            while (i + 4 <= imglen && load_le32(&img[i]) == 0) {
+                zeros++;
+                i += 4;
+            }
+            printf("(%zu zeros)\n", zeros);
+            continue;
+        }
+
+        Instr d = decode(load_le32((uint8_t*)&raw));
 
         switch (d.opcode) {
             case OP_ADD: printf("add"); break;
