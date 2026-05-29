@@ -1,5 +1,5 @@
 __entry:
-    call $main
+    call $__exit
 __exit:
     halt
 

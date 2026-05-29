@@ -25,7 +25,7 @@ LDFLAGS :=
 
 BUILD := build
 
-TARGETS := asm disasm emu
+TARGETS := asm disasm emu ld
 
 .Phony: all
 all: $(TARGETS)

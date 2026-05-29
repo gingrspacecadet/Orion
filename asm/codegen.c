@@ -86,7 +86,6 @@ static void write_text_u32(uint32_t word) {
     text_section[text_ptr++] = (word >> 24) & 0xFF;
 }
 
-
 typedef struct {
     const char *mnem;
     uint32_t code;
