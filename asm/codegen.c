@@ -6,16 +6,35 @@
 #include "parser.h"
 #include "isa.h"
 #include "obj.h"
+#include "codegen.h"
 
-#define MAX_SECTION_SIZE    65536
+Section sections[MAX_SECTIONS];
+int section_count = 0;
+Section *active_section = NULL;
+
+void switch_section(const char *name) {
+    for (int i = 0; i < section_count; i++) {
+        if (strcmp(sections[i].name, name) == 0) {
+            active_section = &sections[i];
+            return;
+        }
+    }
+
+    if (section_count >= MAX_SECTIONS) {
+        fprintf(stderr, "Assembler Error: Exceeded maximum allowed sections (%d)\n", MAX_SECTIONS);
+        exit(1);
+    }
+
+    Section *new_sec = &sections[section_count++];
+    memset(new_sec, 0, sizeof(Section));
+    strncpy(new_sec->name, name, 31);
+    new_sec->id = section_count;
+    active_section = new_sec;
+    printf("Assembler: Created new section '%s' (ID: %d)\n", name, section_count);
+}
+
 #define MAX_SYMBOLS         1024
 #define MAX_RELOCS          1024
-
-uint8_t text_section[MAX_SECTION_SIZE];
-uint32_t text_ptr = 0;
-
-uint8_t data_section[MAX_SECTION_SIZE];
-uint32_t data_ptr = 0;
 
 ObjSymbol symbol_table[MAX_SYMBOLS];
 int symbol_count = 0;
@@ -89,15 +108,33 @@ static uint32_t encode_s(uint32_t opcode, int rd, bool is_reg, bool rw, int64_t 
     return w;
 }
 
-static void write_text_u32(uint32_t word) {
-    if (text_ptr + 4 > MAX_SECTION_SIZE) {
-        fprintf(stderr, "Assembler Error: .text section overflow.\n");
+static void write_active_u32(uint32_t word) {
+    if (!active_section) {
+        switch_section(".text");
+    }
+
+    if (active_section->ptr + 4 > MAX_SECTION_SIZE) {
+        fprintf(stderr, "Assembler Error: Section '%s' overflow\n", active_section->name);
         exit(1);
     }
-    text_section[text_ptr++] = (word >>  0) & 0xFF;
-    text_section[text_ptr++] = (word >>  8) & 0xFF;
-    text_section[text_ptr++] = (word >> 16) & 0xFF;
-    text_section[text_ptr++] = (word >> 24) & 0xFF;
+
+    active_section->buffer[active_section->ptr++] = (word >>  0) & 0xFF;
+    active_section->buffer[active_section->ptr++] = (word >>  8) & 0xFF;
+    active_section->buffer[active_section->ptr++] = (word >> 16) & 0xFF;
+    active_section->buffer[active_section->ptr++] = (word >> 24) & 0xFF;
+}
+
+static void write_active_u8(uint8_t word) {
+    if (!active_section) {
+        switch_section(".text");
+    }
+
+    if (active_section->ptr + 4 > MAX_SECTION_SIZE) {
+        fprintf(stderr, "Assembler Error: Section '%s' overflow\n", active_section->name);
+        exit(1);
+    }
+
+    active_section->buffer[active_section->ptr++] = word;
 }
 
 typedef struct {
@@ -167,8 +204,8 @@ void codegen(instr_array *instrs) {
 
         if (instr.is_label_def) {
             symbol_table[symbol_count++] = (ObjSymbol){
-                .offset = text_ptr,
-                .section = 1,
+                .offset = active_section->ptr,
+                .section = active_section->id,
                 .is_global = true,
                 .name = "",
             };
@@ -178,19 +215,15 @@ void codegen(instr_array *instrs) {
 
         if (instr.is_directive) {
             if (strcmp(instr.mnemonic, ".word") == 0) {
-                uint8_t *v = (uint8_t *)&instr.ops[0].val;
-                data_section[data_ptr++] = v[0];
-                data_section[data_ptr++] = v[1];
-                data_section[data_ptr++] = v[2];
-                data_section[data_ptr++] = v[3];
+                write_active_u32(instr.ops[0].val);
                 continue;
             }
             if (strcmp(instr.mnemonic, ".byte") == 0) {
-                data_section[data_ptr++] = (uint8_t)instr.ops[0].val;
+                write_active_u8(instr.ops[0].val);
                 continue;
             }
-            if (strcmp(instr.mnemonic, ".org") == 0) {
-                text_ptr = instr.ops[0].val;
+            if (strcmp(instr.mnemonic, ".section") == 0) {
+                switch_section(instr.ops[0].label);
                 continue;
             }
             
@@ -204,7 +237,7 @@ void codegen(instr_array *instrs) {
             Operand src = instr.ops[1];
 
             if (dst.mode == AM_REG && src.mode == AM_REG) {
-                write_text_u32(encode_a(OP_OR, src.reg, dst.reg, true, false, src.reg));
+                write_active_u32(encode_a(OP_OR, src.reg, dst.reg, true, false, src.reg));
                 continue;
             }
 
@@ -213,42 +246,44 @@ void codegen(instr_array *instrs) {
                 uint32_t low = (uint32_t)src.val & 0xFFFF;
 
                 if (high != 0)
-                    write_text_u32(encode_a(OP_LUI, 0, dst.reg, false, true, high));
+                    write_active_u32(encode_a(OP_LUI, 0, dst.reg, false, true, high));
                 else
-                    write_text_u32(encode_a(OP_XOR, dst.reg, dst.reg, true, false, dst.reg));
+                    write_active_u32(encode_a(OP_XOR, dst.reg, dst.reg, true, false, dst.reg));
                 
                 if (low != 0)
-                    write_text_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, true, low));
+                    write_active_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, true, low));
                 
                 continue;
             }
 
             if (dst.mode == AM_REG && src.mode == AM_LABEL) {
                 reloc_table[reloc_count++] = (ObjReloc){
-                    .patch_offset = text_ptr,
+                    .patch_offset = active_section->ptr,
+                    .patch_section = active_section->id,
                     .patch_type = RELOC_HI16,
                     .symbol_name = ""
                 };
                 strncpy(reloc_table[reloc_count - 1].symbol_name, src.label, 31);
-                write_text_u32(encode_a(OP_LUI, 0, dst.reg, false, true, 0));
+                write_active_u32(encode_a(OP_LUI, 0, dst.reg, false, true, 0));
 
                 reloc_table[reloc_count++] = (ObjReloc){
-                    .patch_offset = text_ptr,
+                    .patch_offset = active_section->ptr,
+                    .patch_section = active_section->id,
                     .patch_type = RELOC_LO16,
                     .symbol_name = ""
                 };
                 strncpy(reloc_table[reloc_count - 1].symbol_name, src.label, 31);
-                write_text_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, true, 0));
+                write_active_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, true, 0));
                 continue;
             }
 
             if (dst.mode == AM_REG && src.mode == AM_MEM) {
-                write_text_u32(encode_m(OP_LDR, src.reg, dst.reg, src.is_reg_offset, true, src.val));
+                write_active_u32(encode_m(OP_LDR, src.reg, dst.reg, src.is_reg_offset, true, src.val));
                 continue;
             }
 
             if (dst.mode == AM_MEM && src.mode == AM_REG) {
-                write_text_u32(encode_m(OP_STR, dst.reg, src.reg, dst.is_reg_offset, true, dst.val));
+                write_active_u32(encode_m(OP_STR, dst.reg, src.reg, dst.is_reg_offset, true, dst.val));
                 continue;
             }
 
@@ -272,9 +307,9 @@ void codegen(instr_array *instrs) {
         switch (format) {
             case FMT_NONE: {
                 if (type == TYPE_X) {
-                    write_text_u32((opcode & 0x3F) << 26);
+                    write_active_u32((opcode & 0x3F) << 26);
                 } else if (type == TYPE_J) {
-                    write_text_u32(encode_j(opcode, 0, false, false, false, 0));
+                    write_active_u32(encode_j(opcode, 0, false, false, false, 0));
                 }
                 break;
             }
@@ -286,7 +321,7 @@ void codegen(instr_array *instrs) {
                 is_reg = (src2.mode == AM_REG);
                 immrm = is_reg ? src2.reg : src2.val;
 
-                write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
                 break;
             }
 
@@ -296,7 +331,7 @@ void codegen(instr_array *instrs) {
                 is_reg = (instr.ops[1].mode == AM_REG);
                 immrm = is_reg ? instr.ops[1].reg : instr.ops[1].val;
 
-                write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
                 break;
             }
 
@@ -306,7 +341,7 @@ void codegen(instr_array *instrs) {
                 is_reg = (instr.ops[1].mode == AM_REG);
                 immrm = is_reg ? instr.ops[1].reg : instr.ops[1].val;
 
-                write_text_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
                 break;
             }
 
@@ -328,7 +363,7 @@ void codegen(instr_array *instrs) {
                     immrm = is_reg ? instr.ops[2].reg : instr.ops[2].val;
                 }
 
-                write_text_u32(encode_m(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_m(opcode, rn, rd, is_reg, true, immrm));
                 break;
             }
 
@@ -337,7 +372,7 @@ void codegen(instr_array *instrs) {
                 is_reg = (op.mode == AM_REG);
                 immrm = is_reg ? op.reg : op.val;
                 
-                write_text_u32(encode_m(opcode, 0, 0, is_reg, true, immrm));
+                write_active_u32(encode_m(opcode, 0, 0, is_reg, true, immrm));
                 break;
             }
 
@@ -347,7 +382,7 @@ void codegen(instr_array *instrs) {
                 is_reg = (src.mode == AM_REG);
                 immrm = is_reg ? src.reg : src.val;
 
-                write_text_u32(encode_s(opcode, rd, is_reg, true, immrm));
+                write_active_u32(encode_s(opcode, rd, is_reg, true, immrm));
                 break;
             }
 
@@ -358,14 +393,15 @@ void codegen(instr_array *instrs) {
 
                 if (target.mode == AM_LABEL) {
                     reloc_table[reloc_count++] = (ObjReloc){
-                        .patch_offset = text_ptr,
+                        .patch_offset = active_section->ptr,
+                        .patch_section = active_section->id,
                         .patch_type = RELOC_PC_REL,
                         .symbol_name = ""
                     };
                     strncpy(reloc_table[reloc_count - 1].symbol_name, target.label, 31);
-                    write_text_u32(encode_j(opcode, cond, false, false, true, 0));
+                    write_active_u32(encode_j(opcode, cond, false, false, true, 0));
                 } else {
-                    write_text_u32(encode_j(opcode, cond, false, (target.mode == AM_REG), true, target.val));
+                    write_active_u32(encode_j(opcode, cond, false, (target.mode == AM_REG), true, target.val));
                 }
                 break;
             }

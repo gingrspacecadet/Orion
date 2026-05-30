@@ -29,7 +29,7 @@ static void init_termios(void) {
     atexit(restore_termios);
 }
 
-int host_stdin_has_char(void) {
+static int stdin_has_char(void) {
     init_termios();
 
     fd_set set;
@@ -41,7 +41,7 @@ int host_stdin_has_char(void) {
     return select(STDIN_FILENO + 1, &set, NULL, NULL, &tv) > 0;
 }
 
-int host_get_char(void) {
+static int stdin_get_char(void) {
     init_termios();
 
     unsigned char c;
@@ -53,14 +53,14 @@ int host_get_char(void) {
 
 uint32_t uart_read(void *state, uint32_t offset, uint8_t size) {
     if (offset == 0x00) {
-        if (host_stdin_has_char()) {
-            return host_get_char();
+        if (stdin_has_char()) {
+            return stdin_get_char();
         }
         return 0;
     }
     if (offset == 0x04) {
         uint32_t stat = 0;
-        if (host_stdin_has_char()) stat |= 0x1;
+        if (stdin_has_char()) stat |= 0x1;
         stat |= 0x2;
         return stat;
     }

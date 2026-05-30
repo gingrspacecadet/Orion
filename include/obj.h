@@ -19,11 +19,16 @@
 
 typedef struct {
     uint32_t magic;
-    uint32_t text_size;
-    uint32_t data_size;
+    uint32_t section_count;
     uint32_t sym_count;
     uint32_t reloc_count;
 } ObjHeader;
+
+typedef struct {
+    char name[32];
+    uint32_t size;
+    int id;
+} ObjSectionHeader;
 
 typedef struct {
     char name[32];
@@ -34,8 +39,9 @@ typedef struct {
 
 typedef struct {
     uint32_t patch_offset;
-    char symbol_name[32];
+    int patch_section;
     uint8_t patch_type;
+    char symbol_name[32];
 } ObjReloc;
 
 #define RELOC_LO16      1

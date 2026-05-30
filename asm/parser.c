@@ -44,7 +44,7 @@ static Operand parse_operand() {
         return op;
     }
 
-    if (t.type == TOK_LABEL) {
+    if (t.type == TOK_LABEL || t.type == TOK_DIRECTIVE) {
         consume();
         op.mode = AM_LABEL;
         strncpy(op.label, t.string, 31);
@@ -111,7 +111,7 @@ instr_array parse(token_array *tokens) {
             instr.is_directive = true;
             strncpy(instr.mnemonic, t.string, 31);
 
-            if (peek().type != TOK_EOF && peek().type != TOK_MNEMONIC && peek().type != TOK_DIRECTIVE && peek().type != TOK_LABEL_DEF) {
+            if (peek().type != TOK_EOF && peek().type != TOK_MNEMONIC && peek().type != TOK_LABEL_DEF) {
                 instr.ops[instr.op_count++] = parse_operand();
             }
             instr_array_push(&ast, instr);

@@ -1,8 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdint.h>
-#include "lexer.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include "codegen.h"
 #include "parser.h"
+#include "lexer.h"
 #include "obj.h"
 
 // External declarations from your codegen.c
@@ -43,13 +44,31 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <input.s> <output.o>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <input.s> [output.o]\n", argv[0]);
         return 1;
     }
-
+    
     const char *input_path = argv[1];
-    const char *output_path = argv[2];
+    char *output_path;
+    
+    if (argc == 2) {
+        const char *dot = strrchr(input_path, '.');
+        if (!dot) {
+            output_path = xmalloc(strlen(input_path) + 3);
+            strcpy(output_path, input_path);
+            strcat(output_path, ".o");
+        } else {
+            size_t base_len = (size_t)(dot - input_path);
+            output_path = xmalloc(base_len + 3);
+            strncpy(output_path, input_path, base_len);
+            output_path[base_len] = '.';
+            output_path[base_len + 1] = 'o';
+            output_path[base_len + 2] = '\0';
+        }
+    } else {
+        output_path = argv[2];
+    }
 
     char *source = read_file(input_path);
 
@@ -58,6 +77,9 @@ int main(int argc, char **argv) {
 
     instr_array instrs = parse(&tokens);
     token_array_free(&tokens); 
+
+    // Implicitly default to .text so code without directives has a home
+    switch_section(".text");
 
     codegen(&instrs);
     instr_array_free(&instrs);
@@ -68,35 +90,50 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // 1. Serialize Main File Header
     ObjHeader header = {
         .magic = OBJ_MAGIC,
-        .text_size = text_ptr,
-        .data_size = data_ptr,
+        .section_count = (uint32_t)section_count,
         .sym_count = (uint32_t)symbol_count,
         .reloc_count = (uint32_t)reloc_count
     };
-
     fwrite(&header, sizeof(ObjHeader), 1, out);
 
-    if (text_ptr > 0) {
-        fwrite(text_section, 1, text_ptr, out);
-    }
-    if (data_ptr > 0) {
-        fwrite(data_section, 1, data_ptr, out);
+    // 2. Serialize Section Headers (Metadata table for the linker)
+    for (int i = 0; i < section_count; i++) {
+        ObjSectionHeader sh = {
+            .size = sections[i].ptr,
+            .id = sections[i].id
+        };
+        strncpy(sh.name, sections[i].name, 31);
+        fwrite(&sh, sizeof(ObjSectionHeader), 1, out);
     }
 
+    // 3. Serialize Section Binary Payloads
+    for (int i = 0; i < section_count; i++) {
+        if (sections[i].ptr > 0) {
+            fwrite(sections[i].buffer, 1, sections[i].ptr, out);
+        }
+    }
+
+    // 4. Serialize Symbol Table
     if (symbol_count > 0) {
         fwrite(symbol_table, sizeof(ObjSymbol), symbol_count, out);
     }
+    
+    // 5. Serialize Relocation Table (Now tracking patch_section IDs!)
     if (reloc_count > 0) {
         fwrite(reloc_table, sizeof(ObjReloc), reloc_count, out);
     }
 
     fclose(out);
     
+    // Summary output is now perfectly dynamic!
     printf("Wrote output to %s\n", output_path);
-    printf(" -> .text size: %u bytes\n", text_ptr);
-    printf(" -> .data size: %u bytes\n", data_ptr);
+    for (int i = 0; i < section_count; i++) {
+        printf(" -> Section '%s' (ID %d) size: %u bytes\n", 
+               sections[i].name, sections[i].id, sections[i].ptr);
+    }
     printf(" -> Symbols:    %d\n", symbol_count);
     printf(" -> Relocs:     %d\n", reloc_count);
 
