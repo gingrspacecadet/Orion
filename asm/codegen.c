@@ -145,26 +145,31 @@ typedef struct {
 } OpInfo;
 
 static OpInfo optab[] = {
-    {"ADD", 0x00, TYPE_A, FMT_RD_RN_RM},   {"SUB", 0x01, TYPE_A, FMT_RD_RN_RM},
-    {"MUL", 0x02, TYPE_A, FMT_RD_RN_RM},   {"DIV", 0x03, TYPE_A, FMT_RD_RN_RM},
-    {"SHL", 0x04, TYPE_A, FMT_RD_RN_RM},   {"SHR", 0x05, TYPE_A, FMT_RD_RN_RM},
-    {"AND", 0x06, TYPE_A, FMT_RD_RN_RM},   {"OR",  0x07, TYPE_A, FMT_RD_RN_RM},
-    {"NOT", 0x08, TYPE_A, FMT_RD_RN_RM},   {"XOR", 0x09, TYPE_A, FMT_RD_RN_RM},
-    {"LUI", 0x0A, TYPE_A, FMT_RD_IMM},     {"CMP", 0x0B, TYPE_A, FMT_RN_IMMRM},
-    {"LDR", 0x0C, TYPE_M, FMT_MEM_ACCESS}, {"STR", 0x0D, TYPE_M, FMT_MEM_ACCESS},
-    {"LDRB",0x0E, TYPE_M, FMT_MEM_ACCESS}, {"STRB",0x0F, TYPE_M, FMT_MEM_ACCESS},
-    {"JXX", 0x10, TYPE_J, FMT_JUMP},       {"CALL",0x11, TYPE_J, FMT_JUMP},
-    {"RET", 0x12, TYPE_J, FMT_NONE},       {"PUSH",0x13, TYPE_M, FMT_STACK},
-    {"POP", 0x14, TYPE_M, FMT_STACK},      {"FLAGS",0x21, TYPE_S, FMT_SYS},
-    {"HALT",0x22, TYPE_X, FMT_NONE},       {"ICALL",0x23, TYPE_J, FMT_JUMP},
-    {"IRET",0x24, TYPE_J, FMT_NONE},
+    {"ADD",  OP_ADD,  TYPE_A, FMT_RD_RN_RM},   {"SUB", OP_SUB,   TYPE_A, FMT_RD_RN_RM},
+    {"MUL",  OP_MUL,  TYPE_A, FMT_RD_RN_RM},   {"DIV", OP_DIV,   TYPE_A, FMT_RD_RN_RM},
+    {"SHL",  OP_SHL,  TYPE_A, FMT_RD_RN_RM},   {"SHR", OP_SHR,   TYPE_A, FMT_RD_RN_RM},
+    {"AND",  OP_AND,  TYPE_A, FMT_RD_RN_RM},   {"OR",  OP_OR,    TYPE_A, FMT_RD_RN_RM},
+    {"NOT",  OP_NOT,  TYPE_A, FMT_RD_RN_RM},   {"XOR", OP_XOR,   TYPE_A, FMT_RD_RN_RM},
+    {"LUI",  OP_LUI,  TYPE_A, FMT_RD_IMM},     {"CMP", OP_CMP,   TYPE_A, FMT_RN_IMMRM},
+    {"LDR",  OP_LDR,  TYPE_M, FMT_MEM_ACCESS}, {"STR", OP_STR,   TYPE_M, FMT_MEM_ACCESS},
+    {"LDRB", OP_LDRB, TYPE_M, FMT_MEM_ACCESS}, {"STRB",OP_STRB,  TYPE_M, FMT_MEM_ACCESS},
+    {"JXX",  OP_JXX,  TYPE_J, FMT_JUMP},       {"CALL",OP_CALL,  TYPE_J, FMT_JUMP},
+    {"RET",  OP_RET,  TYPE_J, FMT_NONE},       {"PUSH",OP_PUSH,  TYPE_M, FMT_STACK},
+    {"POP",  OP_POP,  TYPE_M, FMT_STACK},      {"FLAGS",OP_FLAGS,TYPE_S, FMT_SYS},
+    {"HALT", OP_HALT, TYPE_X, FMT_NONE},       {"ICALL",OP_ICALL,TYPE_J, FMT_JUMP},
+    {"IRET", OP_IRET, TYPE_J, FMT_NONE},
     {NULL,0,0,FMT_NONE}
 };
 
 static struct { const char *mnem; int val; } condtab[] = {
-    {"JMP", 0x0}, {"JEQ", 0x1}, {"JNE", 0x2}, {"JLT", 0x3}, {"JGE", 0x4},
-    {"JLTU",0x5}, {"JGEU",0x6}, {"JCS",0x7}, {"JCC",0x8}, {"JN",0x9},
-    {"JP",0xA}, {"JVS",0xB}, {"JVC",0xC}, {"JLS",0xD},
+    {"JMP",  COND_JMP}, 
+    {"JEQ",  COND_JEQ},  {"JNE",  COND_JNE}, 
+    {"JLT",  COND_JLT},  {"JGE",  COND_JGE},
+    {"JLTU", COND_JLTU}, {"JGEU", COND_JGEU}, 
+    {"JCS",  COND_JCS},  {"JCC",  COND_JCC}, 
+    {"JN",   COND_JN},   {"JP",   COND_JP},
+    {"JVS",  COND_JVS},  {"JVC",  COND_JVC}, 
+    {"JLS",  COND_JLS},
     {NULL, -1}
 };
 
@@ -179,7 +184,7 @@ static int lookup_opcode(const char *mnem, uint32_t *opcode, int *type, OpFormat
     }
     for (int i = 0; condtab[i].mnem; i++) {
         if (strcasecmp(condtab[i].mnem, mnem) == 0) {
-            *opcode = 0x10; // OP_JXX
+            *opcode = OP_JXX;
             *type = TYPE_J;
             *format = FMT_JUMP;
             return 1;
@@ -196,6 +201,28 @@ static int lookup_cond(const char *mnem, int *cond) {
         }
     }
     return 0;
+}
+
+static int64_t encode_operand(Operand op, int patch_type, bool *is_reg) {
+    if (op.mode == AM_LABEL) {
+        if (reloc_count >= MAX_RELOCS) {
+            fprintf(stderr, "Assembler Error: Maximum relocations exceeded.\n");
+            exit(1);
+        }
+        reloc_table[reloc_count++] = (ObjReloc){
+            .patch_offset = active_section->ptr,
+            .patch_section = active_section->id,
+            .patch_type = patch_type,
+            .symbol_name = ""
+        };
+        strncpy(reloc_table[reloc_count - 1].symbol_name, op.label, 31);
+
+        if (is_reg) *is_reg = false;
+        return 0;
+    }
+
+    if (is_reg) *is_reg = op.mode == AM_REG;
+    return (op.mode == AM_REG) ? op.reg : op.val;
 }
 
 void codegen(instr_array *instrs) {
@@ -215,11 +242,11 @@ void codegen(instr_array *instrs) {
 
         if (instr.is_directive) {
             if (strcmp(instr.mnemonic, ".word") == 0) {
-                write_active_u32(instr.ops[0].val);
+                write_active_u32(encode_operand(instr.ops[0], RELOC_32, NULL));
                 continue;
             }
             if (strcmp(instr.mnemonic, ".byte") == 0) {
-                write_active_u8(instr.ops[0].val);
+                write_active_u8(encode_operand(instr.ops[0], RELOC_32, NULL));
                 continue;
             }
             if (strcmp(instr.mnemonic, ".section") == 0) {
@@ -317,9 +344,7 @@ void codegen(instr_array *instrs) {
             case FMT_RD_RN_RM: {
                 rd = instr.ops[0].reg;
                 rn = instr.ops[1].reg;
-                Operand src2 = instr.ops[2];
-                is_reg = (src2.mode == AM_REG);
-                immrm = is_reg ? src2.reg : src2.val;
+                immrm = encode_operand(instr.ops[2], RELOC_LO16, &is_reg);
 
                 write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
                 break;
@@ -328,8 +353,7 @@ void codegen(instr_array *instrs) {
             case FMT_RD_IMM: {
                 rd = instr.ops[0].reg;
                 rn = 0;
-                is_reg = (instr.ops[1].mode == AM_REG);
-                immrm = is_reg ? instr.ops[1].reg : instr.ops[1].val;
+                immrm = encode_operand(instr.ops[1], (opcode == OP_LUI) ? RELOC_HI16 : RELOC_LO16, &is_reg);
 
                 write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
                 break;
@@ -338,8 +362,7 @@ void codegen(instr_array *instrs) {
             case FMT_RN_IMMRM: {
                 rd = 0;
                 rn = instr.ops[0].reg;
-                is_reg = (instr.ops[1].mode == AM_REG);
-                immrm = is_reg ? instr.ops[1].reg : instr.ops[1].val;
+                immrm = encode_operand(instr.ops[1], RELOC_LO16, &is_reg);
 
                 write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
                 break;
@@ -359,8 +382,7 @@ void codegen(instr_array *instrs) {
                 } else {
                     rd = instr.ops[0].reg;
                     rn = instr.ops[1].reg;
-                    is_reg = (instr.ops[2].mode == AM_REG);
-                    immrm = is_reg ? instr.ops[2].reg : instr.ops[2].val;
+                    immrm = encode_operand(instr.ops[2], RELOC_LO16, &is_reg);
                 }
 
                 write_active_u32(encode_m(opcode, rn, rd, is_reg, true, immrm));
@@ -369,8 +391,7 @@ void codegen(instr_array *instrs) {
 
             case FMT_STACK: {
                 Operand op = instr.ops[0];
-                is_reg = (op.mode == AM_REG);
-                immrm = is_reg ? op.reg : op.val;
+                immrm = encode_operand(instr.ops[0], RELOC_LO16, &is_reg);
                 
                 write_active_u32(encode_m(opcode, 0, 0, is_reg, true, immrm));
                 break;
@@ -378,9 +399,7 @@ void codegen(instr_array *instrs) {
 
             case FMT_SYS: {
                 rd = instr.ops[0].reg;
-                Operand src = instr.ops[1];
-                is_reg = (src.mode == AM_REG);
-                immrm = is_reg ? src.reg : src.val;
+                immrm = encode_operand(instr.ops[1], RELOC_LO16, &is_reg);
 
                 write_active_u32(encode_s(opcode, rd, is_reg, true, immrm));
                 break;
@@ -389,20 +408,9 @@ void codegen(instr_array *instrs) {
             case FMT_JUMP: {
                 int cond = 0;
                 lookup_cond(instr.mnemonic, &cond);
-                Operand target = instr.ops[0];
+                immrm = encode_operand(instr.ops[0], RELOC_PC_REL, &is_reg);
 
-                if (target.mode == AM_LABEL) {
-                    reloc_table[reloc_count++] = (ObjReloc){
-                        .patch_offset = active_section->ptr,
-                        .patch_section = active_section->id,
-                        .patch_type = RELOC_PC_REL,
-                        .symbol_name = ""
-                    };
-                    strncpy(reloc_table[reloc_count - 1].symbol_name, target.label, 31);
-                    write_active_u32(encode_j(opcode, cond, false, false, true, 0));
-                } else {
-                    write_active_u32(encode_j(opcode, cond, false, (target.mode == AM_REG), true, target.val));
-                }
+                write_active_u32(encode_j(opcode, cond, false, is_reg, true, immrm));
                 break;
             }
         }

@@ -137,20 +137,27 @@ int main(int argc, char **argv) {
     size_t imglen;
     uint8_t *img = load_file(argv[1], &imglen);
 
-    for (size_t i = 0; i < imglen; i += 4) {
+    size_t i = 0;
+    while (i < imglen) {
         uint32_t raw = load_le32(&img[i]);
 
         if (raw == 0) {
             size_t zeros = 0;
-            while (i + 4 <= imglen && load_le32(&img[i]) == 0) {
+            while (i < imglen && load_le32(&img[i]) == 0) {
                 zeros++;
-                i += 4;
+                i += 4; 
             }
-            printf("(%zu zeros)\n", zeros);
+            printf("(%zu zero words)\n", zeros);
             continue;
         }
 
-        Instr d = decode(load_le32((uint8_t*)&raw));
+        Instr d = decode(raw);
+        
+        if (opcode_type(d.opcode) == -1 && d.opcode != OP_HALT) {
+            printf("data: 0x%08X\n", raw);
+            i += 4;
+            continue;
+        }
 
         switch (d.opcode) {
             case OP_ADD: printf("add"); break;
@@ -160,7 +167,7 @@ int main(int argc, char **argv) {
             case OP_SHL: printf("shl"); break;
             case OP_SHR: printf("shr"); break;
             case OP_AND: printf("and"); break;
-            case OP_OR: printf("or"); break;
+            case OP_OR:  printf("or");  break;
             case OP_NOT: printf("not"); break;
             case OP_XOR: printf("xor"); break;
             case OP_LUI: printf("lui"); break;
@@ -170,60 +177,56 @@ int main(int argc, char **argv) {
             case OP_STR: printf("str"); break;
             case OP_STRB: printf("strb"); break;
             case OP_PUSH: printf("push"); break;
-            case OP_POP: printf("pop"); break;
+            case OP_POP:  printf("pop");  break;
             case OP_JXX: {
                 printf("j");
                 switch (d.cond) {
-                    case COND_JEQ: printf("eq"); break;
-                    case COND_JNE: printf("ne"); break;
-                    case COND_JLT: printf("lt"); break;
-                    case COND_JGE: printf("ge"); break;
+                    case COND_JEQ:  printf("eq"); break;
+                    case COND_JNE:  printf("ne"); break;
+                    case COND_JLT:  printf("lt"); break;
+                    case COND_JGE:  printf("ge"); break;
                     case COND_JLTU: printf("ltu"); break;
                     case COND_JGEU: printf("geu"); break;
-                    case COND_JCS: printf("cs"); break;
-                    case COND_JCC: printf("cc"); break;
-                    case COND_JN: printf("n"); break;
-                    case COND_JP: printf("p"); break;
-                    case COND_JVS: printf("vs"); break;
-                    case COND_JVC: printf("vc"); break;
-                    case COND_JLS: printf("ls"); break;
-                    default: printf("mp"); break;
+                    case COND_JCS:  printf("cs"); break;
+                    case COND_JCC:  printf("cc"); break;
+                    case COND_JN:   printf("n");  break;
+                    case COND_JP:   printf("p");  break;
+                    case COND_JVS:  printf("vs"); break;
+                    case COND_JVC:  printf("vc"); break;
+                    case COND_JLS:  printf("ls"); break;
+                    default:        printf("mp"); break;
                 }
                 break;
             }
-            case OP_CALL: printf("call"); break;
-            case OP_RET: printf("ret"); break;
+            case OP_CALL:  printf("call"); break;
+            case OP_RET:   printf("ret"); break;
             case OP_ICALL: printf("icall"); break;
-            case OP_IRET: printf("iret"); break;
+            case OP_IRET:  printf("iret"); break;
             case OP_FLAGS: printf("flags"); break;
-            case OP_HALT: printf("halt"); break;
-            default: printf("<unknown>"); break;
+            case OP_HALT:  printf("halt"); break;
+            default:       printf("<unknown>"); break;
         }
 
-        if (d.opcode == OP_PUSH || d.opcode == OP_POP) {
+        if (d.opcode == OP_HALT || d.opcode == OP_RET || d.opcode == OP_IRET) {
+            // do nothing
+        } else if (d.opcode == OP_PUSH || d.opcode == OP_POP) {
             if (d.is_reg) {
                 printf(" r%d", d.rm);
             } else {
-                if (d.is_signed) {
-                    printf(" %" PRId16, d.imm);
-                } else {
-                    printf(" %" PRIu16, d.imm);
-                }
+                if (d.is_signed) printf(" %" PRId16, (int16_t)d.imm);
+                else             printf(" %" PRIu16, d.imm);
             }
         } else {
-            printf(" r%d, ", d.rd);
-            printf("r%d, ", d.rn);
+            printf(" r%d, r%d, ", d.rd, d.rn);
             if (d.is_reg) {
                 printf("r%d", d.rm);
             } else {
-                if (d.is_signed) {
-                    printf("%" PRId16, d.imm);
-                } else {
-                    printf("%" PRIu16, d.imm);
-                }
+                if (d.is_signed) printf("%" PRId16, (int16_t)d.imm);
+                else             printf("%" PRIu16, d.imm);
             }
         }
         
         printf("\n");
+        i += 4;
     }
 }

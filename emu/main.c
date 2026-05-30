@@ -416,18 +416,18 @@ static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
 static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     uint32_t active_irqs = icu->irr & ~(icu->imr);
 
-    if (active_irqs != 0 && cpu->flags & FLAG_IE) {
+    if (active_irqs != 0 && get_flag(cpu, FLAG_IE)) {
         uint8_t irq = find_highest_priority(icu, active_irqs);
-        icu->isr |= (1u << irq);
         icu->irr &= ~(1u << irq);
+        icu->isr |= (1u << irq);
 
         *icu->cpu_int_pin = ((icu->irr & ~icu->imr) != 0);
 
         if (!push32(cpu, cpu->flags)) return;
-        cpu->flags &= ~FLAG_IE; 
         if (!push32(cpu, cpu->pc)) return;
+        set_flag(cpu, FLAG_IE, false);
 
-        uint8_t vec = icu->vec[irq];
+        uint8_t vec = icu->vec[irq] + 0x20;
         cpu->pc = bus_read32(cpu->bus, IHVT_BASE + (vec * 4));
     }
 }
@@ -448,6 +448,7 @@ int main(int argc, char **argv) {
     cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
     cpu.memory = mem_init();
     cpu.bus = bus_init(cpu.memory);
+    set_flag(&cpu, FLAG_IE, true);
 
     TimerPool timer_pool = {0};
 

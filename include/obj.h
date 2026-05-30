@@ -47,5 +47,6 @@ typedef struct {
 #define RELOC_LO16      1
 #define RELOC_HI16      2
 #define RELOC_PC_REL    3
+#define RELOC_32        4
 
 #endif

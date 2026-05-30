@@ -227,6 +227,13 @@ void resolve_relocations(void) {
             uint32_t lo16 = target_addr & 0xFFFF;
             instr = (instr & ~0x0003FFFC) | (lo16 << 2);
         }
+        else if (def->reloc.patch_type == RELOC_32) {
+            instr = target_addr;
+        }
+        else {
+            fprintf(stderr, "Linker Error: Unknown relocation type %d\n", def->reloc.patch_type);
+            exit(1);
+        }
 
         write_section_u32(g_idx, patch_offset, instr);
     }
@@ -239,11 +246,7 @@ void write_executable(const char *out_path) {
         exit(1);
     }
 
-    if (exec_section_count == 0) {
-        fprintf(stderr, "Linker Error: No sections to write\n");
-        exit(1);
-    }
-
+    // 1. Sort sections by VMA layout mapping (Bubble Sort)
     for (int i = 0; i < exec_section_count - 1; i++) {
         for (int j = 0; j < exec_section_count - i - 1; j++) {
             if (get_section_vma(exec_sections[j].name) > get_section_vma(exec_sections[j + 1].name)) {
@@ -254,28 +257,55 @@ void write_executable(const char *out_path) {
         }
     }
 
-    uint32_t current_absolute_vma = get_section_vma(exec_sections[0].name);
+    // Find the absolute base VMA of our executable binary image
+    uint32_t binary_base_vma = 0xFFFFFFFF;
+    for (int i = 0; i < exec_section_count; i++) {
+        if (exec_sections[i].size > 0) {
+            uint32_t vma = get_section_vma(exec_sections[i].name);
+            if (vma < binary_base_vma) {
+                binary_base_vma = vma;
+            }
+        }
+    }
 
+    if (binary_base_vma == 0xFFFFFFFF) {
+        fprintf(stderr, "Linker Error: No sections containing payload data found.\n");
+        fclose(f);
+        return;
+    }
+
+    printf("Linker: Binary base image VMA established at 0x%08X\n", binary_base_vma);
+
+    // 2. Write out sections, calculating explicit file offsets
     for (int i = 0; i < exec_section_count; i++) {
         if (exec_sections[i].size == 0) continue;
 
-        uint32_t section_target_vma = get_section_vma(exec_sections[i].name);
+        uint32_t section_vma = get_section_vma(exec_sections[i].name);
+        
+        // Calculate exactly where this section belongs relative to the file start
+        long expected_file_offset = (long)(section_vma - binary_base_vma);
+        long current_file_offset = ftell(f);
 
-        if (section_target_vma < current_absolute_vma) {
-            fprintf(stderr, "Linker Error: Overlapping section layouts detected around '%s'\n", exec_sections[i].name);
+        if (expected_file_offset < current_file_offset) {
+            fprintf(stderr, "Linker Error: Section '%s' (VMA: 0x%08X) overlaps with previous file allocations!\n", 
+                    exec_sections[i].name, section_vma);
             exit(1);
         }
 
-        if (section_target_vma > current_absolute_vma) {
-            uint32_t gap = section_target_vma - current_absolute_vma;
+        // Pad up to the exact file offset required
+        if (expected_file_offset > current_file_offset) {
+            long padding_needed = expected_file_offset - current_file_offset;
             uint8_t zero = 0;
-            for (uint32_t g = 0; g < gap; g++) {
+            for (long p = 0; p < padding_needed; p++) {
                 fwrite(&zero, 1, 1, f);
             }
         }
 
+        // Write the consolidated payload block cleanly
+        printf(" -> Writing section '%s' at file offset 0x%08lX (%u bytes)\n", 
+               exec_sections[i].name, ftell(f), exec_sections[i].size);
+               
         fwrite(exec_sections[i].buffer, 1, exec_sections[i].size, f);
-        current_absolute_vma = section_target_vma + exec_sections[i].size;
     }
 
     fclose(f);

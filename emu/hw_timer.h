@@ -7,7 +7,7 @@ typedef struct {
     IrqLine irq;
     uint32_t interval_cycles;
 } HwTimer;
-
+#include <stdio.h>
 static void hw_timer_expired_cb(void *state) {
     HwTimer *timer = (HwTimer *)state;
 

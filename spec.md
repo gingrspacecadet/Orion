@@ -55,28 +55,29 @@ all `reserved` bits **MUST** be 0. If not, it raises an "Invalid Instruction" fa
 Instructions:
 |Number|Mnemonic|Type|Description   |
 |------|--------|----|--------------|
-|0x0   |ADD     |A   |Addition      |
-|0x1   |SUB     |A   |Subtraction   |
-|0x2   |MUL     |A   |Multiplication|
-|0x3   |DIV     |A   |Division      |
-|0x4   |SHL     |A   |Left shift    |
-|0x5   |SHR     |A   |Right shift   |
-|0x6   |AND     |A   |bitwise and   |
-|0x7   |OR      |A   |bitwise or    |
-|0x8   |NOT     |A   |bitwise not (idnores `rn`)|
-|0x9   |XOR     |A   |bitwise xor   |
-|0xA   |LUI     |A   |loads `rm`/`imm` into top 16 bits of `rd` (ignores `rn`)|
-|0xB   |CMP     |A   |Subtracts and discards result (`rd` is ignored)|
-|0xC   |LDR     |M   |Load a word   |
-|0xD   |STR     |M   |Store a word  |
-|0xE   |LDRB    |M   |Load a byte   |
-|0xF   |STRB    |M   |Store a byte  |
-|0x10   |JXX     |J   |Jumps to addr |
-|0x11  |CALL    |J   |Pushes PC and jumps to addr|
-|0x12  |RET     |J   |Pops PC       |
-|0x13  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Decrements by 4, then stores at `SP`|
-|0x14  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Loads from `SP`, then increments|
-|0x15-20|reserved|||
+|0x00  |reserved|    |Exists to cause a fault when executing uninitialised code|
+|0x01  |ADD     |A   |Addition      |
+|0x02  |SUB     |A   |Subtraction   |
+|0x03  |MUL     |A   |Multiplication|
+|0x04  |DIV     |A   |Division      |
+|0x05  |SHL     |A   |Left shift    |
+|0x06  |SHR     |A   |Right shift   |
+|0x07  |AND     |A   |bitwise and   |
+|0x08  |OR      |A   |bitwise or    |
+|0x09  |NOT     |A   |bitwise not (idnores `rn`)|
+|0x0A  |XOR     |A   |bitwise xor   |
+|0x0B  |LUI     |A   |loads `rm`/`imm` into top 16 bits of `rd` (ignores `rn`)|
+|0x0C  |CMP     |A   |Subtracts and discards result (`rd` is ignored)|
+|0x0D  |LDR     |M   |Load a word   |
+|0x0E  |STR     |M   |Store a word  |
+|0x0F  |LDRB    |M   |Load a byte   |
+|0x10  |STRB    |M   |Store a byte  |
+|0x11  |JXX     |J   |Jumps to addr |
+|0x12  |CALL    |J   |Pushes PC and jumps to addr|
+|0x13  |RET     |J   |Pops PC       |
+|0x14  |PUSH    |M   |If register mode, pushes specified `rm`. Otherwise, treats `imm` as a bitmask of registers to push in ascending order. Decrements by 4, then stores at `SP`|
+|0x15  |POP     |M   |If register mode, pops specified `rm`. Otherwise, treats `imm` as a bitmask of registers to pop in descending order. Loads from `SP`, then increments|
+|0x16-20|reserved|||
 |0x21  |FLAGS   |S   |Reads `flags` to `rd` OR writes `rm`/`imm` to `flags`|
 |0x22  |HALT    |x   |Pauses the cpu until an interrupt fires|
 |0x23  |ICALL   |J   |Calls the specified interrupt number in either `rm` or `imm`|
@@ -146,7 +147,7 @@ CPU Exceptions:
 
 For all exceptions less than `0x20`, the cpu first pushes some details to the stack, then jumps to the address stored in the Interrupt Handler Vector Table: `PC = IHVT[irq]`. For "Interrupt Entry" exceptions, the `IE` flag must be enabled for this to happen, otherwise the exception is ignored.
 
-The IHVT is a 256-word-long array of function pointers. Its address is `0x0000_0100`.
+The IHVT is a 256-word-long array of function pointers. Its address is `0x0000_1000`.
 
 On external interrupts (`vec >= 0x20 && (IE == 1 || vec == 0xFF)`):
 - Clear `IE`
@@ -163,7 +164,7 @@ On internal interrupts (`vec < 0x20`):
 Interrupt Controller Unit (ICU):  
 
 Currently only supports 32 possible hardware interrupts  
-MMIO address - `0x0000_2000`
+MMIO address - `0x0001_0400`
 - 0x00 - IRR (Interrupt Request Register): one bit per IRQ; set by the hardware when a device asserts an interrupt.
 - 0x04 - ISR (In-Service Register): one bit per IRQ; set when the ICU has dispatched an IRQ to the CPU. Cleared by EOI
 - 0x08 - IMR (Interrupt Mask Register): one bit per IRQ; software can mask unwanted interrupts and they get dropped.
