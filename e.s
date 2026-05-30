@@ -1,7 +1,7 @@
 __entry: jmp $__entry
 
 __default_int_handler:
-    add r1, r1, #1
+    add r1, r1, #0x8000
     halt
 .section .ihvt
 .word $__default_int_handler

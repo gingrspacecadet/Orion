@@ -225,6 +225,8 @@ static int64_t encode_operand(Operand op, int patch_type, bool *is_reg) {
     return (op.mode == AM_REG) ? op.reg : op.val;
 }
 
+#define SHOULD_SIGN_EXTEND(val) ((val) >= -32768 && (val) <= 32767)
+
 void codegen(instr_array *instrs) {
     for (size_t i = 0; i < instrs->len; i++) {
         ParsedInstr instr = instrs->data[i];
@@ -273,12 +275,12 @@ void codegen(instr_array *instrs) {
                 uint32_t low = (uint32_t)src.val & 0xFFFF;
 
                 if (high != 0)
-                    write_active_u32(encode_a(OP_LUI, 0, dst.reg, false, true, high));
+                    write_active_u32(encode_a(OP_LUI, 0, dst.reg, false, SHOULD_SIGN_EXTEND(high), high));
                 else
                     write_active_u32(encode_a(OP_XOR, dst.reg, dst.reg, true, false, dst.reg));
                 
                 if (low != 0)
-                    write_active_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, true, low));
+                    write_active_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, SHOULD_SIGN_EXTEND(low), low));
                 
                 continue;
             }
@@ -291,7 +293,7 @@ void codegen(instr_array *instrs) {
                     .symbol_name = ""
                 };
                 strncpy(reloc_table[reloc_count - 1].symbol_name, src.label, 31);
-                write_active_u32(encode_a(OP_LUI, 0, dst.reg, false, true, 0));
+                write_active_u32(encode_a(OP_LUI, 0, dst.reg, false, false, 0));
 
                 reloc_table[reloc_count++] = (ObjReloc){
                     .patch_offset = active_section->ptr,
@@ -300,17 +302,17 @@ void codegen(instr_array *instrs) {
                     .symbol_name = ""
                 };
                 strncpy(reloc_table[reloc_count - 1].symbol_name, src.label, 31);
-                write_active_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, true, 0));
+                write_active_u32(encode_a(OP_ADD, dst.reg, dst.reg, false, false, 0));
                 continue;
             }
 
             if (dst.mode == AM_REG && src.mode == AM_MEM) {
-                write_active_u32(encode_m(OP_LDR, src.reg, dst.reg, src.is_reg_offset, true, src.val));
+                write_active_u32(encode_m(OP_LDR, src.reg, dst.reg, src.is_reg_offset, SHOULD_SIGN_EXTEND(src.val), src.val));
                 continue;
             }
 
             if (dst.mode == AM_MEM && src.mode == AM_REG) {
-                write_active_u32(encode_m(OP_STR, dst.reg, src.reg, dst.is_reg_offset, true, dst.val));
+                write_active_u32(encode_m(OP_STR, dst.reg, src.reg, dst.is_reg_offset, SHOULD_SIGN_EXTEND(dst.val), dst.val));
                 continue;
             }
 
@@ -346,7 +348,7 @@ void codegen(instr_array *instrs) {
                 rn = instr.ops[1].reg;
                 immrm = encode_operand(instr.ops[2], RELOC_LO16, &is_reg);
 
-                write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_a(opcode, rn, rd, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 
@@ -355,7 +357,7 @@ void codegen(instr_array *instrs) {
                 rn = 0;
                 immrm = encode_operand(instr.ops[1], (opcode == OP_LUI) ? RELOC_HI16 : RELOC_LO16, &is_reg);
 
-                write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_a(opcode, rn, rd, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 
@@ -364,7 +366,7 @@ void codegen(instr_array *instrs) {
                 rn = instr.ops[0].reg;
                 immrm = encode_operand(instr.ops[1], RELOC_LO16, &is_reg);
 
-                write_active_u32(encode_a(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_a(opcode, rn, rd, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 
@@ -385,7 +387,7 @@ void codegen(instr_array *instrs) {
                     immrm = encode_operand(instr.ops[2], RELOC_LO16, &is_reg);
                 }
 
-                write_active_u32(encode_m(opcode, rn, rd, is_reg, true, immrm));
+                write_active_u32(encode_m(opcode, rn, rd, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 
@@ -393,7 +395,7 @@ void codegen(instr_array *instrs) {
                 Operand op = instr.ops[0];
                 immrm = encode_operand(instr.ops[0], RELOC_LO16, &is_reg);
                 
-                write_active_u32(encode_m(opcode, 0, 0, is_reg, true, immrm));
+                write_active_u32(encode_m(opcode, 0, 0, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 
@@ -401,7 +403,7 @@ void codegen(instr_array *instrs) {
                 rd = instr.ops[0].reg;
                 immrm = encode_operand(instr.ops[1], RELOC_LO16, &is_reg);
 
-                write_active_u32(encode_s(opcode, rd, is_reg, true, immrm));
+                write_active_u32(encode_s(opcode, rd, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 
@@ -410,7 +412,7 @@ void codegen(instr_array *instrs) {
                 lookup_cond(instr.mnemonic, &cond);
                 immrm = encode_operand(instr.ops[0], RELOC_PC_REL, &is_reg);
 
-                write_active_u32(encode_j(opcode, cond, false, is_reg, true, immrm));
+                write_active_u32(encode_j(opcode, cond, false, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
         }
