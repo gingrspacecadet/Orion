@@ -504,7 +504,7 @@ int main(int argc, char **argv) {
     IcuDevice icu = {0};
     icu.cpu_int_pin = &cpu.int_pin;
 
-    bus_register_device(cpu.bus, 0x00010400, sizeof(IcuDevice), &icu, icu_read, icu_write);
+    bus_register_device(cpu.bus, 0x00010400, 256, &icu, icu_read, icu_write);
 
     // TODO: register this as a bus device
     HwTimer system_timer;
