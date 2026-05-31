@@ -20,8 +20,8 @@ $$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
 endef
 
 CC := gcc -g
-CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Iinclude
-LDFLAGS :=
+CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Iinclude $(shell pkg-config --cflags sdl2)
+LDFLAGS :=$(shell pkg-config --libs sdl2)
 
 # optimisations
 CFLAGS += -O3 -march=native -flto -fno-plt -fomit-frame-pointer

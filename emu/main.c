@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include "hw_timer.h"
 #include "uart.h"
 #include "isa.h"
@@ -12,6 +13,7 @@
 #include "bus.h"
 #include "pcu.h"
 #include "icu.h"
+#include "gpu.h"
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -209,10 +211,6 @@ static __always_inline void step(Cpu *cpu) {
         }
 
         case OP_LDR: {
-            if (unlikely(((cpu->r[rn] + op_b) & 0x3) != 0)) {
-                raise_exception(cpu, EX_INVALID_MEM_ACCESS);
-                return;
-            }
             cpu->r[rd] = bus_read32(cpu->bus, cpu->r[rn] + op_b);
             break;
         }
@@ -223,10 +221,6 @@ static __always_inline void step(Cpu *cpu) {
         }
 
         case OP_STR: {
-            if (unlikely(((cpu->r[rn] + op_b) & 0x3) != 0)) {
-                raise_exception(cpu, EX_INVALID_MEM_ACCESS);
-                return;
-            }
             bus_write32(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
             break;
         }
@@ -352,21 +346,27 @@ static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
 
 static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     uint32_t active_irqs = icu->irr & ~(icu->imr);
+    if (active_irqs == 0 || !get_flag(cpu, FLAG_IE)) return;
 
-    if (active_irqs != 0 && get_flag(cpu, FLAG_IE)) {
-        uint8_t irq = find_highest_priority(icu, active_irqs);
-        icu->irr &= ~(1u << irq);
-        icu->isr |= (1u << irq);
+    uint8_t irq = find_highest_priority(icu, active_irqs);
 
-        *icu->cpu_int_pin = ((icu->irr & ~icu->imr) != 0);
-
-        if (!push32(cpu, cpu->flags)) return;
-        if (!push32(cpu, cpu->pc)) return;
-        set_flag(cpu, FLAG_IE, false);
-
-        uint8_t vec = icu->vec[irq] + 0x20;
-        cpu->pc = bus_read32(cpu->bus, IHVT_BASE + (vec * 4));
+    for (int i = 0; i < 32; i++) {
+        if ((icu->isr & (1u << i)) && (icu->prio[i] >= icu->prio[irq])) {
+            return;
+        }
     }
+
+    icu->irr &= ~(1u << irq);
+    icu->isr |= (1u << irq);
+
+    icu_update_output_pin(icu);
+
+    if (!push32(cpu, cpu->flags)) return;
+    if (!push32(cpu, cpu->pc)) return;
+    set_flag(cpu, FLAG_IE, false);
+
+    uint8_t vec = icu->vec[irq] + 0x20;
+    cpu->pc = bus_read32(cpu->bus, IHVT_BASE + (vec * 4));
 }
 
 volatile sig_atomic_t signalled = false;
@@ -402,7 +402,7 @@ int main(int argc, char **argv) {
     cpu.pc = 0x00001000;
     cpu.memory = mem_init();
     cpu.bus = bus_init(cpu.memory);
-    set_flag(&cpu, FLAG_IE, true);
+    cpu.running = true;
 
     TimerPool timer_pool = {0};
 
@@ -433,11 +433,21 @@ int main(int argc, char **argv) {
     HwTimer system_timer;
     hw_timer_init(&system_timer, &timer_pool, icu_get_irq_line(&icu, 0));
 
+    // gpu!
+    GpuDevice *gpu = gpu_create(cpu.bus, &timer_pool, icu_get_irq_line(&icu, 1));
+    bus_register_device(cpu.bus, 0x00010A00, 16, gpu, gpu_bus_read, gpu_bus_write);
+
     // TODO: ideally, this would be done by the ROM image
     for (size_t i = 0; i < imglen; i++) {
         mem_write8(cpu.memory, 0x1000 + i, img[i]);
     }
-    cpu.running = true;
+
+    uint64_t cycles = 0;
+    uint64_t last_ns, now_ns, delta_ns;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    last_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+
     while (likely(cpu.running)) {
         if (unlikely(signalled)) break;
 
@@ -445,8 +455,15 @@ int main(int argc, char **argv) {
             step(&cpu);
             if (unlikely(!cpu.running)) break;
         }
+        cycles += BATCH_SIZE;
 
-        timer_pool.virtual_time += BATCH_SIZE;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+        delta_ns = now_ns - last_ns;
+        last_ns = now_ns;
+
+        timer_pool.virtual_time += delta_ns;
+
         if (unlikely(timer_pool.active_timers && timer_pool.virtual_time >= timer_pool.active_timers->expire_time)) {
             timer_run_expired(&timer_pool);
         }
@@ -459,7 +476,7 @@ int main(int argc, char **argv) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);
         if (i == 7) putc('\n', stdout);
     }
-    putc('\n', stdout);
+    printf("\nPC: 0x%08X\n", cpu.pc);
 
     for (int i = 0; i < cpu.bus->device_count; i++) {
         printf("bus device %d address 0x%08X\n", i, cpu.bus->devices[i].base_addr);
@@ -476,5 +493,5 @@ int main(int argc, char **argv) {
 
         printf("pcu device %d address 0x%08X, vendor 0x%03X, class 0x%02X, device 0x%02X, revision 0x%01X\n", i, dev.base_addr, vendor, class, device, revision);
     }
-    printf("time: %lu\n", timer_pool.virtual_time);
+    printf("time: %luns\ncycles: %lu\ncycles per second: %llu\n", timer_pool.virtual_time, cycles, cycles * 1000000000ULL / timer_pool.virtual_time);
 }

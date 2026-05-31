@@ -51,7 +51,7 @@ typedef enum {
     FMT_MEM_ACCESS,     // LDR rd, [rn + offset] / STR rd, [rn + offset]
     FMT_STACK,          // PUSH / POP handling
     FMT_SYS,            // FLAGS rd, imm
-    FMT_JUMP,            // JXX target / CALL target
+    FMT_JUMP,           // JXX target / CALL target
 } OpFormat;
 
 static uint32_t encode_a(uint32_t opcode, int rn, int rd, bool is_reg, bool is_signed, int64_t immrm) {

@@ -9,6 +9,7 @@
 
 typedef struct {
     uint8_t data[PAGE_SIZE];
+    volatile bool dirty;
 } MemPage;
 
 typedef struct Memory {
@@ -52,6 +53,7 @@ static __always_inline void mem_write32(Memory *mem, uint32_t addr, const uint32
     if (offset <= PAGE_SIZE - 4) {
         MemPage *p = get_page(mem, addr, true);
         memcpy(&p->data[offset], &v, sizeof(v));
+        p->dirty = true;
         return;
     }
 

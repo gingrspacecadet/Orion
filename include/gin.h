@@ -11,7 +11,9 @@
 #ifndef __GIN_H
 #define __GIN_H
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,7 +21,6 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
-#undef _GNU_SOURCE
 
 static inline void *xmalloc(size_t size) {
     void *ptr = malloc(size);

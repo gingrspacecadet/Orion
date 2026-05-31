@@ -14,6 +14,7 @@ void mem_write8(Memory *mem, uint32_t addr, uint8_t v) {
     MemPage *p = get_page(mem, addr, true);
     uint32_t offset = addr % PAGE_SIZE;
     p->data[offset] = v;
+    p->dirty = true;
 }
 
 uint8_t mem_read8(Memory *mem, uint32_t addr) {

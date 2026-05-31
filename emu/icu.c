@@ -1,10 +1,5 @@
 #include "icu.h"
 
-static void icu_update_output_pin(IcuDevice *icu) {
-    uint32_t active_requests = icu->irr & ~icu->imr;
-    *icu->cpu_int_pin = (active_requests != 0);
-}
-
 void icu_raise_irq(IcuDevice *icu, int irq_num) {
     if (irq_num >= 0 && irq_num < 32) {
         icu->irr |= (1u << irq_num);

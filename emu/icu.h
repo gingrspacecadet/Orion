@@ -32,4 +32,9 @@ void icu_write(void *state, uint32_t offset, uint32_t value, uint8_t size);
 
 IrqLine icu_get_irq_line(IcuDevice *icu, int irq_num);
 
+static void icu_update_output_pin(IcuDevice *icu) {
+    uint32_t active_requests = icu->irr & ~icu->imr;
+    *icu->cpu_int_pin = (active_requests != 0);
+}
+
 #endif
