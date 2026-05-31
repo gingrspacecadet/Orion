@@ -129,18 +129,18 @@ typedef struct {
     uint32_t pc_page_num;
 } Cpu;
 
-static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
+static __always_inline void set_flag(Cpu *cpu, Flag flag, bool v) {
     if (v) cpu->flags |= (1u << flag);
     else cpu->flags &= ~(1u << flag);
 }
 
-static inline bool get_flag(Cpu *cpu, Flag flag) {
+static __always_inline bool get_flag(Cpu *cpu, Flag flag) {
     return cpu->flags & (1u << flag);
 }
 
 static __always_inline void push32_nocheck(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
-    mem_write32(cpu->memory, cpu->r[SP], v);
+    bus_write32(cpu->bus, cpu->r[SP], v);
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
@@ -163,7 +163,7 @@ static __always_inline bool push32(Cpu *cpu, const uint32_t v) {
         return false;
     }
     cpu->r[SP] -= 4;
-    mem_write32(cpu->memory, cpu->r[SP], v);
+    bus_write32(cpu->bus, cpu->r[SP], v);
     return true;
 }
 
@@ -173,7 +173,7 @@ static __always_inline bool pop32(Cpu *cpu, uint32_t *out) {
         raise_exception(cpu, EX_STACK_UNDERFLOW);
         return false;
     }
-    *out = mem_read32(cpu->memory, cpu->r[SP]);
+    *out = bus_read32(cpu->bus, cpu->r[SP]);
     cpu->r[SP] += 4;
     return true;
 }
@@ -193,7 +193,7 @@ static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
     return target;
 }
 
-static void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
+static __always_inline void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     uint64_t sum = (uint64_t)a + (uint64_t)b;
 
     set_flag(cpu, FLAG_Z, res == 0);
@@ -202,7 +202,7 @@ static void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     set_flag(cpu, FLAG_V, ((((~(a ^ b)) & (a ^ res)) >> 31 ) & 1u ));
 }
 
-static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
+static __always_inline void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     set_flag(cpu, FLAG_Z, res == 0);
     set_flag(cpu, FLAG_N, (res >> 31) & 1u);
     set_flag(cpu, FLAG_C, a < b);
@@ -210,132 +210,138 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
 }
 
 static __always_inline void sync_pc_cache(Cpu *cpu) {
-    uint32_t page_num = cpu->pc / PAGE_SIZE;
+    uint32_t page_num = cpu->pc >> 12;
     if (unlikely(page_num != cpu->pc_page_num || !cpu->pc_page_ptr)) {
         cpu->pc_page_num = page_num;
-        MemPage *p = get_page(cpu->memory, cpu->pc, false);
-        cpu->pc_page_ptr = p ? p->data : NULL;
+        
+        if (unlikely(cpu->bus->page_map[page_num] != NULL)) {
+            cpu->pc_page_ptr = NULL;
+        } else {
+            MemPage *p = get_page(cpu->memory, cpu->pc, false);
+            cpu->pc_page_ptr = p ? p->data : NULL;
+        }
     }
-} 
+}
 
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
-static void step(Cpu *cpu) {
+static __always_inline void step(Cpu *cpu) {
     uint32_t word;
 
     sync_pc_cache(cpu);
 
-    uint32_t offset = cpu->pc % PAGE_SIZE;
-    if (likely(cpu->pc_page_ptr && offset <= PAGE_SIZE - 4)) {
-        memcpy(&word, &cpu->pc_page_ptr[offset], sizeof(uint32_t));
+    uint32_t offset = cpu->pc & 4095;
+    if (likely(cpu->pc_page_ptr && offset <= 4092)) {
+        word = *(const uint32_t *)&cpu->pc_page_ptr[offset];
     } else {
         word = bus_read32(cpu->bus, cpu->pc);
     }
 
-    Instr d;
-    decode(word, &d);
+    uint8_t opcode   = (word >> 26) & 0x3F;
+    bool is_reg      = (word >> IS_REG_SHIFT) & IS_REG_MASK;
+    bool is_signed   = (word >> SIGNED_SHIFT) & SIGNED_MASK;
+    uint8_t rm       = (word >> IMM_RM_SHIFT) & RM_MASK;
+    uint32_t imm     = (word >> IMM_RM_SHIFT) & IMM_MASK;
+    
+    uint8_t rn       = (word >> RN_SHIFT) & RN_MASK;
+    uint8_t rd       = (word >> RD_SHIFT) & RD_MASK;
 
+    uint32_t op_b = is_reg ? cpu->r[rm] : (is_signed ? (int32_t)((int16_t)imm) : imm);
     bool update_pc = true;
 
-    switch (d.opcode) {
+    switch (opcode) {
         case OP_ADD: {
-            uint32_t a = cpu->r[d.rn];
-            uint32_t b = get_rm_or_imm(d);
-            uint32_t res = a + b;
-            cpu->r[d.rd] = res;
-            update_flags_add(cpu, a, b, res);
+            uint32_t a = cpu->r[rn];
+            uint32_t res = a + op_b;
+            cpu->r[rd] = res;
+            update_flags_add(cpu, a, op_b, res);
             break;
         }
 
         case OP_SUB: {
-            uint32_t a = cpu->r[d.rn];
-            uint32_t b = get_rm_or_imm(d);
-            uint32_t res = a - b;
-            cpu->r[d.rd] = res;
-            update_flags_sub(cpu, a, b, res);
+            uint32_t a = cpu->r[rn];
+            uint32_t res = a - op_b;
+            cpu->r[rd] = res;
+            update_flags_sub(cpu, a, op_b, res);
             break;
         }
 
         case OP_XOR: {
-            cpu->r[d.rd] = cpu->r[d.rn] ^ get_rm_or_imm(d);
+            cpu->r[rd] = cpu->r[rn] ^ op_b;
             break;
         }
 
         case OP_OR: {
-            cpu->r[d.rd] = cpu->r[d.rn] | get_rm_or_imm(d);
+            cpu->r[rd] = cpu->r[rn] | op_b;
             break;
         }
 
         case OP_SHL: {
-            cpu->r[d.rd] = cpu->r[d.rn] << get_rm_or_imm(d);
+            cpu->r[rd] = cpu->r[rn] << op_b;
             break;
         }
 
         case OP_SHR: {
-            cpu->r[d.rd] = cpu->r[d.rn] >> get_rm_or_imm(d);
+            cpu->r[rd] = cpu->r[rn] >> op_b;
             break;
         }
 
         case OP_AND: {
-            cpu->r[d.rd] = cpu->r[d.rn] & get_rm_or_imm(d);
+            cpu->r[rd] = cpu->r[rn] & op_b;
             break;
         }
 
         case OP_CMP: {
-            uint32_t a = cpu->r[d.rn];
-            uint32_t b = get_rm_or_imm(d);
-            uint32_t res = a - b;
-            update_flags_sub(cpu, a, b, res);
+            uint32_t a = cpu->r[rn];
+            update_flags_sub(cpu, a, op_b, a - op_b);
             break;
         }
 
         case OP_LDR: {
-            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            cpu->r[d.rd] = bus_read32(cpu->bus, addr);
+            cpu->r[rd] = bus_read32(cpu->bus, cpu->r[rn] + op_b);
             break;
         }
 
         case OP_LDRB: {
-            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            cpu->r[d.rd] = bus_read8(cpu->bus, addr);
+            cpu->r[rd] = bus_read8(cpu->bus, cpu->r[rn] + op_b);
             break;
         }
 
         case OP_STR: {
-            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            bus_write32(cpu->bus, addr, cpu->r[d.rd]);
+            bus_write32(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
             break;
         }
 
         case OP_STRB: {
-            uint32_t addr = cpu->r[d.rn] + get_rm_or_imm(d);
-            bus_write8(cpu->bus, addr, cpu->r[d.rd]);
+            bus_write8(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
             break;
         }
 
         case OP_LUI: {
-            cpu->r[d.rd] = (uint32_t)(get_rm_or_imm(d)) << 16;
+            cpu->r[rd] = op_b << 16;
             break;
         }
 
         case OP_JXX: {
-            uint32_t target = compute_jmp_target(cpu, d);
+            bool is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
+            uint32_t target = op_b + (is_absolute ? 0 : cpu->pc);
             bool jump = false;
-            switch (d.cond) {
-                case COND_JMP: jump = true; break;
-                case COND_JEQ: if (get_flag(cpu, FLAG_Z)) jump = true; break;
-                case COND_JNE: if (!get_flag(cpu, FLAG_Z)) jump = true; break;
-                case COND_JLT: if (get_flag(cpu, FLAG_N) != get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JGE: if (get_flag(cpu, FLAG_N) == get_flag(cpu, FLAG_V)) jump = true; break;
+            
+            switch ((word >> COND_SHIFT) & COND_MASK) {
+                case COND_JMP:  jump = true; break;
+                case COND_JEQ:  if (get_flag(cpu, FLAG_Z)) jump = true; break;
+                case COND_JNE:  if (!get_flag(cpu, FLAG_Z)) jump = true; break;
+                case COND_JLT:  if (get_flag(cpu, FLAG_N) != get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JGE:  if (get_flag(cpu, FLAG_N) == get_flag(cpu, FLAG_V)) jump = true; break;
                 case COND_JLTU: if (!get_flag(cpu, FLAG_C)) jump = true; break;
                 case COND_JGEU: if (get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JCS: if (get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JCC: if (!get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JN: if (get_flag(cpu, FLAG_N)) jump = true; break;
-                case COND_JP: if (!get_flag(cpu, FLAG_N)) jump = true; break;
-                case COND_JVS: if (get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JVC: if (!get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JLS: if (!get_flag(cpu, FLAG_C) || get_flag(cpu, FLAG_Z)) jump = true; break;
+                case COND_JCS:  if (get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JCC:  if (!get_flag(cpu, FLAG_C)) jump = true; break;
+                case COND_JN:   if (get_flag(cpu, FLAG_N)) jump = true; break;
+                case COND_JP:   if (!get_flag(cpu, FLAG_N)) jump = true; break;
+                case COND_JVS:  if (get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JVC:  if (!get_flag(cpu, FLAG_V)) jump = true; break;
+                case COND_JLS:  if (!get_flag(cpu, FLAG_C) || get_flag(cpu, FLAG_Z)) jump = true; break;
                 default: break;
             }
             if (jump) {
@@ -347,7 +353,8 @@ static void step(Cpu *cpu) {
 
         case OP_CALL: {
             if (!push32(cpu, cpu->pc + 4)) return;
-            cpu->pc = compute_jmp_target(cpu, d);
+            bool is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
+            cpu->pc = op_b + (is_absolute ? 0 : cpu->pc);
             update_pc = false;
             break;
         }
@@ -359,34 +366,28 @@ static void step(Cpu *cpu) {
         }
 
         case OP_PUSH: {
-            if (d.is_reg) {
-                if (!push32(cpu, cpu->r[d.rm])) return;
-            }
-            else {
-                if (d.imm & 1u) {
-                    raise_exception(cpu, EX_INVALID_INSTR);
-                    return;
-                }
+            if (is_reg) {
+                if (!push32(cpu, cpu->r[rm])) return;
+            } else {
+                if (unlikely(imm & 1u)) { raise_exception(cpu, EX_INVALID_INSTR); return; }
                 for (int i = 0; i < 16; i++) {
-                    bool push = (d.imm >> i) & 0x1;
-                    if (push) if (!push32(cpu, cpu->r[i])) return;
+                    if ((imm >> i) & 0x1) {
+                        if (!push32(cpu, cpu->r[i])) return;
+                    }
                 }
             }
             break;
         }
 
         case OP_POP: {
-            if (d.is_reg) {
-                if (!pop32(cpu, &cpu->r[d.rm])) return;
-            }
-            else {
-                if (d.imm & 1u) {
-                    raise_exception(cpu, EX_INVALID_INSTR);
-                    return;
-                }
+            if (is_reg) {
+                if (!pop32(cpu, &cpu->r[rm])) return;
+            } else {
+                if (unlikely(imm & 1u)) { raise_exception(cpu, EX_INVALID_INSTR); return; }
                 for (int i = 15; i >= 0; i--) {
-                    bool pop = (d.imm >> i) & 0x1;
-                    if (pop) if (!pop32(cpu, &cpu->r[i])) return;
+                    if ((imm >> i) & 0x1) {
+                        if (!pop32(cpu, &cpu->r[i])) return;
+                    }
                 }
             }
             break;
@@ -400,6 +401,7 @@ static void step(Cpu *cpu) {
         case OP_IRET: {
             if (!pop32(cpu, &cpu->pc)) return;
             if (!pop32(cpu, &cpu->flags)) return;
+            update_pc = false;
             break;
         }
 
@@ -457,6 +459,8 @@ void setup_signal_handlers(void) {
     sigaction(SIGINT, &sa, NULL);
 }
 
+#define BATCH_SIZE  128
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s out.bin\n", argv[0]);
@@ -511,17 +515,19 @@ int main(int argc, char **argv) {
         mem_write8(cpu.memory, 0x1000 + i, img[i]);
     }
     cpu.running = true;
-    while (cpu.running && !signalled) {
-        // first, step the cpu
-        step(&cpu);
+    while (likely(cpu.running)) {
+        if (unlikely(signalled)) break;
 
-        // then handle timer pool
-        timer_pool.virtual_time += 1;   // TODO: make this more accurate
+        for (int i = 0; i < BATCH_SIZE; i++) {
+            step(&cpu);
+            if (unlikely(!cpu.running)) break;
+        }
+
+        timer_pool.virtual_time += BATCH_SIZE;
         if (unlikely(timer_pool.active_timers && timer_pool.virtual_time >= timer_pool.active_timers->expire_time)) {
             timer_run_expired(&timer_pool);
         }
 
-        // then check for interrupts
         if (unlikely(cpu.int_pin && get_flag(&cpu, FLAG_IE))) {
             icu_check_and_fire(&cpu, &icu);
         }

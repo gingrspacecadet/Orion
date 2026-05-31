@@ -7,6 +7,26 @@ Bus *bus_init(Memory *mem) {
     return bus;
 }
 
+void bus_rebuild_page_map(Bus *bus) {
+    memset(bus->page_map, 0, sizeof(bus->page_map));
+    
+    for (int i = 0; i < bus->device_count; i++) {
+        BusDevice *dev = &bus->devices[i];
+        
+        if (dev->size == 0 || dev->base_addr == 0) continue;
+
+        uint32_t start_page = dev->base_addr >> 12;
+        uint64_t end_addr = (uint64_t)dev->base_addr + dev->size;
+        uint32_t end_page = (end_addr + 4095) >> 12;
+        
+        if (end_page > TOTAL_PAGES) end_page = TOTAL_PAGES;
+
+        for (uint32_t p = start_page; p < end_page; p++) {
+            bus->page_map[p] = dev;
+        }
+    }
+}
+
 bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, device_read_fn read, device_write_fn write) {
     if (bus->device_count >= MAX_DEVICES) return false;
 
@@ -18,11 +38,6 @@ bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, de
     dev->write = write;
 
     bus_update_mapping(bus, bus->device_count - 1, base);
-
-    if (base + size > bus->max_mmio_addr) {
-        bus->max_mmio_addr = base + size;
-    }
-
     return true;
 }
 
@@ -34,54 +49,6 @@ void bus_update_mapping(Bus *bus, int slot, uint32_t new_base) {
         } else {
             dev->base_addr = new_base;
         }
+        bus_rebuild_page_map(bus);
     }
-}
-
-static inline BusDevice* find_device(Bus *bus, uint32_t addr) {
-    if (addr >= bus->max_mmio_addr) return NULL;
-
-    if (bus->last_device_hit && addr >= bus->last_device_hit->base_addr && addr < (bus->last_device_hit->base_addr + bus->last_device_hit->size)) {
-        return bus->last_device_hit;
-    }
-
-    for (int i = 0; i < bus->device_count; i++) {
-        BusDevice *dev = &bus->devices[i];
-        if (dev->base_addr == 0) continue;
-
-        if (addr >= dev->base_addr && addr < (dev->base_addr + dev->size)) {
-            bus->last_device_hit = dev;
-            return dev;
-        }
-    }
-    return NULL;
-}
-
-uint8_t bus_read8(Bus *bus, uint32_t addr) {
-    BusDevice *dev = find_device(bus, addr);
-    if (dev) return dev->read(dev->state, addr - dev->base_addr, 1);
-    else return mem_read8(bus->mem, addr);
-}
-
-uint32_t bus_read32(Bus *bus, uint32_t addr) {
-    BusDevice *dev = find_device(bus, addr);
-    if (dev) return dev->read(dev->state, addr - dev->base_addr, 4);
-    else return mem_read32(bus->mem, addr);
-}
-
-void bus_write8(Bus *bus, uint32_t addr, uint8_t val) {
-    BusDevice *dev = find_device(bus, addr);
-    if (dev) {
-        dev->write(dev->state, addr - dev->base_addr, val, 1);
-        return;
-    }
-    mem_write8(bus->mem, addr, val);
-}
-
-void bus_write32(Bus *bus, uint32_t addr, uint32_t val) {
-    BusDevice *dev = find_device(bus, addr);
-    if (dev) {
-        dev->write(dev->state, addr - dev->base_addr, val, 4);
-        return;
-    }
-    mem_write32(bus->mem, addr, val);
 }
