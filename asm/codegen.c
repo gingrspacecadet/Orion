@@ -392,7 +392,6 @@ void codegen(instr_array *instrs) {
             }
 
             case FMT_STACK: {
-                Operand op = instr.ops[0];
                 immrm = encode_operand(instr.ops[0], RELOC_LO16, &is_reg);
                 
                 write_active_u32(encode_m(opcode, 0, 0, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));

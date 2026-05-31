@@ -16,23 +16,6 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
 
-typedef struct {
-    uint8_t opcode;
-    uint8_t rn;
-    uint8_t rd;
-    bool is_reg;
-    bool is_signed;
-    uint16_t imm;
-    uint8_t rm;
-
-    // J-type
-    uint8_t cond;
-    bool is_absolute;
-
-    // FLAGS
-    bool is_write;
-} Instr;
-
 static uint8_t *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (!f) { perror("fopen"); exit(1); }
@@ -46,68 +29,6 @@ static uint8_t *load_file(const char *path, size_t *out_len) {
     fclose(f);
     *out_len = (size_t)sz;
     return buf;
-}
-
-static const int8_t opcode_type_lut[64] = {
-    [OP_ADD] = TYPE_A, [OP_SUB] = TYPE_A, [OP_MUL] = TYPE_A, [OP_DIV] = TYPE_A,
-    [OP_SHL] = TYPE_A, [OP_SHR] = TYPE_A, [OP_AND] = TYPE_A, [OP_OR]  = TYPE_A,
-    [OP_NOT] = TYPE_A, [OP_XOR] = TYPE_A, [OP_LUI] = TYPE_A, [OP_CMP] = TYPE_A,
-    
-    [OP_LDR] = TYPE_M, [OP_STR] = TYPE_M, [OP_LDRB]= TYPE_M, [OP_STRB]= TYPE_M,
-    [OP_PUSH]= TYPE_M, [OP_POP] = TYPE_M,
-    
-    [OP_JXX] = TYPE_J, [OP_CALL]= TYPE_J, [OP_RET] = TYPE_J, 
-    [OP_ICALL] = TYPE_J, [OP_IRET] = TYPE_J,
-    
-    [OP_FLAGS] = TYPE_S
-};
-
-static inline void decode(uint32_t word, Instr *instr) {
-    memset(instr, 0, sizeof(Instr));
-    instr->opcode = (word >> 26) & 0x3F;
-    
-    // same with all opcodes
-    instr->is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK;
-    instr->is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK;
-
-    if (instr->is_reg) {
-        instr->rm = (word >> IMM_RM_SHIFT) & RM_MASK;
-    } else {
-        instr->imm = (word >> IMM_RM_SHIFT) & IMM_MASK;
-    }
-
-    int type = opcode_type_lut[instr->opcode];
-    switch (type) {
-        case TYPE_M:
-        case TYPE_A: {
-            instr->rn = (word >> RN_SHIFT) & RN_MASK;
-            instr->rd = (word >> RD_SHIFT) & RD_MASK;
-            break;
-        }
-
-        case TYPE_J: {
-            instr->cond = (word >> COND_SHIFT) & COND_MASK;
-            instr->is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
-            // TODO: raise exception if `reserved` non-zero
-            break;
-        }
-
-        case TYPE_S: {
-            instr->is_write = word & 0x1;
-            if (instr->is_write) {
-                if (instr->is_reg) {
-                    instr->rm = (word >> 10) & 0x3F;
-                } else {
-                    instr->imm = (word >> 10) & 0xFFFF;
-                }
-            } else {
-                instr->rd = (word >> 10) & 0x3F;
-            }
-            break;
-        }
-
-        default: break;
-    }
 }
 
 typedef uint32_t Register;
@@ -178,21 +99,6 @@ static __always_inline bool pop32(Cpu *cpu, uint32_t *out) {
     return true;
 }
 
-static uint32_t compute_jmp_target(Cpu *cpu, Instr d) {
-    uint32_t target = (d.is_reg
-        ? cpu->r[d.rm]
-        : (d.is_signed
-            ? (int32_t)((int16_t)d.imm)
-            : (uint32_t)d.imm
-        )
-    );
-    target += (d.is_absolute
-        ? 0
-        : cpu->pc
-    );
-    return target;
-}
-
 static __always_inline void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     uint64_t sum = (uint64_t)a + (uint64_t)b;
 
@@ -226,6 +132,11 @@ static __always_inline void sync_pc_cache(Cpu *cpu) {
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
 static __always_inline void step(Cpu *cpu) {
+    if (unlikely((cpu->pc & 0x3) != 0)) {
+        raise_exception(cpu, EX_MISALIGNED_PC);
+        return;
+    }
+
     uint32_t word;
 
     sync_pc_cache(cpu);
@@ -298,6 +209,10 @@ static __always_inline void step(Cpu *cpu) {
         }
 
         case OP_LDR: {
+            if (unlikely(((cpu->r[rn] + op_b) & 0x3) != 0)) {
+                raise_exception(cpu, EX_INVALID_MEM_ACCESS);
+                return;
+            }
             cpu->r[rd] = bus_read32(cpu->bus, cpu->r[rn] + op_b);
             break;
         }
@@ -308,6 +223,10 @@ static __always_inline void step(Cpu *cpu) {
         }
 
         case OP_STR: {
+            if (unlikely(((cpu->r[rn] + op_b) & 0x3) != 0)) {
+                raise_exception(cpu, EX_INVALID_MEM_ACCESS);
+                return;
+            }
             bus_write32(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
             break;
         }
@@ -326,6 +245,11 @@ static __always_inline void step(Cpu *cpu) {
             bool is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
             uint32_t target = op_b + (is_absolute ? 0 : cpu->pc);
             bool jump = false;
+            uint8_t reserved = (word >> 21) & 0x7;
+            if (unlikely(reserved != 0)) {
+                raise_exception(cpu, EX_INVALID_INSTR);
+                return;
+            }
             
             switch ((word >> COND_SHIFT) & COND_MASK) {
                 case COND_JMP:  jump = true; break;
@@ -476,7 +400,6 @@ int main(int argc, char **argv) {
 
     Cpu cpu = {0};
     cpu.pc = 0x00001000;
-    cpu.r[SP] = UINT32_MAX - sizeof(uint32_t);
     cpu.memory = mem_init();
     cpu.bus = bus_init(cpu.memory);
     set_flag(&cpu, FLAG_IE, true);

@@ -77,7 +77,7 @@ typedef struct { \
     size_t cap; \
     bool alive; \
 } N##_array; \
-static N##_array N##_array_empty = {}; \
+static inline N##_array N##_array_empty(void) { return (N##_array){}; } \
 static inline N##_array N##_array_init(void) { \
     N##_array v = {}; \
     v.data = (T*)xcalloc(sizeof(T)); \
