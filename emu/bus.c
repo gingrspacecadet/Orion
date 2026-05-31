@@ -19,6 +19,10 @@ bool bus_register_device(Bus *bus, uint32_t base, uint32_t size, void *state, de
 
     bus_update_mapping(bus, bus->device_count - 1, base);
 
+    if (base + size > bus->max_mmio_addr) {
+        bus->max_mmio_addr = base + size;
+    }
+
     return true;
 }
 
@@ -33,13 +37,19 @@ void bus_update_mapping(Bus *bus, int slot, uint32_t new_base) {
     }
 }
 
-static BusDevice* find_device(Bus *bus, uint32_t addr) {
+static inline BusDevice* find_device(Bus *bus, uint32_t addr) {
+    if (addr >= bus->max_mmio_addr) return NULL;
+
+    if (bus->last_device_hit && addr >= bus->last_device_hit->base_addr && addr < (bus->last_device_hit->base_addr + bus->last_device_hit->size)) {
+        return bus->last_device_hit;
+    }
+
     for (int i = 0; i < bus->device_count; i++) {
         BusDevice *dev = &bus->devices[i];
-
         if (dev->base_addr == 0) continue;
 
         if (addr >= dev->base_addr && addr < (dev->base_addr + dev->size)) {
+            bus->last_device_hit = dev;
             return dev;
         }
     }

@@ -48,6 +48,7 @@ typedef enum {
 } Condition;
 
 typedef enum {
+    TYPE_INVALID,
     TYPE_A,
     TYPE_M,
     TYPE_J,
@@ -98,6 +99,6 @@ typedef enum {
     EX_NON_MASKABLE_INT = 0xFF,
 } Exception;
 
-#define IHVT_BASE   0x00010000
+#define IHVT_BASE           0x00010000
 
 #endif

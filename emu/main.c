@@ -1,16 +1,20 @@
-#include <stdio.h>
+#include <inttypes.h>
 #include <stdbool.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
+#include <stdio.h>
+#include "hw_timer.h"
+#include "uart.h"
 #include "isa.h"
 #include "mem.h"
 #include "bus.h"
 #include "pcu.h"
 #include "icu.h"
-#include "hw_timer.h"
-#include "uart.h"
+
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#define likely(x) __builtin_expect(!!(x), 1)
 
 typedef struct {
     uint8_t opcode;
@@ -44,87 +48,66 @@ static uint8_t *load_file(const char *path, size_t *out_len) {
     return buf;
 }
 
-static int opcode_type(uint8_t opcode) {
-    switch (opcode) {
-        case OP_ADD:
-        case OP_SUB:
-        case OP_MUL:
-        case OP_DIV:
-        case OP_SHL:
-        case OP_SHR:
-        case OP_AND:
-        case OP_OR:
-        case OP_NOT:
-        case OP_XOR:
-        case OP_LUI:
-        case OP_CMP: return TYPE_A;
+static const int8_t opcode_type_lut[64] = {
+    [OP_ADD] = TYPE_A, [OP_SUB] = TYPE_A, [OP_MUL] = TYPE_A, [OP_DIV] = TYPE_A,
+    [OP_SHL] = TYPE_A, [OP_SHR] = TYPE_A, [OP_AND] = TYPE_A, [OP_OR]  = TYPE_A,
+    [OP_NOT] = TYPE_A, [OP_XOR] = TYPE_A, [OP_LUI] = TYPE_A, [OP_CMP] = TYPE_A,
+    
+    [OP_LDR] = TYPE_M, [OP_STR] = TYPE_M, [OP_LDRB]= TYPE_M, [OP_STRB]= TYPE_M,
+    [OP_PUSH]= TYPE_M, [OP_POP] = TYPE_M,
+    
+    [OP_JXX] = TYPE_J, [OP_CALL]= TYPE_J, [OP_RET] = TYPE_J, 
+    [OP_ICALL] = TYPE_J, [OP_IRET] = TYPE_J,
+    
+    [OP_FLAGS] = TYPE_S
+};
 
-        case OP_LDR:
-        case OP_STR:
-        case OP_LDRB:
-        case OP_STRB:
-        case OP_PUSH:
-        case OP_POP: return TYPE_M;
-
-        case OP_JXX:
-        case OP_CALL:
-        case OP_RET:
-        case OP_ICALL:
-        case OP_IRET: return TYPE_J;
-
-        case OP_FLAGS: return TYPE_S;
-
-        default: return -1;
-    }
-}
-
-static Instr decode(uint32_t word) {
-    Instr instr = {0};
-    instr.opcode = (word >> 26) & 0x3F;
+static inline void decode(uint32_t word, Instr *instr) {
+    memset(instr, 0, sizeof(Instr));
+    instr->opcode = (word >> 26) & 0x3F;
     
     // same with all opcodes
-    instr.is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK;
-    instr.is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK;
+    instr->is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK;
+    instr->is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK;
 
-    if (instr.is_reg) {
-        instr.rm = (word >> IMM_RM_SHIFT) & RM_MASK;
+    if (instr->is_reg) {
+        instr->rm = (word >> IMM_RM_SHIFT) & RM_MASK;
     } else {
-        instr.imm = (word >> IMM_RM_SHIFT) & IMM_MASK;
+        instr->imm = (word >> IMM_RM_SHIFT) & IMM_MASK;
     }
 
-    switch (opcode_type(instr.opcode)) {
+    int type = opcode_type_lut[instr->opcode];
+    switch (type) {
         case TYPE_M:
         case TYPE_A: {
-            instr.rn = (word >> RN_SHIFT) & RN_MASK;
-            instr.rd = (word >> RD_SHIFT) & RD_MASK;
+            instr->rn = (word >> RN_SHIFT) & RN_MASK;
+            instr->rd = (word >> RD_SHIFT) & RD_MASK;
             break;
         }
 
         case TYPE_J: {
-            instr.cond = (word >> COND_SHIFT) & COND_MASK;
-            instr.is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
+            instr->cond = (word >> COND_SHIFT) & COND_MASK;
+            instr->is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
             // TODO: raise exception if `reserved` non-zero
             break;
         }
 
         case TYPE_S: {
-            instr.is_write = word & 0x1;
-            if (instr.is_write) {
-                if (instr.is_reg) {
-                    instr.rm = (word >> 10) & 0x3F;
+            instr->is_write = word & 0x1;
+            if (instr->is_write) {
+                if (instr->is_reg) {
+                    instr->rm = (word >> 10) & 0x3F;
                 } else {
-                    instr.imm = (word >> 10) & 0xFFFF;
+                    instr->imm = (word >> 10) & 0xFFFF;
                 }
             } else {
-                instr.rd = (word >> 10) & 0x3F;
+                instr->rd = (word >> 10) & 0x3F;
             }
             break;
         }
 
         default: break;
     }
-
-    return instr;
 }
 
 typedef uint32_t Register;
@@ -141,6 +124,9 @@ typedef struct {
 
     Memory *memory;
     Bus *bus;   // sits on top of `memory`
+
+    uint8_t *pc_page_ptr;
+    uint32_t pc_page_num;
 } Cpu;
 
 static inline void set_flag(Cpu *cpu, Flag flag, bool v) {
@@ -152,9 +138,9 @@ static inline bool get_flag(Cpu *cpu, Flag flag) {
     return cpu->flags & (1u << flag);
 }
 
-static void push32_nocheck(Cpu *cpu, const uint32_t v) {
+static __always_inline void push32_nocheck(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
-    bus_write32(cpu->bus, cpu->r[SP], v);
+    mem_write32(cpu->memory, cpu->r[SP], v);
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
@@ -171,23 +157,23 @@ static void raise_exception(Cpu *cpu, uint8_t e) {
 }
 
 [[nodiscard]]
-static bool push32(Cpu *cpu, const uint32_t v) {
-    if (cpu->r[SP] <= 4) {
+static __always_inline bool push32(Cpu *cpu, const uint32_t v) {
+    if (unlikely(cpu->r[SP] <= 4)) {
         raise_exception(cpu, EX_STACK_OVERFLOW);
         return false;
     }
     cpu->r[SP] -= 4;
-    bus_write32(cpu->bus, cpu->r[SP], v);
+    mem_write32(cpu->memory, cpu->r[SP], v);
     return true;
 }
 
 [[nodiscard]]
-static bool pop32(Cpu *cpu, uint32_t *out) {
-    if (cpu->r[SP] >= UINT32_MAX - 4) {
+static __always_inline bool pop32(Cpu *cpu, uint32_t *out) {
+    if (unlikely(cpu->r[SP] >= UINT32_MAX - 4)) {
         raise_exception(cpu, EX_STACK_UNDERFLOW);
         return false;
     }
-    *out = bus_read32(cpu->bus, cpu->r[SP]);
+    *out = mem_read32(cpu->memory, cpu->r[SP]);
     cpu->r[SP] += 4;
     return true;
 }
@@ -223,12 +209,31 @@ static void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     set_flag(cpu, FLAG_V, ((((a ^ b) & (a ^ res)) >> 31 ) & 1u ));
 }
 
+static __always_inline void sync_pc_cache(Cpu *cpu) {
+    uint32_t page_num = cpu->pc / PAGE_SIZE;
+    if (unlikely(page_num != cpu->pc_page_num || !cpu->pc_page_ptr)) {
+        cpu->pc_page_num = page_num;
+        MemPage *p = get_page(cpu->memory, cpu->pc, false);
+        cpu->pc_page_ptr = p ? p->data : NULL;
+    }
+} 
+
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
 static void step(Cpu *cpu) {
-    uint32_t word = bus_read32(cpu->bus, cpu->pc);
+    uint32_t word;
 
-    Instr d = decode(word);
+    sync_pc_cache(cpu);
+
+    uint32_t offset = cpu->pc % PAGE_SIZE;
+    if (likely(cpu->pc_page_ptr && offset <= PAGE_SIZE - 4)) {
+        memcpy(&word, &cpu->pc_page_ptr[offset], sizeof(uint32_t));
+    } else {
+        word = bus_read32(cpu->bus, cpu->pc);
+    }
+
+    Instr d;
+    decode(word, &d);
 
     bool update_pc = true;
 
@@ -392,6 +397,12 @@ static void step(Cpu *cpu) {
             break;
         }
 
+        case OP_IRET: {
+            if (!pop32(cpu, &cpu->pc)) return;
+            if (!pop32(cpu, &cpu->flags)) return;
+            break;
+        }
+
         default: {
             raise_exception(cpu, EX_INVALID_INSTR);
             return;
@@ -432,11 +443,27 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     }
 }
 
+volatile sig_atomic_t signalled = false;
+
+void handle_signal(int sig) {
+    signalled = true;
+}
+
+void setup_signal_handlers(void) {
+    struct sigaction sa = {0};
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s out.bin\n", argv[0]);
         return 1;
     }
+
+    setup_signal_handlers();
 
     const char *path = argv[1];
 
@@ -484,16 +511,20 @@ int main(int argc, char **argv) {
         mem_write8(cpu.memory, 0x1000 + i, img[i]);
     }
     cpu.running = true;
-    while (cpu.running) {
+    while (cpu.running && !signalled) {
         // first, step the cpu
         step(&cpu);
 
         // then handle timer pool
         timer_pool.virtual_time += 1;   // TODO: make this more accurate
-        timer_run_expired(&timer_pool);
+        if (unlikely(timer_pool.active_timers && timer_pool.virtual_time >= timer_pool.active_timers->expire_time)) {
+            timer_run_expired(&timer_pool);
+        }
 
         // then check for interrupts
-        icu_check_and_fire(&cpu, &icu);
+        if (unlikely(cpu.int_pin && get_flag(&cpu, FLAG_IE))) {
+            icu_check_and_fire(&cpu, &icu);
+        }
     }
     for (int i = 0; i < 16; i++) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);
@@ -516,4 +547,5 @@ int main(int argc, char **argv) {
 
         printf("pcu device %d address 0x%08X, vendor 0x%03X, class 0x%02X, device 0x%02X, revision 0x%01X\n", i, dev.base_addr, vendor, class, device, revision);
     }
+    printf("time: %lu\n", timer_pool.virtual_time);
 }

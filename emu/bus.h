@@ -22,6 +22,8 @@ typedef struct {
     Memory *mem;
     BusDevice devices[MAX_DEVICES];
     int device_count;
+    uint32_t max_mmio_addr;
+    BusDevice *last_device_hit;
 } Bus;
 
 Bus *bus_init(Memory *mem);

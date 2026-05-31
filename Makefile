@@ -23,6 +23,8 @@ CC := gcc -g
 CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Iinclude
 LDFLAGS :=
 
+CFLAGS += -O3 -march=native -flto
+
 BUILD := build
 
 TARGETS := asm disasm emu ld
