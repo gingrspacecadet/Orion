@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include <termios.h>
 #include <stdbool.h>
 #include <signal.h>
 #include <stdint.h>
@@ -323,6 +324,16 @@ static __always_inline void step(Cpu *cpu) {
             break;
         }
 
+        case OP_FLAGS: {
+            if (word & 0x1) {   // write
+                cpu->flags = (word >> 6) & is_reg ? 0xF : 0xFFFF;
+            } else {    // read
+                rd = (word >> 6) & 0xF;
+                cpu->r[rd] = cpu->flags;
+            }
+            break;
+        }
+
         default: {
             raise_exception(cpu, EX_INVALID_INSTR);
             return;
@@ -383,6 +394,23 @@ void setup_signal_handlers(void) {
     sigaction(SIGINT, &sa, NULL);
 }
 
+static struct termios oldt;
+static void disable_rawmode(void) {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
+}
+static void enable_rawmode(void) {
+    struct termios t;
+    tcgetattr(STDIN_FILENO, &oldt);
+    t = oldt;
+    t.c_cflag &= ~(ICANON | ECHO);
+    t.c_lflag &= ~(ECHOCTL);
+    t.c_cc[VMIN] = 1;
+    t.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
+
+    atexit(disable_rawmode);
+}
+
 #define BATCH_SIZE  128
 
 int main(int argc, char **argv) {
@@ -392,6 +420,8 @@ int main(int argc, char **argv) {
     }
 
     setup_signal_handlers();
+    enable_rawmode();
+    atexit(disable_rawmode);
 
     const char *path = argv[1];
 

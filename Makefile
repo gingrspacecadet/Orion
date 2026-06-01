@@ -31,7 +31,26 @@ BUILD := build
 TARGETS := asm disasm emu ld
 
 .Phony: all
-all: $(TARGETS)
+all: $(TARGETS) boot
+
+override BOOT_SRC := $(shell find boot/ -type f -name '*.s' 2>/dev/null | LC_ALL=C sort)
+override BOOT_OBJ_ALL := $(addprefix $(BUILD)/boot/, $(notdir $(BOOT_SRC:.s=.o)))
+override BOOT_MAIN := $(BUILD)/boot/main.o
+override BOOT_OBJ := $(if $(filter $(BOOT_MAIN),$(BOOT_OBJ_ALL)),$(BOOT_MAIN) $(filter-out $(BOOT_MAIN),$(BOOT_OBJ_ALL)),$(BOOT_OBJ_ALL))
+
+.PHONY: boot
+boot: $(BUILD)/boot/boot
+
+$(BUILD)/boot:
+	@mkdir -p "$@"
+
+$(BUILD)/boot/%.o: boot/%.s | $(BUILD)/boot $(BUILD)/asm
+	@mkdir -p "$(dir $@)"
+	$(BUILD)/asm $< $@
+
+$(BUILD)/boot/boot: $(BOOT_OBJ) | $(BUILD)/ld
+	@mkdir -p "$(dir $@)"
+	$(BUILD)/ld $(BOOT_OBJ) -o $@ -T boot/boot.ld
 
 .Phony: clean
 clean:

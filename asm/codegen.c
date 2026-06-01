@@ -50,7 +50,6 @@ typedef enum {
     FMT_RN_IMMRM,       // CMP rn, rm/imm
     FMT_MEM_ACCESS,     // LDR rd, [rn + offset] / STR rd, [rn + offset]
     FMT_STACK,          // PUSH / POP handling
-    FMT_SYS,            // FLAGS rd, imm
     FMT_JUMP,           // JXX target / CALL target
 } OpFormat;
 
@@ -155,9 +154,8 @@ static OpInfo optab[] = {
     {"LDRB", OP_LDRB, TYPE_M, FMT_MEM_ACCESS}, {"STRB",OP_STRB,  TYPE_M, FMT_MEM_ACCESS},
     {"JXX",  OP_JXX,  TYPE_J, FMT_JUMP},       {"CALL",OP_CALL,  TYPE_J, FMT_JUMP},
     {"RET",  OP_RET,  TYPE_J, FMT_NONE},       {"PUSH",OP_PUSH,  TYPE_M, FMT_STACK},
-    {"POP",  OP_POP,  TYPE_M, FMT_STACK},      {"FLAGS",OP_FLAGS,TYPE_S, FMT_SYS},
-    {"HALT", OP_HALT, TYPE_X, FMT_NONE},       {"ICALL",OP_ICALL,TYPE_J, FMT_JUMP},
-    {"IRET", OP_IRET, TYPE_J, FMT_NONE},
+    {"POP",  OP_POP,  TYPE_M, FMT_STACK},      {"HALT", OP_HALT, TYPE_X, FMT_NONE},
+    {"ICALL",OP_ICALL,TYPE_J, FMT_JUMP},       {"IRET", OP_IRET, TYPE_J, FMT_NONE},
     {NULL,0,0,FMT_NONE}
 };
 
@@ -316,6 +314,22 @@ void codegen(instr_array *instrs) {
                 continue;
             }
 
+            // `flags` operations
+            if (dst.mode == AM_REG && src.mode == AM_LABEL && strcasecmp(src.label, "flags") == 0) {
+                write_active_u32(encode_s(OP_FLAGS, dst.reg, false, false, 0));
+                continue;
+            }
+
+            if (dst.mode == AM_LABEL && strcasecmp(dst.label, "flags") == 0 && src.mode == AM_REG) {
+                write_active_u32(encode_s(OP_FLAGS, 0, true, true, src.reg));
+                continue;
+            }
+
+            if (dst.mode == AM_LABEL && strcasecmp(dst.label, "flags") == 0 && src.mode == AM_IMM) {
+                write_active_u32(encode_s(OP_FLAGS, 0, false, true, src.val));
+                continue;
+            }
+
             fprintf(stderr, "Assembler Error (Line %d): Invalid mov operands.\n", instr.line_num);
             exit(1);
         }
@@ -395,14 +409,6 @@ void codegen(instr_array *instrs) {
                 immrm = encode_operand(instr.ops[0], RELOC_LO16, &is_reg);
                 
                 write_active_u32(encode_m(opcode, 0, 0, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
-                break;
-            }
-
-            case FMT_SYS: {
-                rd = instr.ops[0].reg;
-                immrm = encode_operand(instr.ops[1], RELOC_LO16, &is_reg);
-
-                write_active_u32(encode_s(opcode, rd, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
                 break;
             }
 

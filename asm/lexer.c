@@ -11,7 +11,7 @@ static int is_mnemonic(const char *str) {
         "str", "ldrb", "strb", "jmp", "jeq", "jne", "jlt",
         "jge", "jltu", "jgeu", "jcs", "jcc", "jn", "jp", 
         "jvs", "jvc", "jls", "call", "ret", "push", "pop",
-        "flags", "halt", "icall", "iret", NULL
+        "halt", "icall", "iret", NULL
     };
     for (int i = 0; mnemonics[i] != NULL; i++) {
         if (strcasecmp(str, mnemonics[i]) == 0) return 1;
