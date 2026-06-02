@@ -161,7 +161,7 @@ static OpInfo optab[] = {
 
 static struct { const char *mnem; int val; } condtab[] = {
     {"JMP",  COND_JMP}, 
-    {"JEQ",  COND_JEQ},  {"JNE",  COND_JNE}, 
+    {"JE",   COND_JE},  {"JNE",  COND_JNE}, 
     {"JLT",  COND_JLT},  {"JGE",  COND_JGE},
     {"JLTU", COND_JLTU}, {"JGEU", COND_JGEU}, 
     {"JCS",  COND_JCS},  {"JCC",  COND_JCC}, 
@@ -230,6 +230,9 @@ void codegen(instr_array *instrs) {
         ParsedInstr instr = instrs->data[i];
 
         if (instr.is_label_def) {
+            if (!active_section) {
+                switch_section(".text");
+            }
             symbol_table[symbol_count++] = (ObjSymbol){
                 .offset = active_section->ptr,
                 .section = active_section->id,
@@ -241,6 +244,7 @@ void codegen(instr_array *instrs) {
         }
 
         if (instr.is_directive) {
+            if (instr.ops[0].label[0]) printf("%s %s\n", instr.mnemonic, instr.ops[0].label);
             if (strcmp(instr.mnemonic, ".word") == 0) {
                 write_active_u32(encode_operand(instr.ops[0], RELOC_32, NULL));
                 continue;
@@ -253,6 +257,7 @@ void codegen(instr_array *instrs) {
                 switch_section(instr.ops[0].label);
                 continue;
             }
+
             
             fprintf(stderr, "Assembler Error (Line %d): Unknown directive '%s'.\n", instr.line_num, instr.mnemonic);
             exit(1);

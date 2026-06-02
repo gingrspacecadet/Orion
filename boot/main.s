@@ -1,4 +1,4 @@
-.section .text
+; .section .text
 __entry: 
     ; Disable IE flag
     mov flags, #0
@@ -19,12 +19,35 @@ __entry:
     xor r12, r12, r12
     xor r13, r13, r13
     xor r14, r14, r14
-    
+    xor r15, r15, r15
+
     ; setup temporary stack
-    mov r15, r15, #0xFFFFFFFF
+    lui r15, #0xFFFF
+    or r15, r15, #0xFFFF
     
     ; mask all icu interrupts
-    mov r1, #0x00010400
+    lui r1, #0x1
+    or r1, r1, #0x400
     str r15, [r1 + #0x8]
 
-loop: jmp $loop
+    ; init the gpu
+    mov r0, #0x00010A00
+    mov r1, #0x00020000
+    str r1, [r0]
+    mov r1, #1
+    str r1, [r0 + #0xC]
+
+    ; print "HELLO WORLD" at coord 20, 40 in bright white (0xFFFF)
+    mov r0, $msg_hello
+    mov r1, #20
+    mov r2, #40
+    mov r3, #0xFFFF
+    call $draw_string
+
+spin:
+    halt
+    jmp $spin
+
+.section .data
+msg_hello:
+    .byte #72, #101, #108, #108, #111, #44, #32, #119, #111, #114, #108, #100, #0 ; "HELLO WORLD\0"

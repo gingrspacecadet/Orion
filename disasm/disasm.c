@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
             case OP_JXX: {
                 printf("j");
                 switch (d.cond) {
-                    case COND_JEQ:  printf("eq"); break;
+                    case COND_JE:  printf("eq"); break;
                     case COND_JNE:  printf("ne"); break;
                     case COND_JLT:  printf("lt"); break;
                     case COND_JGE:  printf("ge"); break;

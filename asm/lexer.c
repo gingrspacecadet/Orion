@@ -8,7 +8,7 @@ static int is_mnemonic(const char *str) {
     const char *mnemonics[] = {
         "mov", "add","sub", "mul", "div", "shl", "shr",
         "and", "or", "not", "xor", "lui", "cmp", "ldr",
-        "str", "ldrb", "strb", "jmp", "jeq", "jne", "jlt",
+        "str", "ldrb", "strb", "jmp", "je", "jne", "jlt",
         "jge", "jltu", "jgeu", "jcs", "jcc", "jn", "jp", 
         "jvs", "jvc", "jls", "call", "ret", "push", "pop",
         "halt", "icall", "iret", NULL
@@ -31,6 +31,16 @@ static int parse_register(const char *str, int64_t *out_reg) {
             *out_reg = regnum;
             return 1;
         }
+    }
+    return 0;
+}
+
+static int is_directive_keyword(const char *str) {
+    const char *directives[] = {
+        ".section", ".byte", ".word", NULL
+    };
+    for (int i = 0; directives[i] != NULL; i++) {
+        if (strcasecmp(str, directives[i]) == 0) return 1;
     }
     return 0;
 }
@@ -72,14 +82,26 @@ token_array lex(char *source) {
         if (*p == '-') { tok.type = TOK_MINUS;  p++; token_array_push(&tags, tok); continue; }
 
         if (*p == '.') {
-            tok.type = TOK_DIRECTIVE;
             int i = 0;
             tok.string[i++] = *p++;
+            
             while (*p != '\0' && (isalnum(*p) || *p == '_')) {
                 if (i < 31) tok.string[i++] = *p;
                 p++;
             }
             tok.string[i] = '\0';
+
+            if (*p == ':') {
+                tok.type = TOK_LABEL_DEF;
+                p++;
+            } 
+            else if (is_directive_keyword(tok.string)) {
+                tok.type = TOK_DIRECTIVE;
+            } 
+            else {
+                tok.type = TOK_LABEL;
+            }
+
             token_array_push(&tags, tok);
             continue;
         }

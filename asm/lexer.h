@@ -4,7 +4,7 @@
 #include "gin.h"
 
 typedef enum {
-    TOK_MNEMONIC,   // "mov", "add", "jeq"
+    TOK_MNEMONIC,   // "mov", "add", "je"
     TOK_REG,        // r0, rsp
     TOK_IMM,        // #4, #0x10, #-5
     TOK_LABEL_DEF,  // main:

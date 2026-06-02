@@ -108,13 +108,22 @@ instr_array parse(token_array *tokens) {
         }
 
         if (t.type == TOK_DIRECTIVE) {
-            instr.is_directive = true;
-            strncpy(instr.mnemonic, t.string, 31);
+            while (peek().type != TOK_EOF && peek().type != TOK_MNEMONIC && peek().type != TOK_LABEL_DEF && peek().type != TOK_DIRECTIVE) {
+                ParsedInstr dir_node = {0};
+                dir_node.line_num = t.line_num;
+                dir_node.is_directive = true;
+                strncpy(dir_node.mnemonic, t.string, 31);
 
-            if (peek().type != TOK_EOF && peek().type != TOK_MNEMONIC && peek().type != TOK_LABEL_DEF) {
-                instr.ops[instr.op_count++] = parse_operand();
+                dir_node.ops[dir_node.op_count++] = parse_operand();
+                
+                instr_array_push(&ast, dir_node);
+
+                if (peek().type == TOK_COMMA) {
+                    consume();
+                } else {
+                    break;
+                }
             }
-            instr_array_push(&ast, instr);
             continue;
         }
 

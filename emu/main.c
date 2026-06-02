@@ -16,6 +16,12 @@
 #include "icu.h"
 #include "gpu.h"
 
+#ifndef DEBUG
+    #define INLINE __always_inline
+#else
+    #define INLINE
+#endif
+
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
 
@@ -53,16 +59,16 @@ typedef struct {
     uint32_t pc_page_num;
 } Cpu;
 
-static __always_inline void set_flag(Cpu *cpu, Flag flag, bool v) {
+static INLINE void set_flag(Cpu *cpu, Flag flag, bool v) {
     if (v) cpu->flags |= (1u << flag);
     else cpu->flags &= ~(1u << flag);
 }
 
-static __always_inline bool get_flag(Cpu *cpu, Flag flag) {
+static INLINE bool get_flag(Cpu *cpu, Flag flag) {
     return cpu->flags & (1u << flag);
 }
 
-static __always_inline void push32_nocheck(Cpu *cpu, const uint32_t v) {
+static INLINE void push32_nocheck(Cpu *cpu, const uint32_t v) {
     cpu->r[SP] -= 4;
     bus_write32(cpu->bus, cpu->r[SP], v);
 }
@@ -81,7 +87,7 @@ static void raise_exception(Cpu *cpu, uint8_t e) {
 }
 
 [[nodiscard]]
-static __always_inline bool push32(Cpu *cpu, const uint32_t v) {
+static INLINE bool push32(Cpu *cpu, const uint32_t v) {
     if (unlikely(cpu->r[SP] <= 4)) {
         raise_exception(cpu, EX_STACK_OVERFLOW);
         return false;
@@ -90,10 +96,9 @@ static __always_inline bool push32(Cpu *cpu, const uint32_t v) {
     bus_write32(cpu->bus, cpu->r[SP], v);
     return true;
 }
-
 [[nodiscard]]
-static __always_inline bool pop32(Cpu *cpu, uint32_t *out) {
-    if (unlikely(cpu->r[SP] >= UINT32_MAX - 4)) {
+static INLINE bool pop32(Cpu *cpu, uint32_t *out) {
+    if (unlikely(cpu->r[SP] > UINT32_MAX - 4)) {
         raise_exception(cpu, EX_STACK_UNDERFLOW);
         return false;
     }
@@ -102,7 +107,7 @@ static __always_inline bool pop32(Cpu *cpu, uint32_t *out) {
     return true;
 }
 
-static __always_inline void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
+static INLINE void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     uint64_t sum = (uint64_t)a + (uint64_t)b;
 
     set_flag(cpu, FLAG_Z, res == 0);
@@ -111,14 +116,14 @@ static __always_inline void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, u
     set_flag(cpu, FLAG_V, ((((~(a ^ b)) & (a ^ res)) >> 31 ) & 1u ));
 }
 
-static __always_inline void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
+static INLINE void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
     set_flag(cpu, FLAG_Z, res == 0);
     set_flag(cpu, FLAG_N, (res >> 31) & 1u);
     set_flag(cpu, FLAG_C, a < b);
     set_flag(cpu, FLAG_V, ((((a ^ b) & (a ^ res)) >> 31 ) & 1u ));
 }
 
-static __always_inline void sync_pc_cache(Cpu *cpu) {
+static INLINE void sync_pc_cache(Cpu *cpu) {
     uint32_t page_num = cpu->pc >> 12;
     if (unlikely(page_num != cpu->pc_page_num || !cpu->pc_page_ptr)) {
         cpu->pc_page_num = page_num;
@@ -134,7 +139,7 @@ static __always_inline void sync_pc_cache(Cpu *cpu) {
 
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
 
-static __always_inline void step(Cpu *cpu) {
+static INLINE void step(Cpu *cpu) {
     if (unlikely((cpu->pc & 0x3) != 0)) {
         raise_exception(cpu, EX_MISALIGNED_PC);
         return;
@@ -240,7 +245,7 @@ static __always_inline void step(Cpu *cpu) {
             bool is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
             uint32_t target = op_b + (is_absolute ? 0 : cpu->pc);
             bool jump = false;
-            uint8_t reserved = (word >> 21) & 0x7;
+            uint8_t reserved = (word >> 18) & 0x3;
             if (unlikely(reserved != 0)) {
                 raise_exception(cpu, EX_INVALID_INSTR);
                 return;
@@ -248,7 +253,7 @@ static __always_inline void step(Cpu *cpu) {
             
             switch ((word >> COND_SHIFT) & COND_MASK) {
                 case COND_JMP:  jump = true; break;
-                case COND_JEQ:  if (get_flag(cpu, FLAG_Z)) jump = true; break;
+                case COND_JE:  if (get_flag(cpu, FLAG_Z)) jump = true; break;
                 case COND_JNE:  if (!get_flag(cpu, FLAG_Z)) jump = true; break;
                 case COND_JLT:  if (get_flag(cpu, FLAG_N) != get_flag(cpu, FLAG_V)) jump = true; break;
                 case COND_JGE:  if (get_flag(cpu, FLAG_N) == get_flag(cpu, FLAG_V)) jump = true; break;
@@ -478,14 +483,16 @@ int main(int argc, char **argv) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     last_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
-    while (likely(cpu.running)) {
+    while (true) {
         if (unlikely(signalled)) break;
 
-        for (int i = 0; i < BATCH_SIZE; i++) {
-            step(&cpu);
-            if (unlikely(!cpu.running)) break;
+        if (cpu.running) {
+            for (int i = 0; i < BATCH_SIZE; i++) {
+                step(&cpu);
+                if (unlikely(!cpu.running)) break;
+            }
+            cycles += BATCH_SIZE;
         }
-        cycles += BATCH_SIZE;
 
         clock_gettime(CLOCK_MONOTONIC, &ts);
         now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
@@ -506,7 +513,7 @@ int main(int argc, char **argv) {
         printf("R%d: 0x%08X\t", i, cpu.r[i]);
         if (i == 7) putc('\n', stdout);
     }
-    printf("\nPC: 0x%08X\n", cpu.pc);
+    printf("\nPC: 0x%08X\tFLAGS: 0x%08X\n", cpu.pc, cpu.flags);
 
     for (int i = 0; i < cpu.bus->device_count; i++) {
         printf("bus device %d address 0x%08X\n", i, cpu.bus->devices[i].base_addr);

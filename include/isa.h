@@ -32,7 +32,7 @@ typedef enum {
 
 typedef enum {
     COND_JMP,
-    COND_JEQ,
+    COND_JE,
     COND_JNE,
     COND_JLT,
     COND_JGE,

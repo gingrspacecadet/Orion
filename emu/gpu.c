@@ -22,7 +22,7 @@ GpuDevice *gpu_create(Bus *bus, TimerPool *pool, IrqLine irq) {
         return NULL;
     }
 
-    gpu->window = SDL_CreateWindow("Orion Architecture Display",
+    gpu->window = SDL_CreateWindow("Orion Display",
                                    SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                    640, 480, SDL_WINDOW_SHOWN);
     if (!gpu->window) { gpu_destroy(gpu); return NULL; }
@@ -82,7 +82,6 @@ void gpu_refresh_frame(GpuDevice *gpu) {
         }
     }
 
-    
     if (gpu->video_mode != 1 || gpu->fb_base_addr == 0) {
         SDL_SetRenderDrawColor(gpu->renderer, 0, 0, 0, 255);
         SDL_RenderClear(gpu->renderer);
@@ -106,25 +105,25 @@ void gpu_refresh_frame(GpuDevice *gpu) {
         if (page && page->dirty) {
             page->dirty = false; 
             system_changed = true;
-
+            
             uint32_t frame_offset = i * PAGE_SIZE;
             uint32_t segment_len = PAGE_SIZE;
             if (frame_offset + segment_len > total_bytes) {
                 segment_len = total_bytes - frame_offset;
             }
-
+            
             uint8_t *dest_ptr = ((uint8_t *)gpu->host_back_buffer) + frame_offset;
             memcpy(dest_ptr, page->data, segment_len);
         }
     }
-
+    
     if (system_changed) {
         SDL_UpdateTexture(gpu->texture, NULL, gpu->host_back_buffer, 320 * sizeof(uint16_t));
         SDL_RenderClear(gpu->renderer);
         SDL_RenderCopy(gpu->renderer, gpu->texture, NULL, NULL);
         SDL_RenderPresent(gpu->renderer);
     }
-
+    
     gpu->vblank_status = 0; 
     irq_lower(gpu->irq);
 }
