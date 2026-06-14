@@ -244,7 +244,6 @@ void codegen(instr_array *instrs) {
         }
 
         if (instr.is_directive) {
-            if (instr.ops[0].label[0]) printf("%s %s\n", instr.mnemonic, instr.ops[0].label);
             if (strcmp(instr.mnemonic, ".word") == 0) {
                 write_active_u32(encode_operand(instr.ops[0], RELOC_32, NULL));
                 continue;
