@@ -43,6 +43,7 @@ __entry:
     mov r2, #40
     mov r3, #0xFFFF
     call $draw_string
+.word #0
 
 spin:
     halt

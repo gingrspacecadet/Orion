@@ -1,8 +1,8 @@
 .section .text
 __default_int_handler:
-    iret
+    halt
 .section .ihvt
-.word $__default_int_handler
+.word $bsod
 .word $__default_int_handler
 .word $__default_int_handler
 .word $__default_int_handler

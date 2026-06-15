@@ -116,6 +116,9 @@ token_array lex(char *source) {
 
             char *endptr;
             tok.val = strtoll(p, &endptr, 0) * sign;
+            if (tok.val > UINT16_MAX) {
+                fprintf(stderr, "Warning (Line %d): Immediate value potentially overflows\n", line);
+            }
             
             if (p == endptr) {
                 fprintf(stderr, "Lexer Error (Line %d): Malformed immediate value\n", line);
