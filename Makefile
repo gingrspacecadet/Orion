@@ -53,6 +53,10 @@ $(BUILD)/boot/boot: $(BOOT_OBJ) | $(BUILD)/ld
 	@mkdir -p "$(dir $@)"
 	$(BUILD)/ld $(BOOT_OBJ) -o $@ -T boot/boot.ld
 
+.PHONY: run
+run: boot emu
+	$(BUILD)/emu $(BUILD)/boot/boot
+
 .Phony: clean
 clean:
 	@rm -rf $(BUILD)

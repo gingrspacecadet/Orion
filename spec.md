@@ -14,15 +14,13 @@
 
 ## Flags register
 
-The Flags register is a private register containing all CPU status flags.
+The Flags register is a private register containing all CPU system states.
 
 | Bit | Flag name | Desc |
 |---|---------|----|
-| 0 | Carry (`C`) | Set when the last ALU operation had an arithmetic carry |
-| 1 | Overflow (`V`) | Set when the last ALU operation result overflows a signed 32-bit integer |
-| 2 | Zero (`Z`) | Set when the last ALU operation resulted in exactly `0` |
-| 3 | Negative (`N`) | Set when the last ALU operation result MSB was set |
-| 4 | Interrupts Enabled (`IE`) | Set manually. When false, external interrupts are ignored |
+| 0 | Interrupts Enabled (`IE`) | When false, external interrupts are ignored. |
+| 1 | Privilege Level (`PRV`) | `0` = User Mode. `1` = Supervisor/Kernel Mode. |
+| 2..31 | Reserved | Must be 0. |
 
 ---
 
@@ -43,74 +41,38 @@ The Flags register is a private register containing all CPU status flags.
 
 ## Encoding types
 
-- `J-type`: `JMP`, `JE`, `JGE`, `CALL`, etc
-- `A-type`: `ADD`, `SUB`, `SHL`, etc
+- `J-type`: `JMP`, `CALL` (Unconditional jumps with massive range)
+- `B-type`: `JEQ`, `JLT`, `JGE` (Conditional branches via register comparison)
+- `A-type`: `ADD`, `SUB`, `SHL`, etc. (Pure math, no flag updates)
 - `M-type`: `LDR`, `STR`
 - `S-type`: `FLAGS`
-
-`A-type` instructions always update flags via the ALU.
 
 ---
 
 ## Instruction formats
 
-`J-type`:
-- `opcode(6)` `cond(4)` `absolute?(1)` `reserved(3)` `(rm(4) | imm(16))` `register?(1)` `signed?(1)`
+`J-type` (Unconditional Jumps):
+- `opcode(6)` `imm(26)`
+
+`B-type` (Conditional Branches):
+- `opcode(6)` `cond(4)` `rn(4)` `rd(4)` `absolute?(1)` `reserved(1)` `imm(12)`
 
 `A-type`:
-- `opcode(6)` `rn(4)` `rd(4)` `(rm(4) | imm(16))` `register?(1)` `signed?(1)`
+- `opcode(6)` `rn(4)` `rd(4)` `(rm(4) | imm(16))` `register?(1)` `reserved(1)`
 
 `M-type`:
-- `opcode(6)` `rn(4)` `rd(4)` `(rm(4) | imm(16))` `register?(1)` `signed?(1)`
+- `opcode(6)` `rn(4)` `rd(4)` `(rm(4) | imm(16))` `register?(1)` `reserved(1)`
 
 `S-type`:
 - specified per instruction
 
 `J-type` decoding:
-- If `absolute?` is set, treat `rm` or `imm` as an absolute jump: `PC = addr`
-- Otherwise, treat it as relative: `PC += offset`
+- `PC = PC + sign_extend(imm26)` (If absolute opcode used, `PC = imm26`)
 
-`M-type` meaning:
-- `R[rd] = ram[rn + offset]`
-- `rn` is the base register
-- `rm` or `imm` are offsets on top of that
-
-All `reserved` bits must be `0`. If not, it raises an `Invalid Instruction` fault.
-
----
-
-## Instructions
-
-| Number | Mnemonic | Type | Description |
-|------|--------|----|--------------|
-| `0x00` | reserved | | Exists to cause a fault when executing uninitialized code |
-| `0x01` | ADD | A | Addition |
-| `0x02` | SUB | A | Subtraction |
-| `0x03` | MUL | A | Multiplication |
-| `0x04` | DIV | A | Division |
-| `0x05` | SHL | A | Left shift |
-| `0x06` | SHR | A | Right shift |
-| `0x07` | AND | A | Bitwise and |
-| `0x08` | OR | A | Bitwise or |
-| `0x09` | NOT | A | Bitwise not (ignores `rn`) |
-| `0x0A` | XOR | A | Bitwise xor |
-| `0x0B` | LUI | A | Loads `rm`/`imm` into top 16 bits of `rd` (ignores `rn`) |
-| `0x0C` | CMP | A | Subtracts and discards result (`rd` is ignored) |
-| `0x0D` | LDR | M | Load a word |
-| `0x0E` | STR | M | Store a word |
-| `0x0F` | LDRB | M | Load a byte |
-| `0x10` | STRB | M | Store a byte |
-| `0x11` | JXX | J | Jumps to addr |
-| `0x12` | CALL | J | Pushes PC and jumps to addr |
-| `0x13` | RET | J | Pops PC |
-| `0x14` | PUSH | M | If register mode, pushes specified `rm`. Otherwise uses `imm` as a register bitmask and pushes in ascending order. Decrements by 4, then stores at `SP` |
-| `0x15` | POP | M | If register mode, pops specified `rm`. Otherwise uses `imm` as a register bitmask and pops in descending order. Loads from `SP`, then increments |
-| `0x16-20` | reserved | | |
-| `0x21` | FLAGS | S | Reads `flags` to `rd` or writes `rm`/`imm` to `flags` |
-| `0x22` | HALT | x | Pauses the CPU until an interrupt fires |
-| `0x23` | ICALL | J | Calls the specified interrupt number in `rm` or `imm` |
-| `0x24` | IRET | J | Pops `FLAGS` then `PC` |
-| `0x25-3F` | reserved | | |
+`B-type` decoding:
+- If `cond` evaluates to true comparing `R[rn]` and `R[rd]`:
+  - If `absolute?` is set: `PC = imm`
+  - Otherwise: `PC += sign_extend(imm)`
 
 ---
 
@@ -120,57 +82,51 @@ All `reserved` bits must be `0`. If not, it raises an `Invalid Instruction` faul
 
 ---
 
-## J-type conditions
-
-Assemblers should prefer using these mnemonics, and encode `cond` accordingly.
+## B-type conditions
 
 | num | mnem | condition |
 |---|----|---------|
-| `0x0` | JMP | `true` |
-| `0x1` | JEQ | `Z == 1` |
-| `0x2` | JNE | `Z == 0` |
-| `0x3` | JLT | `N != V` |
-| `0x4` | JGE | `N == V` |
-| `0x5` | JLTU | `C == 0` |
-| `0x6` | JGEU | `C == 1` |
-| `0x7` | JCS | `C == 1` |
-| `0x8` | JCC | `C == 0` |
-| `0x9` | JN | `N == 1` |
-| `0xA` | JP | `N == 0` |
-| `0xB` | JVS | `V == 1` |
-| `0xC` | JVC | `V == 0` |
-| `0xD` | JLS | `C == 0 or Z == 1` |
-| `0xE` | reserved | |
-| `0xF` | reserved | |
+| `0x0` | reserved | (Unconditional jumps moved to J-Type) |
+| `0x1` | JEQ | `R[rn] == R[rd]` |
+| `0x2` | JNE | `R[rn] != R[rd]` |
+| `0x3` | JLT | `R[rn] < R[rd]` (Signed) |
+| `0x4` | JGE | `R[rn] >= R[rd]` (Signed) |
+| `0x5` | JLTU | `R[rn] < R[rd]` (Unsigned) |
+| `0x6` | JGEU | `R[rn] >= R[rd]` (Unsigned) |
+| `0x7..0xF` | reserved | |
 
 ---
 
 ## Exact opcode spec table
 
-| Mnem | Flag updates | PC effect | SP effect | Fault cases |
-|----|------------|---------|---------|-----------|
-| SUB | C,V,Z,N | | | |
-| ADD | C,V,Z,N | | | |
-| MUL | C,V,Z,N | | | |
-| DIV | C,V,Z,N | | | Division by 0 |
-| SHL | C,V,Z,N | | | |
-| SHR | C,V,Z,N | | | |
-| AND | Z,N | | | |
-| OR | Z,N | | | |
-| NOT | Z,N | | | |
-| XOR | Z,N | | | |
-| LUI | | | | |
-| CMP | Z,N | | | |
-| LDR | | | | Out-of-bounds target |
-| STR | | | | Out-of-bounds target |
-| LDRB | | | | Out-of-bounds target |
-| STRB | | | | Out-of-bounds target |
-| JXX | | Sets to decoded target if `cond` is true | | Out-of-bounds target |
-| CALL | | Pushes to SP, then follows `JXX` logic to jump to target unconditionally | Decrements by 4 | Out-of-bounds target |
-| RET | | Pops from SP | Increments by 4 | Out-of-bounds target |
-| PUSH | | | On single-register, decrements by 4. On bitmask, decrements by 4 for every set bit | Pushing `SP` |
-| POP | | | On single-register, increments by 4. On bitmask, increments by 4 for every set bit | Popping `SP` |
-| FLAGS | | | | |
+| Number | Mnemonic | Type | Description | Fault cases |
+|--------|----------|------|-------------|-------------|
+| `0x00` | NOP | x | Does nothing for a cycle |  |
+| `0x01` | SUB | A | Subtraction |  |
+| `0x02` | ADD | A | Addition |  |
+| `0x03` | MUL | A | Multiplication |  |
+| `0x04` | DIV | A | Signed division | Divisor == 0 |
+| `0x05` | DIVU | A | Unsigned division | Divisor == 0 |
+| `0x06` | SHL | A | Logical left shift |  |
+| `0x07` | SHR | A | Signed logical right shift |  |
+| `0x08` | SHRU | A | Unsigned logical right shift |  |
+| `0x09` | AND | A | Bitwise and |  |
+| `0x0A` | OR | A | Bitwise or |  |
+| `0x0B` | XOR | A | Bitwise xor |  |
+| `0x0C` | LUI | A | Loads `rm`/`imm` into top 16 bits of `rd` (ignores `rn`) | |
+| `0x0D` | LDR | M | Load a word | Out-of-bounds, Priv Violation (MMIO) |
+| `0x0E` | STR | M | Store a word | Out-of-bounds, Priv Violation (MMIO) |
+| `0x0F` | LDRB | M | Load a byte | Out-of-bounds, Priv Violation (MMIO) |
+| `0x10` | STRB | M | Store a byte | Out-of-bounds, Priv Violation (MMIO) |
+| `0x11` | JMP | J | Unconditional relative jump | Out-of-bounds |
+| `0x12` | JMPA | J | Unconditional absolute jump | Out-of-bounds |
+| `0x13` | JXX | B | Conditional branch based on register comparison | Out-of-bounds |
+| `0x14` | CALL | J | Pushes PC and jumps relative unconditionally | Out-of-bounds |
+| `0x15` | CALLA | J | Pushes PC and jumps absolute unconditionally | Out-of-bounds |
+| `0x16` | RET | x | Pops PC (Ignores immediate fields) | Out-of-bounds |
+| `0x17` - `0x20` | reserved | | | |
+| `0x21` | FLAGS | S | Reads `flags` to `rd` or writes `rm`/`imm` to `flags` | Priv Violation (Write when PRV=0) |
+| `0x22` | HALT | x | Pauses the CPU until an interrupt fires | Priv Violation (If PRV=0) |
 
 ---
 
