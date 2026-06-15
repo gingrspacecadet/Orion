@@ -3,11 +3,16 @@
 ## Registers
 
 - `R0..R14` general-purpose
-- `R15` is `SP`
+- `R15` is `SP` (Stack Pointer)
 - Private `PC` and flags registers
 
-`SP` and `PC` are both stored as byte addresses, but must be word-aligned.
+#### Fully Banked Register File:  
+The CPU maintains two physically separate 16-register files: the User Bank (`USR`) and the Kernel Bank (`KSR`).
+- When `FLAGS.PRV == 0`, the CPU executes using the `USR` bank.
+- When `FLAGS.PRV == 1`, the CPU instantly switches to the `KSR` bank.
+- `SP` is fully banked, ensuring independent stack pointers for User space (`USP`) and Kernel space (`KSP`).
 
+`SP` and `PC` are both stored as byte addresses, but must be word-aligned.
 `PC` always points to the current instruction being executed.
 
 ---
@@ -20,7 +25,9 @@ The Flags register is a private register containing all CPU system states.
 |---|---------|----|
 | 0 | Interrupts Enabled (`IE`) | When false, external interrupts are ignored. |
 | 1 | Privilege Level (`PRV`) | `0` = User Mode. `1` = Supervisor/Kernel Mode. |
-| 2..31 | Reserved | Must be 0. |
+| 2 | Virtual Memory (`VM`) | `0` = Paging disabled (Physical 1:1). `1` = Paging active. |
+| 3 | Translation Mode (`TM`) | Set by hardware during a TLB miss. Bypasses the MMU for all data access paths. |
+| 4..31 | Reserved | Must be 0. |
 
 ---
 
@@ -127,6 +134,33 @@ The Flags register is a private register containing all CPU system states.
 | `0x17` - `0x20` | reserved | | | |
 | `0x21` | FLAGS | S | Reads `flags` to `rd` or writes `rm`/`imm` to `flags` | Priv Violation (Write when PRV=0) |
 | `0x22` | HALT | x | Pauses the CPU until an interrupt fires | Priv Violation (If PRV=0) |
+| `0x23` | SYSCALL | S | Triggers a software interrupt | |
+| `0x24` | IRET | x | Pops `PC`, then pops `FLAGS`. Atomically restores privilege/state. | Priv violation (if PRV=0) |
+
+---
+
+## System power-on and reset state
+
+When the CPU receives a hardware reset signal or powers on, it initialises its internal state machines to a strict, predictable baseline before executing the first clock cycle.
+
+### Register reset values
+
+`PC` = `0x00001000` (Points to beginning of Boot ROM)  
+`FLAGS` = `0x00000002` (Privilege level set to `Supervisor Mode`,   Paging `Disabled`, Interrupts `Disabled`)
+`USR`/`KSR` `R0-15` = Undefined (it is recommended that emulators zero out registers anyways, but it cannot be relied upon)  
+
+### Flag state explanation
+
+|Flag|Reset value|Meaning|
+|----|-----------|-------|
+|`IE` (Bit 0) | `0` | Interrupts disabled. The bootloader must configure the IHVT and the ICU before enabling |
+|`PRV` (Bit 1) | `1` | Kernel mode active. Allows full access to system architecture mapping |
+|`VM` (Bit 2) | `0` | Virtual memory active paging disabled. Address lines mirror physical RAM 1:1 |
+|`TM` (Bit 3) | `0` | Translation mode disabled. Normal memory bus access rules apply | 
+
+### Subsystem Initialisation State
+
+The only subsystem that enforces initialisation state is the Peripheral Control Unit. It ensures that all device BARs are set to `0` (aka unmapped).
 
 ---
 
@@ -138,7 +172,10 @@ The Flags register is a private register containing all CPU system states.
 | Misaligned PC | `0x1` | Thrown when `PC` is not a multiple of 4 |
 | Invalid memory access | `0x2` | Thrown when an instruction attempts to access a memory location that does not exist |
 | Stack under/overflow | `0x3/0x4` | Thrown when trying to pop past memory maximum or push past `0x0` |
-| reserved | `0x5-0x1F` | |
+| Instruction TLB Miss | `0x5` | Fetching the next PC instruction missed the TLB |
+| Data TLB Miss | `0x6` | An LDR/STR instruction missed the TLB |
+| Page Fault | `0x7` | TLB entry exists, but access was violated (e.g., User writing to read-only page) |
+| reserved | `0x8-0x1F` | |
 | Interrupt entry | `0x20-0xFE` | Not a CPU exception, and in fact a hardware interrupt |
 | Non-maskable Interrupt | `0xFF` | Thrown by the ICU |
 
@@ -220,11 +257,14 @@ Epilogue:
 
 ## Exception/Interrupt stack frames
 
+Because the CPU automatically swaps to the `KSR` register bank on an exception, no user registers need to be pushed. All stack operations below occur on the Kernel Stack (`KSP`).
+
 Internal exception entry (`vec < 0x20`):
+- Hardware saves offending virtual address to `MTU_FAULT_ADDR` (if memory-related fault)
 - push `FLAGS`
 - push `PC`
-- error code
-- offending instruction
+- push error code if applicable
+- push offending instruction if applicable
 - `PC = IHVT[vec]`
 
 External interrupt:
@@ -262,8 +302,6 @@ Consists of 16 devices. Each device is 16 bytes.
 
 ---
 
-## Memory Mapping
-
 | Start addr | End addr | Size | Name | Desc |
 |----------|--------|----|----|-----------|
 | `0x00000000` | `0x00000FFF` | 4KB | Zero page | Strictly unmapped. Any read/write attempts here trigger bus fault |
@@ -271,8 +309,54 @@ Consists of 16 devices. Each device is 16 bytes.
 | `0x00010000` | `0x000103FF` | 1KB | IHVT | |
 | `0x00010400` | `0x000104FF` | 256B | ICU | Fixed control registers for interrupt management |
 | `0x00010500` | `0x000105FF` | 256B | Timers | Fixed hardware tick counters |
-| `0x00010600` | `0x0001FFFF` | 62.5KB | PCU | |
+| `0x00010600` | `0x000107FF` | 512B | MTU | Memory Translation Unit & Suspended USR Register Portal |
+| `0x00010800` | `0x0001FFFF` | ~60KB| PCU | Peripheral Configuration Unit |
 | `0x00020000` | `0xFFFFFFFF` | ~4.3GB | System RAM | |
+
+---
+
+## Memory Translation Unit (MTU)
+
+The MTU handles all Virtual-to-Physical memory mapping via a 32-slot Software-Refilled Translation Lookaside Buffer (TLB). It is fully memory-mapped, requiring no special opcodes to manage.
+
+### Virtual Address Format (32-bit, 4KB Pages)
+- Bits 31..12: Virtual Page Number (`VPN`, 20 bits)
+- Bits 11..0: Byte Offset (12 bits)
+
+### MTU Control Registers (`0x00010600 - 0x0001063F`)
+| Offset | Name | Perms | Description |
+|--------|------|-------|-------------|
+| `0x00` | `MTU_FAULT_ADDR` | RO | Holds the exact 32-bit virtual address that caused the last miss/fault. |
+| `0x04` | `MTU_CONFIG`     | RW | Bits 0..4: Indexes the target hardware TLB entry (0..31) for configuration slots. |
+| `0x08` | `TLB_HI_WIN`     | RW | Writes the high-word (VPN, ASID, Valid bit) to the active TLB index. |
+| `0x0C` | `TLB_LO_WIN`     | RW | Writes the low-word (PFN, Permissions) to the active TLB index. |
+
+### Suspended USR Register File Portal (`0x00010640 - 0x0001067F`)
+When `PRV == 1`, reading or writing to these offsets directly manipulates the frozen user-mode register file, allowing zero-cost context switching.
+
+| Offset | Name | Perms | Description |
+|--------|------|-------|-------------|
+| `0x40` | `USR_R0`  | RW | Suspended User `R0` (Argument / Return value slot) |
+| `0x44` | `USR_R1`  | RW | Suspended User `R1` |
+| ...    | ...       | ...| ... |
+| `0x78` | `USR_R14` | RW | Suspended User `R14` |
+| `0x7C` | `USR_SP`  | RW | Suspended User `R15` (`SP`). |
+
+### TLB Window Bit Layouts
+When writing to `TLB_HI_WIN` or `TLB_LO_WIN`, the 32-bit words must be formatted as follows:
+
+TLB_HI_WIN (Virtual Word):
+- `Bits 31..12`: Virtual Page Number (`VPN`)
+- `Bits 11..1`: Address Space ID (`ASID`) - Used to distinguish process spaces without flushing the TLB.
+- `Bit 0`: Valid (`V`) - `1` = Entry active, `0` = Entry triggers Page Fault.
+
+TLB_LO_WIN (Physical Word):
+- `Bits 31..12`: Physical Frame Number (`PFN`)
+- `Bits 11..4`: Reserved (Must be 0)
+- `Bit 3`: Writable (`W`) - `1` = Read/Write, `0` = Read-Only.
+- `Bit 2`: User (`U`) - `1` = Accessible in User Mode, `0` = Kernel Only.
+- `Bit 1`: Cacheable (`C`) - `1` = Standard RAM cache, `0` = Uncached (MMIO bypass).
+- `Bit 0`: Wired (`WI`) - `1` = Hardware cannot evict this entry naturally.
 
 ---
 
@@ -300,3 +384,6 @@ Consists of 16 devices. Each device is 16 bytes.
 * `0x2..0xF`: Reserved for future hardware graphics accelerators.
 
 ---
+
+# scratchpad
+
