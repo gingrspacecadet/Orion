@@ -50,7 +50,7 @@ The Flags register is a private register containing all CPU system states.
 
 - `J-type`: `JMP`, `CALL` (Unconditional jumps with massive range)
 - `B-type`: `JEQ`, `JLT`, `JGE` (Conditional branches via register comparison)
-- `A-type`: `ADD`, `SUB`, `SHL`, etc. (Pure math, no flag updates)
+- `A-type`: `ADD`, `SUB`, `SHL`, etc. (Pure maths, no flag updates)
 - `M-type`: `LDR`, `STR`
 - `S-type`: `FLAGS`
 
@@ -69,6 +69,8 @@ The Flags register is a private register containing all CPU system states.
 
 `M-type`:
 - `opcode(6)` `rn(4)` `rd(4)` `(rm(4) | imm(16))` `register?(1)` `reserved(1)`
+
+(note, mathematical operations like `ADD`, `SUB`, `STR`, etc. will sign-extend their immediates, whilst bitwise operations like `AND`, `OR`, `XOR`, will zero-extend their immediates.)
 
 `S-type`:
 - specified per instruction
@@ -138,7 +140,9 @@ The Flags register is a private register containing all CPU system states.
 | `0x1B` | FCMP | A | Float Compare. `R[rd] = -1` if `rn < rm`; `0` if equal; `1` if `rn > rm` | |
 | `0x1C` | ITOF | A | Convert 32-bit Integer in `R[rm]` to Float in `R[rd]` | |
 | `0x1D` | FTOI | A | Convert 32-bit Float in `R[rm]` to Integer in `R[rd]` (Truncate) | Float out of Integer bounds |
-| `0x1E-0x20` | reserved | | |
+| `0x1E` | XCHG | M | Atomically reads a word from memory address `rn + (rm/imm)` into a temporary buffer, writes `rd` to that address, and stores the temporary buffer back into `rd` | Out-of-bounds, Priv violation, Misaligned data |
+| `0x1F` | reserved | | |
+| `0x20` | RPC | S | Reads `pc` to `rd` | |
 | `0x21` | FLAGS | S | Reads `flags` to `rd` or writes `rm`/`imm` to `flags` | Priv Violation (Write when PRV=0) |
 | `0x22` | HALT | x | Pauses the CPU until an interrupt fires | Priv Violation (If PRV=0) |
 | `0x23` | SYSCALL | S | Triggers a software interrupt | |
@@ -184,7 +188,8 @@ The only subsystem that enforces initialisation state is the Peripheral Control 
 | Page Fault | `0x7` | TLB entry exists, but access was violated (e.g., User writing to read-only page) |
 | System Call | `0x8` | Thrown intentionally by the `SYSCALL` instruction |
 | Arithmetic Fault | `0x9` | Thrown by the ALU or FPU (e.g., Division by Zero, Float Overflow, Invalid Float Op) |
-| reserved | `0xA-0x1F` | |
+| Misaligned Data | `0xA` | Thrown when `LDR`, `STR`, or `XCHG` attempt to access a word at a memory address that is not a multiple of 4|
+| reserved | `0xB-0x1F` | |
 | Interrupt entry | `0x20-0xFE` | Not a CPU exception, and in fact a hardware interrupt |
 | Non-maskable Interrupt | `0xFF` | Thrown by the ICU |
 
@@ -324,6 +329,19 @@ Consists of 16 devices. Each device is 16 bytes.
 
 ---
 
+## Programmable Interval Timer (PIT)
+
+### Timer Control Registers (`0x00010500`)
+
+|Offset|Name|Perms|Description|
+|------|----|-----|-----------|
+|`0x00`|`TIMER_CTRL`|RW|Bit 0: enable timer. bit 1: auto-reload after firing. bit 2: interrupt enable|
+|`0x04`|`TIMER_INTERVAL`|RW|The target value in nanoseconds before the timer expires|
+|`0x08`|`TIMER_CURRENT`|RO|The current tick count of the timer|
+|`0x0C`|`TIMER_ACK`|WO|Writing any value clears the pending timer interrupt in the ICU|
+
+---
+
 ## Memory Translation Unit (MTU)
 
 The MTU handles all Virtual-to-Physical memory mapping via a 32-slot Software-Refilled Translation Lookaside Buffer (TLB). It is fully memory-mapped, requiring no special opcodes to manage.
@@ -339,6 +357,7 @@ The MTU handles all Virtual-to-Physical memory mapping via a 32-slot Software-Re
 | `0x04` | `MTU_CONFIG`     | RW | Bits 0..4: Indexes the target hardware TLB entry (0..31) for configuration slots. |
 | `0x08` | `TLB_HI_WIN`     | RW | Writes the high-word (VPN, ASID, Valid bit) to the active TLB index. |
 | `0x0C` | `TLB_LO_WIN`     | RW | Writes the low-word (PFN, Permissions) to the active TLB index. |
+| `0x10` | `MTU_CURR_ASID`  | RW | The ASID (0-1023) of the currently executing thread. |
 
 ### Suspended USR Register File Portal (`0x00010640 - 0x0001067F`)
 When `PRV == 1`, reading or writing to these offsets directly manipulates the frozen user-mode register file, allowing zero-cost context switching.
