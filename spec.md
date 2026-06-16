@@ -131,7 +131,14 @@ The Flags register is a private register containing all CPU system states.
 | `0x14` | CALL | J | Pushes PC and jumps relative unconditionally | Out-of-bounds |
 | `0x15` | CALLA | J | Pushes PC and jumps absolute unconditionally | Out-of-bounds |
 | `0x16` | RET | x | Pops PC (Ignores immediate fields) | Out-of-bounds |
-| `0x17` - `0x20` | reserved | | | |
+| `0x17` | FADD | A | Floating-point Addition (IEEE 754) | Float Overflow/Underflow |
+| `0x18` | FSUB | A | Floating-point Subtraction | Float Overflow/Underflow |
+| `0x19` | FMUL | A | Floating-point Multiplication | Float Overflow/Underflow |
+| `0x1A` | FDIV | A | Floating-point Division | Divisor == 0.0, Invalid Op |
+| `0x1B` | FCMP | A | Float Compare. `R[rd] = -1` if `rn < rm`; `0` if equal; `1` if `rn > rm` | |
+| `0x1C` | ITOF | A | Convert 32-bit Integer in `R[rm]` to Float in `R[rd]` | |
+| `0x1D` | FTOI | A | Convert 32-bit Float in `R[rm]` to Integer in `R[rd]` (Truncate) | Float out of Integer bounds |
+| `0x1E-0x20` | reserved | | |
 | `0x21` | FLAGS | S | Reads `flags` to `rd` or writes `rm`/`imm` to `flags` | Priv Violation (Write when PRV=0) |
 | `0x22` | HALT | x | Pauses the CPU until an interrupt fires | Priv Violation (If PRV=0) |
 | `0x23` | SYSCALL | S | Triggers a software interrupt | |
@@ -175,7 +182,9 @@ The only subsystem that enforces initialisation state is the Peripheral Control 
 | Instruction TLB Miss | `0x5` | Fetching the next PC instruction missed the TLB |
 | Data TLB Miss | `0x6` | An LDR/STR instruction missed the TLB |
 | Page Fault | `0x7` | TLB entry exists, but access was violated (e.g., User writing to read-only page) |
-| reserved | `0x8-0x1F` | |
+| System Call | `0x8` | Thrown intentionally by the `SYSCALL` instruction |
+| Arithmetic Fault | `0x9` | Thrown by the ALU or FPU (e.g., Division by Zero, Float Overflow, Invalid Float Op) |
+| reserved | `0xA-0x1F` | |
 | Interrupt entry | `0x20-0xFE` | Not a CPU exception, and in fact a hardware interrupt |
 | Non-maskable Interrupt | `0xFF` | Thrown by the ICU |
 
