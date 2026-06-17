@@ -200,7 +200,6 @@ int main(int argc, char **argv) {
             }
             case OP_CALL:  printf("call"); break;
             case OP_RET:   printf("ret"); break;
-            case OP_ICALL: printf("icall"); break;
             case OP_IRET:  printf("iret"); break;
             case OP_FLAGS: printf("flags"); break;
             case OP_HALT:  printf("halt"); break;

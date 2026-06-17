@@ -141,7 +141,7 @@ The Flags register is a private register containing all CPU system states.
 | `0x1C` | ITOF | A | Convert 32-bit Integer in `R[rm]` to Float in `R[rd]` | |
 | `0x1D` | FTOI | A | Convert 32-bit Float in `R[rm]` to Integer in `R[rd]` (Truncate) | Float out of Integer bounds |
 | `0x1E` | XCHG | M | Atomically reads a word from memory address `rn + (rm/imm)` into a temporary buffer, writes `rd` to that address, and stores the temporary buffer back into `rd` | Out-of-bounds, Priv violation, Misaligned data |
-| `0x1F` | reserved | | |
+| `0x1F` | FENCE | x | Blocks CPU execution until all pending memory stores are completely flushed and globally visible on the system bus | |
 | `0x20` | RPC | S | Reads `pc` to `rd` | |
 | `0x21` | FLAGS | S | Reads `flags` to `rd` or writes `rm`/`imm` to `flags` | Priv Violation (Write when PRV=0) |
 | `0x22` | HALT | x | Pauses the CPU until an interrupt fires | Priv Violation (If PRV=0) |
@@ -389,6 +389,23 @@ TLB_LO_WIN (Physical Word):
 ---
 
 ## Devices
+
+### Mass Storage Controller (Block device)
+
+#### Device ID:
+- Vendor `0x123`
+- Class `0x01`
+- Device `0x01`
+- Revision `0x0`
+
+#### Registers:
+|Offset|Name|Perms|Desc|
+|------|----|-----|----|
+|`0x00`|`STATUS`|RO|Bit 0: `BUSY` (1=transfer in progress, 0=idle)|
+|`0x04`|`COMMAND`|WO|Write `0x1` to initialise READ. Write `0x2` to initiate WRITE|
+|`0x08`|`LBA`|RW|Logical Block Address. The 32-bit index of the starting 512-byte sector on the disc|
+|`0x0C`|`MEM_ADDR`|RW|The 32-bit physical RAM address where data should be copied to or from.|
+|`0x10`|`SECTOR_COUNT`|RW|The number of consecutive 512-byte sectors to transfer|
 
 ### GPU
 

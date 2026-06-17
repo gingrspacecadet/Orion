@@ -148,14 +148,14 @@ static OpInfo optab[] = {
     {"MUL",  OP_MUL,  TYPE_A, FMT_RD_RN_RM},   {"DIV", OP_DIV,   TYPE_A, FMT_RD_RN_RM},
     {"SHL",  OP_SHL,  TYPE_A, FMT_RD_RN_RM},   {"SHR", OP_SHR,   TYPE_A, FMT_RD_RN_RM},
     {"AND",  OP_AND,  TYPE_A, FMT_RD_RN_RM},   {"OR",  OP_OR,    TYPE_A, FMT_RD_RN_RM},
-    {"NOT",  OP_NOT,  TYPE_A, FMT_RD_RN_RM},   {"XOR", OP_XOR,   TYPE_A, FMT_RD_RN_RM},
-    {"LUI",  OP_LUI,  TYPE_A, FMT_RD_IMM},     {"CMP", OP_CMP,   TYPE_A, FMT_RN_IMMRM},
+    {"XOR", OP_XOR,   TYPE_A, FMT_RD_RN_RM},
+    {"LUI",  OP_LUI,  TYPE_A, FMT_RD_IMM},
     {"LDR",  OP_LDR,  TYPE_M, FMT_MEM_ACCESS}, {"STR", OP_STR,   TYPE_M, FMT_MEM_ACCESS},
     {"LDRB", OP_LDRB, TYPE_M, FMT_MEM_ACCESS}, {"STRB",OP_STRB,  TYPE_M, FMT_MEM_ACCESS},
     {"JXX",  OP_JXX,  TYPE_J, FMT_JUMP},       {"CALL",OP_CALL,  TYPE_J, FMT_JUMP},
-    {"RET",  OP_RET,  TYPE_J, FMT_NONE},       {"PUSH",OP_PUSH,  TYPE_M, FMT_STACK},
-    {"POP",  OP_POP,  TYPE_M, FMT_STACK},      {"HALT", OP_HALT, TYPE_X, FMT_NONE},
-    {"ICALL",OP_ICALL,TYPE_J, FMT_JUMP},       {"IRET", OP_IRET, TYPE_J, FMT_NONE},
+    {"RET",  OP_RET,  TYPE_J, FMT_NONE},
+    {"HALT", OP_HALT, TYPE_X, FMT_NONE},
+    {"IRET", OP_IRET, TYPE_J, FMT_NONE},
     {NULL,0,0,FMT_NONE}
 };
 
