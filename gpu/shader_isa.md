@@ -245,25 +245,6 @@ If constant flag is set:
 | 0x17   | TEX      |
 | 0x18   | M4X4     |
 
-#### M4X4 Semantics
-`M4X4` implicitly consumesa contiguous block.
-
-Example:
-```
-M4X4 rD, rS, cN
-```
-Expands to:
-```
-rD.x = dot(rS, cN)
-rD.y = dot(rS, cN+1)
-rD.z = dot(rS, cN+2)
-rD.w = dot(rS, cN+3)
-```
-
-Each matrix is stored as:
-- 4 consecutive vec4 constants
-Interpretation depends on convention, but fixed ordering is required.
-
 ---
 
 ### Control
@@ -327,3 +308,23 @@ FragmentShaderID
 ```
 
 Shader binaries are immutable once loaded.
+
+---
+
+## Varying Mapping
+
+Varyings are connected through the Pipeline State Object.
+
+Vertex shader outputs:
+
+    o1-o15
+
+may be mapped to fragment shader inputs:
+
+    v0-v15
+
+using a varying mapping table contained within the pipeline object.
+
+Mismatched varyings are a pipeline creation error.
+
+No implicit linkage by register number is assumed.

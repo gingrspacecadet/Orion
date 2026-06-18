@@ -229,3 +229,20 @@ The presented output must be identical across:
 
 * emulator
 * silicon implementation
+
+---
+
+## Depth Buffer Format
+
+The depth buffer uses FP24 values.
+
+The recommended convention is reverse-Z:
+
+    Near plane = 1.0
+    Far plane = 0.0
+
+Depth comparison is typically:
+
+    GREATER
+
+Reverse-Z improves depth precision near the camera and allows large view distances with reduced Z-fighting.

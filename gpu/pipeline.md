@@ -120,31 +120,6 @@ Outputs:
 
 ---
 
-## Varyings
-
-Explicit mapping via Pipeline State Object.  
-There is no implicit 1:1 mapping by index alone.  
-Instead:
-- The Pipeline State Object defines a fixed varying linkage table
-
-### Rule
-
-Each pipeline contains a Varying Map:
-```
-VS output slot -> FS input slot
-```
-Example:
-```
-o1 -> v0
-o2 -> v1
-o3 -> v2
-...
-o15 -> v14
-```
-Unused slots are discarded.
-
----
-
 ## Pipeline Immutability
 
 Once created, pipelines cannot be modified.

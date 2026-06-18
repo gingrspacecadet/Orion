@@ -327,3 +327,28 @@ Execution must be bit-identical across:
 
 * emulator
 * silicon implementation
+
+---
+
+## M4X4 Instruction
+
+The M4X4 instruction performs a 4×4 matrix multiplication.
+
+Syntax:
+
+    M4X4 rd, rs, cN
+
+The source vector rs is multiplied by four consecutive constant registers.
+
+The operation is defined as:
+
+    rd.x = dot(rs, cN)
+    rd.y = dot(rs, cN+1)
+    rd.z = dot(rs, cN+2)
+    rd.w = dot(rs, cN+3)
+
+Matrices are stored in row-major order.
+
+cN through cN+3 must all exist.
+
+No strided or indirect matrix addressing is supported.

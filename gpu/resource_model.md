@@ -234,13 +234,15 @@ If memory is insufficient:
 
 ---
 
-## Upload model
+## Upload Model
 
-Data transfer to GPU memory is CPU-driven:
+No dedicated upload mechanism exists.
 
-* staging buffers are used
-* explicit copy operations (future extension)
-* no shader writeback to buffers (base spec)
+The CPU writes resource contents directly into system memory.
+
+Once a resource has been created and populated, the GPU accesses it directly.
+
+No copies between CPU memory and VRAM occur because Lyra uses unified memory.
 
 ---
 
@@ -257,3 +259,27 @@ The GPU must produce identical results across:
 
 * emulator
 * silicon implementation
+
+---
+
+## Memory Architecture
+
+Lyra uses a unified physical memory architecture.
+
+The CPU and GPU share the same physical address space.
+
+There is no dedicated VRAM and no separate GPU address space.
+
+All resources ultimately reside in system RAM.
+
+The GPU accesses resource memory directly.
+
+---
+
+## Resource Backing
+
+Buffers, textures, framebuffers, shader binaries, and pipeline objects are physically backed by memory in system RAM.
+
+Resource handles are opaque identifiers managed by the driver and do not correspond directly to memory addresses.
+
+Internally, the GPU maintains descriptor tables describing each resource.
