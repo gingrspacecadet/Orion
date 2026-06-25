@@ -202,7 +202,7 @@ static int lookup_opcode(const char *mnem, uint32_t *opcode, int *type, OpFormat
         if (strcasecmp(condtab[i].mnem, mnem) == 0) {
             *opcode = OP_JXX;
             *type = TYPE_J;
-            *format = FMT_JUMP;
+            *format = FMT_JXX;
             return 1;
         }
     }
@@ -487,8 +487,6 @@ void codegen(instr_array *instrs) {
             }
 
             case FMT_JUMP: {
-                int cond = 0;
-                lookup_cond(instr.mnemonic, &cond);
                 immrm = encode_operand(instr.ops[0], RELOC_PC_REL, &is_reg);
 
                 write_active_u32(encode_j(opcode, immrm));
@@ -496,7 +494,13 @@ void codegen(instr_array *instrs) {
             }
 
             case FMT_JXX: {
-
+                int cond;
+                if (!lookup_cond(instr.mnemonic, &cond)) {
+                    fprintf(stderr, "Assembler Error (Line %d): Unknown condition \"%s\"\n", instr.line_num, instr.mnemonic);
+                    exit(1);
+                }
+                write_active_u32(encode_b(opcode, cond, instr.ops[0].reg, instr.ops[1].reg, false, instr.ops[2].val));
+                continue;
             }
         }
     }

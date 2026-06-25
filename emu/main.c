@@ -74,7 +74,7 @@ static INLINE void push32_nocheck(Cpu *cpu, const uint32_t v) {
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
-    fprintf(stderr, "exception"); exit(1);
+    // fprintf(stderr, "exception %d\n", e); exit(1);
 
     // build the exception frame
     // to avoid recursive exceptions
