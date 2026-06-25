@@ -74,6 +74,8 @@ static INLINE void push32_nocheck(Cpu *cpu, const uint32_t v) {
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
+    fprintf(stderr, "exception"); exit(1);
+
     // build the exception frame
     // to avoid recursive exceptions
     // dont check sp bounds and hope
@@ -105,22 +107,6 @@ static INLINE bool pop32(Cpu *cpu, uint32_t *out) {
     *out = bus_read32(cpu->bus, cpu->r[SP]);
     cpu->r[SP] += 4;
     return true;
-}
-
-static INLINE void update_flags_add(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
-    uint64_t sum = (uint64_t)a + (uint64_t)b;
-
-    set_flag(cpu, FLAG_Z, res == 0);
-    set_flag(cpu, FLAG_N, (res >> 31) & 1u);
-    set_flag(cpu, FLAG_C, (sum >> 32) & 1u);
-    set_flag(cpu, FLAG_V, ((((~(a ^ b)) & (a ^ res)) >> 31 ) & 1u ));
-}
-
-static INLINE void update_flags_sub(Cpu *cpu, uint32_t a, uint32_t b, uint32_t res) {
-    set_flag(cpu, FLAG_Z, res == 0);
-    set_flag(cpu, FLAG_N, (res >> 31) & 1u);
-    set_flag(cpu, FLAG_C, a < b);
-    set_flag(cpu, FLAG_V, ((((a ^ b) & (a ^ res)) >> 31 ) & 1u ));
 }
 
 static INLINE void sync_pc_cache(Cpu *cpu) {
@@ -173,7 +159,6 @@ static INLINE void step(Cpu *cpu) {
             uint32_t a = cpu->r[rn];
             uint32_t res = a + op_b;
             cpu->r[rd] = res;
-            update_flags_add(cpu, a, op_b, res);
             break;
         }
 
@@ -181,7 +166,6 @@ static INLINE void step(Cpu *cpu) {
             uint32_t a = cpu->r[rn];
             uint32_t res = a - op_b;
             cpu->r[rd] = res;
-            update_flags_sub(cpu, a, op_b, res);
             break;
         }
 
@@ -207,12 +191,6 @@ static INLINE void step(Cpu *cpu) {
 
         case OP_AND: {
             cpu->r[rd] = cpu->r[rn] & op_b;
-            break;
-        }
-
-        case OP_CMP: {
-            uint32_t a = cpu->r[rn];
-            update_flags_sub(cpu, a, op_b, a - op_b);
             break;
         }
 
@@ -242,35 +220,21 @@ static INLINE void step(Cpu *cpu) {
         }
 
         case OP_JXX: {
-            bool is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
-            uint32_t target = op_b + (is_absolute ? 0 : cpu->pc);
+            uint8_t cond = (word >> 22) & 0xF;
+            uint8_t rn = (word >> 18) & 0xF;
+            uint8_t rd = (word >> 14) & 0xF;
+            bool absolute = (word >> 13) & 0x1;
+            uint16_t imm = ((word) & 0xFFF) << 2;
+
             bool jump = false;
-            uint8_t reserved = (word >> 18) & 0x3;
-            if (unlikely(reserved != 0)) {
-                raise_exception(cpu, EX_INVALID_INSTR);
-                return;
-            }
-            
-            switch ((word >> COND_SHIFT) & COND_MASK) {
-                case COND_JMP:  jump = true; break;
-                case COND_JE:  if (get_flag(cpu, FLAG_Z)) jump = true; break;
-                case COND_JNE:  if (!get_flag(cpu, FLAG_Z)) jump = true; break;
-                case COND_JLT:  if (get_flag(cpu, FLAG_N) != get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JGE:  if (get_flag(cpu, FLAG_N) == get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JLTU: if (!get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JGEU: if (get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JCS:  if (get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JCC:  if (!get_flag(cpu, FLAG_C)) jump = true; break;
-                case COND_JN:   if (get_flag(cpu, FLAG_N)) jump = true; break;
-                case COND_JP:   if (!get_flag(cpu, FLAG_N)) jump = true; break;
-                case COND_JVS:  if (get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JVC:  if (!get_flag(cpu, FLAG_V)) jump = true; break;
-                case COND_JLS:  if (!get_flag(cpu, FLAG_C) || get_flag(cpu, FLAG_Z)) jump = true; break;
-                default: break;
-            }
-            if (jump) {
-                cpu->pc = target;
-                update_pc = false;
+            switch (cond) {
+                case COND_JEQ: if (cpu->r[rn] == cpu->r[rd]) jump = true; break;
+                case COND_JNE: if (cpu->r[rn] != cpu->r[rd]) jump = true; break;
+                case COND_JLT: if (cpu->r[rn] < cpu->r[rd]) jump = true; break;
+                case COND_JGE: if ((int32_t)cpu->r[rn] >= (int32_t)cpu->r[rd]) jump = true; break;
+                case COND_JLTU:if ((int32_t)cpu->r[rn] <  (int32_t)cpu->r[rd]) jump = true; break;
+                case COND_JGEU:if (cpu->r[rn] >= cpu->r[rd]) jump = true; break;
+                default: raise_exception(cpu, EX_INVALID_INSTR); return;
             }
             break;
         }
@@ -286,34 +250,6 @@ static INLINE void step(Cpu *cpu) {
         case OP_RET: {
             if (!pop32(cpu, &cpu->pc)) return;
             update_pc = false;
-            break;
-        }
-
-        case OP_PUSH: {
-            if (is_reg) {
-                if (!push32(cpu, cpu->r[rm])) return;
-            } else {
-                if (unlikely(imm & 1u)) { raise_exception(cpu, EX_INVALID_INSTR); return; }
-                for (int i = 0; i < 16; i++) {
-                    if ((imm >> i) & 0x1) {
-                        if (!push32(cpu, cpu->r[i])) return;
-                    }
-                }
-            }
-            break;
-        }
-
-        case OP_POP: {
-            if (is_reg) {
-                if (!pop32(cpu, &cpu->r[rm])) return;
-            } else {
-                if (unlikely(imm & 1u)) { raise_exception(cpu, EX_INVALID_INSTR); return; }
-                for (int i = 15; i >= 0; i--) {
-                    if ((imm >> i) & 0x1) {
-                        if (!pop32(cpu, &cpu->r[i])) return;
-                    }
-                }
-            }
             break;
         }
 

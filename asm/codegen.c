@@ -50,7 +50,8 @@ typedef enum {
     FMT_RN_IMMRM,       // CMP rn, rm/imm
     FMT_MEM_ACCESS,     // LDR rd, [rn + offset] / STR rd, [rn + offset]
     FMT_STACK,          // PUSH / POP handling
-    FMT_JUMP,           // JXX target / CALL target
+    FMT_JUMP,           // JMP target / CALL target
+    FMT_JXX,            // JXX rn, rm/imm, target
 } OpFormat;
 
 static uint32_t encode_a(uint32_t opcode, int rn, int rd, bool is_reg, bool is_signed, int64_t immrm) {
@@ -74,20 +75,21 @@ static uint32_t encode_m(uint32_t opcode, int rn, int rd, bool is_reg, bool is_s
     return encode_a(opcode, rn, rd, is_reg, is_signed, immrm);
 }
 
-static uint32_t encode_j(uint32_t opcode, int cond, bool absolute, bool is_reg, bool signed_flag, int64_t immrm) {
+static uint32_t encode_j(uint32_t opcode, uint32_t imm) {
+    uint32_t w = 0;
+    w |= (opcode & 0x3F) << 26;
+    w |= (opcode & 0x4000000);
+    return w;    
+}
+
+static uint32_t encode_b(uint32_t opcode, uint8_t cond, uint8_t rn, uint8_t rd, bool absolute, uint16_t imm) {
     uint32_t w = 0;
     w |= (opcode & 0x3F) << 26;
     w |= (cond & 0xF) << 22;
-    if (absolute) w |= 1u << 21;
-    if (is_reg) {
-        uint32_t rm = (uint32_t)immrm & 0xF;
-        w |= (rm & 0xF) << 2;
-    } else {
-        uint32_t imm16 = (uint32_t)immrm & 0xFFFF;
-        w |= (imm16 & 0xFFFF) << 2;
-    }
-    if (is_reg) w |= 1u << 1;
-    if (signed_flag) w |= 1u << 0;
+    w |= (rn & 0xF) << 18;
+    w |= (rd & 0xF) << 14;
+    w |= (absolute & 0x1) << 13;
+    w |= (imm & 0xFFF);
     return w;
 }
 
@@ -144,30 +146,46 @@ typedef struct {
 } OpInfo;
 
 static OpInfo optab[] = {
-    {"ADD",  OP_ADD,  TYPE_A, FMT_RD_RN_RM},   {"SUB", OP_SUB,   TYPE_A, FMT_RD_RN_RM},
-    {"MUL",  OP_MUL,  TYPE_A, FMT_RD_RN_RM},   {"DIV", OP_DIV,   TYPE_A, FMT_RD_RN_RM},
-    {"SHL",  OP_SHL,  TYPE_A, FMT_RD_RN_RM},   {"SHR", OP_SHR,   TYPE_A, FMT_RD_RN_RM},
-    {"AND",  OP_AND,  TYPE_A, FMT_RD_RN_RM},   {"OR",  OP_OR,    TYPE_A, FMT_RD_RN_RM},
-    {"XOR", OP_XOR,   TYPE_A, FMT_RD_RN_RM},
+    {"NOP",  OP_NOP,  TYPE_X, FMT_NONE},
+    {"SUB",  OP_SUB,  TYPE_A, FMT_RD_RN_RM},
+    {"ADD",  OP_ADD,  TYPE_A, FMT_RD_RN_RM},
+    {"MUL",  OP_MUL,  TYPE_A, FMT_RD_RN_RM},
+    {"DIV",  OP_DIV,  TYPE_A, FMT_RD_RN_RM},
+    {"DIVU", OP_DIVU, TYPE_A, FMT_RD_RN_RM},
+    {"SHL",  OP_SHL,  TYPE_A, FMT_RD_RN_RM},
+    {"SHR",  OP_SHR,  TYPE_A, FMT_RD_RN_RM},
+    {"SHRU", OP_SHRU, TYPE_A, FMT_RD_RN_RM},
+    {"AND",  OP_AND,  TYPE_A, FMT_RD_RN_RM},
+    {"OR",   OP_OR,   TYPE_A, FMT_RD_RN_RM},
+    {"XOR",  OP_XOR,  TYPE_A, FMT_RD_RN_RM},
     {"LUI",  OP_LUI,  TYPE_A, FMT_RD_IMM},
-    {"LDR",  OP_LDR,  TYPE_M, FMT_MEM_ACCESS}, {"STR", OP_STR,   TYPE_M, FMT_MEM_ACCESS},
-    {"LDRB", OP_LDRB, TYPE_M, FMT_MEM_ACCESS}, {"STRB",OP_STRB,  TYPE_M, FMT_MEM_ACCESS},
-    {"JXX",  OP_JXX,  TYPE_J, FMT_JUMP},       {"CALL",OP_CALL,  TYPE_J, FMT_JUMP},
-    {"RET",  OP_RET,  TYPE_J, FMT_NONE},
+    {"LDR",  OP_LDR,  TYPE_M, FMT_MEM_ACCESS},
+    {"STR",  OP_STR,  TYPE_M, FMT_MEM_ACCESS},
+    {"LDRB", OP_LDRB, TYPE_M, FMT_MEM_ACCESS},
+    {"STRB", OP_STRB, TYPE_M, FMT_MEM_ACCESS},
+    {"JMP",  OP_JMP,  TYPE_J, FMT_JUMP},
+    {"JMPA", OP_JMPA, TYPE_J, FMT_JUMP},
+    {"JXX",  OP_JXX,  TYPE_B, FMT_JXX},
+    {"CALL", OP_CALL, TYPE_J, FMT_JUMP},
+    {"CALLA",OP_CALLA,TYPE_J, FMT_JUMP},
+    {"RET",  OP_RET,  TYPE_X, FMT_NONE},
+    {"FADD", OP_FADD, TYPE_A, FMT_RD_RN_RM},
+    {"FSUB", OP_FSUB, TYPE_A, FMT_RD_RN_RM},
+    {"FMUL", OP_FMUL, TYPE_A, FMT_RD_RN_RM},
+    {"FDIV", OP_FDIV, TYPE_A, FMT_RD_RN_RM},
+    {"FCMP", OP_FCMP, TYPE_A, FMT_RD_RN_RM},
+    {"ITOF", OP_ITOF, TYPE_A, FMT_RD_RN_RM},
+    {"FTOI", OP_FTOI, TYPE_A, FMT_RD_RN_RM},
     {"HALT", OP_HALT, TYPE_X, FMT_NONE},
-    {"IRET", OP_IRET, TYPE_J, FMT_NONE},
-    {NULL,0,0,FMT_NONE}
+    {"SYSCALL",OP_SYSCALL,TYPE_S,FMT_NONE}, // TODO: this should have an argument!
+    {"IRET", OP_IRET, TYPE_X, FMT_NONE},
+    {NULL,   0,       0,      FMT_NONE}
 };
 
 static struct { const char *mnem; int val; } condtab[] = {
-    {"JMP",  COND_JMP}, 
-    {"JE",   COND_JE},  {"JNE",  COND_JNE}, 
+    {"JEQ",  COND_JEQ}, {"JNE",  COND_JNE}, 
     {"JLT",  COND_JLT},  {"JGE",  COND_JGE},
     {"JLTU", COND_JLTU}, {"JGEU", COND_JGEU}, 
-    {"JCS",  COND_JCS},  {"JCC",  COND_JCC}, 
-    {"JN",   COND_JN},   {"JP",   COND_JP},
-    {"JVS",  COND_JVS},  {"JVC",  COND_JVC}, 
-    {"JLS",  COND_JLS},
     {NULL, -1}
 };
 
@@ -338,6 +356,62 @@ void codegen(instr_array *instrs) {
             exit(1);
         }
 
+        // Handle pseudoinstruction "push"
+        if (strcasecmp(instr.mnemonic, "push") == 0) {
+            if (instr.op_count != 1) {
+                fprintf(stderr, "Assembler Error (Line %d): \"push\" only accepts 1 argument\n", instr.line_num);
+                exit(1);
+            }
+            Operand op = instr.ops[0];
+
+            if (op.mode == AM_REG) {
+                write_active_u32(encode_a(OP_SUB, SP, SP, false, false, sizeof(uint32_t)));
+                write_active_u32(encode_m(OP_STR, SP, op.reg, false, false, 0));
+                continue;
+            }
+
+            if (op.mode == AM_REGLIST) {
+                for (int i = 0; i < 16; i++) {
+                    if (op.reg & (1u << i)) {
+                        write_active_u32(encode_a(OP_SUB, SP, SP, false, false, sizeof(uint32_t)));
+                        write_active_u32(encode_m(OP_STR, SP, i, false, false, 0));
+                    }
+                }
+                continue;
+            }
+
+            fprintf(stderr, "Assembler Error (Line %d): Unknown \"push\" arguments\n", instr.line_num);
+            exit(1);
+        }
+
+        // Handle pseudoinstruction "pop"
+        if (strcasecmp(instr.mnemonic, "pop") == 0) {
+            if (instr.op_count != 1) {
+                fprintf(stderr, "Assembler Error (Line %d): \"pop\" only accepts 1 argument\n", instr.line_num);
+                exit(1);
+            }
+            Operand op = instr.ops[0];
+
+            if (op.mode == AM_REG) {
+                write_active_u32(encode_m(OP_LDR, SP, op.reg, false, false, 0));
+                write_active_u32(encode_a(OP_ADD, SP, SP, false, false, sizeof(uint32_t)));
+                continue;
+            }
+
+            if (op.mode == AM_REGLIST) {
+                for (int i = 0; i < 16; i++) {
+                    if (op.reg & (1u << i)) {
+                        write_active_u32(encode_m(OP_LDR, SP, i, false, false, 0));
+                        write_active_u32(encode_a(OP_ADD, SP, SP, false, false, sizeof(uint32_t)));
+                    }
+                }
+                continue;
+            }
+
+            fprintf(stderr, "Assembler Error (Line %d): Unknown \"pop\" arguments\n", instr.line_num);
+            exit(1);
+        }
+
         uint32_t opcode;
         int type;
         OpFormat format;
@@ -353,11 +427,7 @@ void codegen(instr_array *instrs) {
 
         switch (format) {
             case FMT_NONE: {
-                if (type == TYPE_X) {
-                    write_active_u32((opcode & 0x3F) << 26);
-                } else if (type == TYPE_J) {
-                    write_active_u32(encode_j(opcode, 0, false, false, false, 0));
-                }
+                write_active_u32((opcode & 0x3F) << 26);
                 break;
             }
 
@@ -421,8 +491,12 @@ void codegen(instr_array *instrs) {
                 lookup_cond(instr.mnemonic, &cond);
                 immrm = encode_operand(instr.ops[0], RELOC_PC_REL, &is_reg);
 
-                write_active_u32(encode_j(opcode, cond, false, is_reg, SHOULD_SIGN_EXTEND(immrm), immrm));
+                write_active_u32(encode_j(opcode, immrm));
                 break;
+            }
+
+            case FMT_JXX: {
+
             }
         }
     }

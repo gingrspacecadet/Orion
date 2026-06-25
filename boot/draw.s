@@ -12,8 +12,7 @@ draw_char:
     mov r6, #0               ; r6 = row_idx (0 to 15)
 
 row_loop:
-    cmp r6, #16
-    jge $char_done           ; if row_idx >= 16, we finished the character
+    jge r6, #16, $char_done  ; if row_idx >= 16, we finished the character
 
     ; fetch font byte for this row and advance pointer
     ldrb r7, [r4 + #0]       ; read byte bitmask for current row
@@ -25,7 +24,7 @@ row_loop:
     shl r10, r9, #8          ; r10 = current_y * 256
     shl r11, r9, #6          ; r11 = current_y * 64
     add r10, r10, r11        ; r10 = current_y * 320
-    add r10, r10, r1          ; r10 = (current_y * 320) + x
+    add r10, r10, r1         ; r10 = (current_y * 320) + x
     shl r10, r10, #1         ; r10 = byte_offset = pixel_index * 2 (RGB565)
     
     mov r11, #0x00020000     ; framebuffer base address
@@ -35,13 +34,11 @@ row_loop:
     mov r8, #0               ; r8 = bit_idx (0 to 7)
 
 pixel_loop:
-    cmp r8, #8
-    jge $row_done            ; completed all 8 horizontal pixels
+    jge r8, #8, $row_done    ; completed all 8 horizontal pixels
 
     ; test the most significant bit
-    and r12, r7, #0x80
-    cmp r12, #0
-    je $skip_pixel           ; if bit is 0, leave background intact
+    and r12, r7, #0x80 
+    jeq r12, #0, $skip_pixel  ; if bit is 0, leave background intact
 
     ; paint the pixel
     strb r3, [r10 + #0]      ; store lower 8 bits of RGB565 colour
@@ -71,9 +68,8 @@ draw_string:
     mov r5, r1               ; r5 = Tracking X screen position
 
 str_loop:
-    ldrb r0, [r4]       ; fetch character ascii byte
-    cmp r0, #0
-    je $str_done             ; hit null terminator, break out
+    ldrb r0, [r4]            ; fetch character ascii byte
+    jeq r0, #0, $str_done    ; hit null terminator, break out
 
     push r4
     push r5

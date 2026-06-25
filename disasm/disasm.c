@@ -33,22 +33,17 @@ static int opcode_type(uint8_t opcode) {
         case OP_SHR:
         case OP_AND:
         case OP_OR:
-        case OP_NOT:
         case OP_XOR:
-        case OP_LUI:
-        case OP_CMP: return TYPE_A;
+        case OP_LUI: return TYPE_A;
 
         case OP_LDR:
         case OP_STR:
         case OP_LDRB:
-        case OP_STRB:
-        case OP_PUSH:
-        case OP_POP: return TYPE_M;
+        case OP_STRB: return TYPE_M;
 
         case OP_JXX:
         case OP_CALL:
         case OP_RET:
-        case OP_ICALL:
         case OP_IRET: return TYPE_J;
 
         case OP_FLAGS: return TYPE_S;
@@ -160,61 +155,60 @@ int main(int argc, char **argv) {
         }
 
         switch (d.opcode) {
-            case OP_ADD: printf("add"); break;
+            case OP_NOP: printf("nop"); break;
             case OP_SUB: printf("sub"); break;
+            case OP_ADD: printf("add"); break;
             case OP_MUL: printf("mul"); break;
             case OP_DIV: printf("div"); break;
+            case OP_DIVU:printf("divu");break;
             case OP_SHL: printf("shl"); break;
             case OP_SHR: printf("shr"); break;
+            case OP_SHRU:printf("shru");break;
             case OP_AND: printf("and"); break;
             case OP_OR:  printf("or");  break;
-            case OP_NOT: printf("not"); break;
             case OP_XOR: printf("xor"); break;
             case OP_LUI: printf("lui"); break;
-            case OP_CMP: printf("cmp"); break;
             case OP_LDR: printf("ldr"); break;
             case OP_LDRB: printf("ldrb"); break;
             case OP_STR: printf("str"); break;
             case OP_STRB: printf("strb"); break;
-            case OP_PUSH: printf("push"); break;
-            case OP_POP:  printf("pop");  break;
-            case OP_JXX: {
+            case OP_JMP: printf("jmp"); break;
+            case OP_JMPA:printf("jmpa");break;
+            case OP_JXX: { // TODO
                 printf("j");
                 switch (d.cond) {
-                    case COND_JE:  printf("eq"); break;
+                    case COND_JEQ:  printf("eq"); break;
                     case COND_JNE:  printf("ne"); break;
                     case COND_JLT:  printf("lt"); break;
                     case COND_JGE:  printf("ge"); break;
                     case COND_JLTU: printf("ltu"); break;
                     case COND_JGEU: printf("geu"); break;
-                    case COND_JCS:  printf("cs"); break;
-                    case COND_JCC:  printf("cc"); break;
-                    case COND_JN:   printf("n");  break;
-                    case COND_JP:   printf("p");  break;
-                    case COND_JVS:  printf("vs"); break;
-                    case COND_JVC:  printf("vc"); break;
-                    case COND_JLS:  printf("ls"); break;
                     default:        printf("mp"); break;
                 }
                 break;
             }
             case OP_CALL:  printf("call"); break;
+            case OP_CALLA: printf("calla"); break;
             case OP_RET:   printf("ret"); break;
-            case OP_IRET:  printf("iret"); break;
+            case OP_FADD: printf("fadd"); break;
+            case OP_FSUB: printf("fsub"); break;
+            case OP_FMUL: printf("fmul"); break;
+            case OP_FDIV: printf("fdiv"); break;
+            case OP_FCMP: printf("fcmp"); break;
+            case OP_ITOF: printf("itof"); break;
+            case OP_FTOI: printf("ftoi"); break;
+            case OP_XCHG: printf("xchg"); break;
+            case OP_FENCE: printf("fence"); break;
+            case OP_RPC: printf("rpc"); break;
             case OP_FLAGS: printf("flags"); break;
             case OP_HALT:  printf("halt"); break;
+            case OP_SYSCALL: printf("syscall"); break;
+            case OP_IRET:  printf("iret"); break;
             default:       printf("<unknown>"); break;
         }
 
         if (d.opcode == OP_HALT || d.opcode == OP_RET || d.opcode == OP_IRET) {
             // do nothing
-        } else if (d.opcode == OP_PUSH || d.opcode == OP_POP) {
-            if (d.is_reg) {
-                printf(" r%d", d.rm);
-            } else {
-                if (d.is_signed) printf(" %" PRId16, (int16_t)d.imm);
-                else             printf(" %" PRIu16, d.imm);
-            }
         } else {
             printf(" r%d, r%d, ", d.rd, d.rn);
             if (d.is_reg) {

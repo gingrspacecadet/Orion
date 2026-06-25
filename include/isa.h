@@ -37,34 +37,27 @@ typedef enum {
     OP_RPC   = 0x20,
     OP_FLAGS = 0x21,
     OP_HALT  = 0x22,
-  OP_SYSCALL = 0x23,
+   OP_SYSCALL= 0x23,
     OP_IRET  = 0x24,
 } Opcode;
 
 typedef enum {
-    COND_JMP,
-    COND_JE,
+    COND_JEQ = 1,
     COND_JNE,
     COND_JLT,
     COND_JGE,
     COND_JLTU,
-    COND_JGEU,
-    COND_JCS,
-    COND_JCC,
-    COND_JN,
-    COND_JP,
-    COND_JVS,
-    COND_JVC,
-    COND_JLS
+    COND_JGEU
 } Condition;
 
 typedef enum {
     TYPE_INVALID,
+    TYPE_J,
+    TYPE_B,
     TYPE_A,
     TYPE_M,
-    TYPE_J,
     TYPE_S,
-    TYPE_X
+    TYPE_X,
 } OpcodeType;
 
 #define OPCODE_SHIFT    36
@@ -94,11 +87,10 @@ typedef enum {
 #define SP              15
 
 typedef enum {
-    FLAG_C,
-    FLAG_V,
-    FLAG_Z,
-    FLAG_N,
     FLAG_IE,
+    FLAG_PRV,
+    FLAG_VM,
+    FLAG_TM,
 } Flag;
 
 typedef enum {
