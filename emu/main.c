@@ -7,6 +7,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdatomic.h>
+#include <ctype.h>
 #include "hw_timer.h"
 #include "uart.h"
 #include "isa.h"
@@ -15,12 +17,6 @@
 #include "pcu.h"
 #include "icu.h"
 #include "gpu.h"
-
-#ifndef DEBUG
-    #define INLINE __always_inline
-#else
-    #define INLINE
-#endif
 
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -230,11 +226,18 @@ static INLINE void step(Cpu *cpu) {
             switch (cond) {
                 case COND_JEQ: if (cpu->r[rn] == cpu->r[rd]) jump = true; break;
                 case COND_JNE: if (cpu->r[rn] != cpu->r[rd]) jump = true; break;
-                case COND_JLT: if (cpu->r[rn] < cpu->r[rd]) jump = true; break;
+                case COND_JLT: if ((int32_t)cpu->r[rn] <  (int32_t)cpu->r[rd]) jump = true; break;
                 case COND_JGE: if ((int32_t)cpu->r[rn] >= (int32_t)cpu->r[rd]) jump = true; break;
-                case COND_JLTU:if ((int32_t)cpu->r[rn] <  (int32_t)cpu->r[rd]) jump = true; break;
+                case COND_JLTU:if (cpu->r[rn] <  cpu->r[rd]) jump = true; break;
                 case COND_JGEU:if (cpu->r[rn] >= cpu->r[rd]) jump = true; break;
                 default: raise_exception(cpu, EX_INVALID_INSTR); return;
+            }
+            if (jump) {
+                cpu->pc = absolute
+                    ? imm
+                    : cpu->pc + (int16_t)imm;
+
+                update_pc = false;
             }
             break;
         }
@@ -267,7 +270,7 @@ static INLINE void step(Cpu *cpu) {
 
         case OP_FLAGS: {
             if (word & 0x1) {   // write
-                cpu->flags = (word >> 6) & is_reg ? 0xF : 0xFFFF;
+                cpu->flags = (word >> 6) & (is_reg ? 0xF : 0xFFFF);
             } else {    // read
                 rd = (word >> 6) & 0xF;
                 cpu->r[rd] = cpu->flags;
@@ -321,35 +324,252 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     cpu->pc = bus_read32(cpu->bus, IHVT_BASE + (vec * 4));
 }
 
-volatile sig_atomic_t signalled = false;
+static atomic_bool pause_requested
+#ifdef DEBUG  // start in debug mode
+    = true;
+#else
+    = false;
+#endif
 
-void handle_signal(int sig) {
-    signalled = true;
+static atomic_bool quit_requested  = false;
+
+static struct termios oldt;
+static bool rawmode_enabled = false;
+
+static void disable_rawmode(void) {
+    if (rawmode_enabled) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
+        rawmode_enabled = false;
+    }
 }
 
-void setup_signal_handlers(void) {
+static void enable_rawmode(void) {
+    if (rawmode_enabled) return;
+
+    struct termios t;
+    tcgetattr(STDIN_FILENO, &oldt);
+    t = oldt;
+    t.c_lflag &= ~(ICANON | ECHO | ECHOCTL);
+    t.c_cc[VMIN] = 1;
+    t.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
+
+    rawmode_enabled = true;
+}
+
+static void handle_signal(int sig) {
+    if (sig == SIGINT) {
+        atomic_store_explicit(&pause_requested, true, memory_order_release);
+    } else if (sig == SIGTERM) {
+        atomic_store_explicit(&quit_requested, true, memory_order_release);
+    }
+}
+
+static void setup_signal_handlers(void) {
     struct sigaction sa = {0};
     sa.sa_handler = handle_signal;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
 }
 
-static struct termios oldt;
-static void disable_rawmode(void) {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
+static void dump_regs(const Cpu *cpu) {
+    for (int i = 0; i < 16; i++) {
+        printf("R%-2d: 0x%08" PRIX32 "%s", i, cpu->r[i], (i == 7) ? "\n" : "\t");
+    }
+    printf("PC : 0x%08" PRIX32 "\n", cpu->pc);
+    printf("FL : 0x%08" PRIX32 "\n", cpu->flags);
 }
-static void enable_rawmode(void) {
-    struct termios t;
-    tcgetattr(STDIN_FILENO, &oldt);
-    t = oldt;
-    t.c_cflag &= ~(ICANON | ECHO);
-    t.c_lflag &= ~(ECHOCTL);
-    t.c_cc[VMIN] = 1;
-    t.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
 
-    atexit(disable_rawmode);
+static void dump_mem(const Cpu *cpu, uint32_t addr, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if ((i & 3u) == 0) {
+            printf("0x%08" PRIX32 ": ", addr + i);
+        }
+        printf("%02" PRIX8 " ", bus_read8(cpu->bus, addr + i));
+        if ((i & 3u) == 3u) putchar('\n');
+    }
+    if ((count & 3u) != 0) putchar('\n');
+}
+
+typedef struct {
+    bool enabled;          // any breakpoints/watchpoints active?
+
+    uint32_t breakpoints[256];
+    size_t breakpoint_count;
+} Debugger;
+
+static void dump_disasm(const Cpu *cpu, uint32_t addr, size_t count) {
+    for (size_t i = 0; i < count; i++, addr += 4) {
+        uint32_t word = bus_read32(cpu->bus, addr);
+        char line[128];
+        isa_disassemble(line, sizeof(line), addr, word);
+        printf("%08" PRIX32 ": %08" PRIX32 "  %s\n", addr, word, line);
+    }
+}
+
+static bool debugger_has_breakpoint(Debugger *dbg, uint32_t pc) {
+    for (size_t i = 0; i < dbg->breakpoint_count; i++) {
+        if (dbg->breakpoints[i] == pc)
+            return true;
+    }
+
+    return false;
+}
+
+static void debugger_add_breakpoint(Debugger *dbg, uint32_t pc) {
+    if (dbg->breakpoint_count == 256)
+        return;
+
+    for (size_t i = 0; i < dbg->breakpoint_count; i++) {
+        if (dbg->breakpoints[i] == pc)
+            return;
+    }
+
+    dbg->breakpoints[dbg->breakpoint_count++] = pc;
+    dbg->enabled = true;
+}
+
+static void debugger_remove_breakpoint(Debugger *dbg, size_t idx) {
+    if (idx >= dbg->breakpoint_count)
+        return;
+
+    memmove(&dbg->breakpoints[idx],
+            &dbg->breakpoints[idx + 1],
+            (dbg->breakpoint_count - idx - 1) *
+                sizeof(uint32_t));
+
+    dbg->breakpoint_count--;
+
+    dbg->enabled = dbg->breakpoint_count != 0;
+}
+
+static void show_current_instruction(const Cpu *cpu) {
+    uint32_t word = bus_read32(cpu->bus, cpu->pc);
+    char line[128];
+    isa_disassemble(line, sizeof(line), cpu->pc, word);
+    printf("=> 0x%08" PRIX32 ": 0x%08" PRIX32 "  %s\n",
+           cpu->pc, word, line);
+}
+
+static void debugger_shell(Cpu *cpu, Debugger *dbg) {
+    char line[256];
+
+    disable_rawmode();
+    puts("\n[paused]");
+    show_current_instruction(cpu);
+    dump_regs(cpu);
+
+    while (1) {
+        if (atomic_load_explicit(&quit_requested, memory_order_acquire)) {
+            break;
+        }
+
+        fputs("(orion) ", stdout);
+        fflush(stdout);
+
+        if (!fgets(line, sizeof(line), stdin)) {
+            atomic_store_explicit(&quit_requested, true, memory_order_release);
+            break;
+        }
+
+        char *cmd = strtok(line, " \t\r\n");
+        if (!cmd) {
+            continue;
+        }
+
+        if (!strcmp(cmd, "u") || !strcmp(cmd, "dis")) {
+            char *a = strtok(NULL, " \t\r\n");
+            char *n = strtok(NULL, " \t\r\n");
+
+            uint32_t addr = a ? (uint32_t)strtoul(a, NULL, 0) : cpu->pc;
+            size_t count = n ? (size_t)strtoull(n, NULL, 0) : 8;
+            dump_disasm(cpu, addr, count);
+            continue;
+        }
+
+        if (!strcmp(cmd, "b")) {
+            char *a = strtok(NULL, " \t\r\n");
+
+            if (!a) {
+                puts("usage: b <addr>");
+                continue;
+            }
+
+            uint32_t addr = (uint32_t)strtoul(a, NULL, 0);
+            debugger_add_breakpoint(dbg, addr);
+            continue;
+        }
+
+        if (!strcmp(cmd, "bl")) {
+            for (size_t i = 0; i < dbg->breakpoint_count; i++) {
+                printf("%zu: %"PRIX32"\n", i, dbg->breakpoints[i]);
+            }
+            continue;
+        }
+
+        if (!strcmp(cmd, "bd")) {
+            char *n = strtok(NULL, " \t\r\n");
+            if (!n) {
+                puts("usage: bd <index>");
+                continue;
+            }
+
+            debugger_remove_breakpoint(dbg, (size_t)strtoull(n, NULL, 0));
+            continue;
+        }
+
+        if (!strcmp(cmd, "c") || !strcmp(cmd, "cont") || !strcmp(cmd, "continue")) {
+            atomic_store_explicit(&pause_requested, false, memory_order_release);
+            break;
+        }
+
+        if (!strcmp(cmd, "s") || !strcmp(cmd, "step")) {
+            step(cpu);
+            if (cpu->running) {
+                show_current_instruction(cpu);
+                dump_regs(cpu);
+            } else {
+                puts("CPU halted");
+            }
+            continue;
+        }
+
+        if (!strcmp(cmd, "regs") || !strcmp(cmd, "r")) {
+            dump_regs(cpu);
+            continue;
+        }
+
+        if (!strcmp(cmd, "pc")) {
+            printf("PC = 0x%08" PRIX32 "\n", cpu->pc);
+            continue;
+        }
+
+        if (!strcmp(cmd, "x") || !strcmp(cmd, "mem")) {
+            char *a = strtok(NULL, " \t\r\n");
+            char *c = strtok(NULL, " \t\r\n");
+
+            if (!a) {
+                puts("usage: x <addr> [count]");
+                continue;
+            }
+
+            uint32_t addr = (uint32_t)strtoul(a, NULL, 0);
+            uint32_t count = c ? (uint32_t)strtoul(c, NULL, 0) : 64u;
+            dump_mem(cpu, addr, count);
+            continue;
+        }
+
+        if (!strcmp(cmd, "q") || !strcmp(cmd, "quit")) {
+            atomic_store_explicit(&quit_requested, true, memory_order_release);
+            break;
+        }
+
+        puts("commands: continue|c, step|s, regs|r, pc, mem|x <addr> [count], dis|u <addr> [count], quit|q");
+    }
+
+    enable_rawmode();
 }
 
 #define BATCH_SIZE  128
@@ -368,6 +588,8 @@ int main(int argc, char **argv) {
 
     size_t imglen;
     uint8_t *img = load_file(path, &imglen);
+
+    Debugger dbg = {0};
 
     Cpu cpu = {0};
     cpu.pc = 0x00001000;
@@ -420,14 +642,36 @@ int main(int argc, char **argv) {
     last_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
     while (true) {
-        if (unlikely(signalled)) break;
+        if (unlikely(atomic_load_explicit(&quit_requested, memory_order_acquire))) {
+            break;
+        }
+
+        if (unlikely(atomic_load_explicit(&pause_requested, memory_order_acquire))) {
+            debugger_shell(&cpu, &dbg);
+            if (unlikely(atomic_load_explicit(&quit_requested, memory_order_acquire))) {
+                break;
+            }
+        }
 
         if (cpu.running) {
-            for (int i = 0; i < BATCH_SIZE; i++) {
+            int executed = 0;
+
+            for (; executed < BATCH_SIZE; executed++) {
+                if (unlikely(dbg.enabled)) {
+                    if (debugger_has_breakpoint(&dbg, cpu.pc)) {
+                        debugger_shell(&cpu, &dbg);
+                    }
+                }
+
                 step(&cpu);
+
                 if (unlikely(!cpu.running)) break;
+                if (unlikely(atomic_load_explicit(&pause_requested, memory_order_relaxed))) {
+                    break;
+                }
             }
-            cycles += BATCH_SIZE;
+
+            cycles += (uint64_t)executed;
         }
 
         clock_gettime(CLOCK_MONOTONIC, &ts);

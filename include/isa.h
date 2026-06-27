@@ -1,6 +1,18 @@
 #ifndef ISA_H
 #define ISA_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <stdio.h>
+
+#ifndef DEBUG
+    #define INLINE __always_inline
+#else
+    #define INLINE
+#endif
+
 typedef enum {
     OP_NOP   = 0x00,
     OP_SUB   = 0x01,
@@ -103,5 +115,200 @@ typedef enum {
 } Exception;
 
 #define IHVT_BASE           0x00010000
+
+typedef struct Instr {
+    uint8_t opcode;
+    uint8_t rn;
+    uint8_t rd;
+    uint8_t rm;
+    uint8_t cond;
+    bool is_reg;
+    bool is_signed;
+    bool is_absolute;
+    bool is_write;
+    uint16_t imm;
+} Instr;
+
+static INLINE const char *opcode_name(uint8_t op) {
+    switch (op) {
+        case OP_NOP:    return "nop";
+        case OP_ADD:    return "add";
+        case OP_SUB:    return "sub";
+        case OP_MUL:    return "mul";
+        case OP_DIV:    return "div";
+        case OP_DIVU:   return "divu";
+        case OP_SHL:    return "shl";
+        case OP_SHR:    return "shr";
+        case OP_SHRU:   return "shru";
+        case OP_AND:    return "and";
+        case OP_OR:     return "or";
+        case OP_XOR:    return "xor";
+        case OP_LUI:    return "lui";
+        case OP_LDR:    return "ldr";
+        case OP_LDRB:   return "ldrb";
+        case OP_STR:    return "str";
+        case OP_STRB:   return "strb";
+        case OP_JMP:    return "jmp";
+        case OP_JMPA:   return "jmpa";
+        case OP_JXX:    return "jxx";
+        case OP_CALL:   return "call";
+        case OP_CALLA:  return "calla";
+        case OP_RET:    return "ret";
+        case OP_FADD:   return "fadd";
+        case OP_FSUB:   return "fsub";
+        case OP_FMUL:   return "fmul";
+        case OP_FDIV:   return "fdiv";
+        case OP_FCMP:   return "fcmp";
+        case OP_ITOF:   return "itof";
+        case OP_FTOI:   return "ftoi";
+        case OP_XCHG:   return "xchg";
+        case OP_FENCE:  return "fence";
+        case OP_RPC:    return "rpc";
+        case OP_FLAGS:  return "flags";
+        case OP_HALT:   return "halt";
+        case OP_SYSCALL:return "syscall";
+        case OP_IRET:   return "iret";
+        default:        return "data";
+    }
+}
+
+static INLINE const char *cond_name(uint8_t cond) {
+    switch (cond) {
+        case COND_JEQ:  return "eq";
+        case COND_JNE:  return "ne";
+        case COND_JLT:  return "lt";
+        case COND_JGE:  return "ge";
+        case COND_JLTU: return "ltu";
+        case COND_JGEU: return "geu";
+        default:        return "??";
+    }
+}
+
+static INLINE int opcode_type(uint8_t opcode) {
+    switch (opcode) {
+        case OP_ADD:
+        case OP_SUB:
+        case OP_MUL:
+        case OP_DIV:
+        case OP_DIVU:
+        case OP_SHL:
+        case OP_SHR:
+        case OP_SHRU:
+        case OP_AND:
+        case OP_OR:
+        case OP_XOR:
+        case OP_LUI:
+            return TYPE_A;
+
+        case OP_LDR:
+        case OP_STR:
+        case OP_LDRB:
+        case OP_STRB:
+            return TYPE_M;
+
+        case OP_JMP:
+        case OP_JMPA:
+        case OP_JXX:
+        case OP_CALL:
+        case OP_CALLA:
+        case OP_RET:
+        case OP_IRET:
+            return TYPE_J;
+
+        case OP_FLAGS:
+            return TYPE_S;
+
+        default:
+            return -1;
+    }
+}
+
+static INLINE Instr isa_decode(uint32_t word) {
+    Instr instr = {0};
+
+    instr.opcode = (word >> 26) & 0x3F;
+    instr.is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK;
+    instr.is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK;
+
+    if (instr.is_reg) {
+        instr.rm = (word >> IMM_RM_SHIFT) & RM_MASK;
+    } else {
+        instr.imm = (word >> IMM_RM_SHIFT) & IMM_MASK;
+    }
+
+    switch (opcode_type(instr.opcode)) {
+        case TYPE_A:
+        case TYPE_M:
+            instr.rn = (word >> RN_SHIFT) & RN_MASK;
+            instr.rd = (word >> RD_SHIFT) & RD_MASK;
+            break;
+
+        case TYPE_J:
+            instr.cond = (word >> COND_SHIFT) & COND_MASK;
+            instr.is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
+            break;
+
+        case TYPE_S:
+            instr.is_write = word & 0x1;
+            if (instr.is_write) {
+                if (instr.is_reg) {
+                    instr.rm = (word >> 10) & 0x3F;
+                } else {
+                    instr.imm = (word >> 10) & 0xFFFF;
+                }
+            } else {
+                instr.rd = (word >> 10) & 0x3F;
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    return instr;
+}
+
+static INLINE size_t isa_disassemble(char *dst, size_t cap, uint32_t pc, uint32_t word) {
+    Instr d = isa_decode(word);
+
+    if (d.opcode == OP_HALT || d.opcode == OP_RET || d.opcode == OP_IRET || d.opcode == OP_NOP) {
+        return (size_t)snprintf(dst, cap, "%s", opcode_name(d.opcode));
+    }
+
+    if (d.opcode == OP_JXX) {
+        uint32_t target = d.is_absolute
+            ? ((uint32_t)d.imm << 2)
+            : (pc + (uint32_t)((int16_t)((uint32_t)d.imm << 2)));
+
+        return (size_t)snprintf(dst, cap,
+                                "j%s r%u, r%u, 0x%08" PRIX32,
+                                cond_name(d.cond), d.rn, d.rd, target);
+    }
+
+    if (d.opcode == OP_FLAGS) {
+        if (d.is_write) {
+            if (d.is_reg) {
+                return (size_t)snprintf(dst, cap, "flags wr r%u", d.rm);
+            }
+            return (size_t)snprintf(dst, cap, "flags wr 0x%04" PRIX16, d.imm);
+        }
+        return (size_t)snprintf(dst, cap, "flags r%u", d.rd);
+    }
+
+    if (opcode_type(d.opcode) == TYPE_A || opcode_type(d.opcode) == TYPE_M) {
+        if (d.is_reg) {
+            return (size_t)snprintf(dst, cap, "%s r%u, r%u, r%u",
+                                    opcode_name(d.opcode), d.rd, d.rn, d.rm);
+        }
+        if (d.is_signed) {
+            return (size_t)snprintf(dst, cap, "%s r%u, r%u, %" PRId16,
+                                    opcode_name(d.opcode), d.rd, d.rn, (int16_t)d.imm);
+        }
+        return (size_t)snprintf(dst, cap, "%s r%u, r%u, %" PRIu16,
+                                opcode_name(d.opcode), d.rd, d.rn, d.imm);
+    }
+
+    return (size_t)snprintf(dst, cap, "%s", opcode_name(d.opcode));
+}
 
 #endif

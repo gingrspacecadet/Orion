@@ -66,10 +66,11 @@ draw_string:
     push r5
     mov r4, r0               ; r4 = Current string index pointer
     mov r5, r1               ; r5 = Tracking X screen position
+    mov r6, #0               ; r6 = NULL
 
 str_loop:
     ldrb r0, [r4]            ; fetch character ascii byte
-    jeq r0, #0, $str_done    ; hit null terminator, break out
+    jeq r0, r6, $str_done    ; hit null terminator, break out
 
     push r4
     push r5

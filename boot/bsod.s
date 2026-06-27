@@ -8,8 +8,7 @@ loop:
     add r4, r1, r2
     str r3, [r4]
     add r2, r2, #4
-    cmp r2, r5
-    jne $loop
+    jne r2, r5, $loop
 
     mov r0, $msg_bsod
     mov r1, #0

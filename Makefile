@@ -24,8 +24,12 @@ CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Iincl
 LDFLAGS :=$(shell pkg-config --libs sdl2)
 
 # optimisations
-# CFLAGS += -O3 -march=native -flto -fno-plt -fomit-frame-pointer
-CFLAGS += -DDEBUG
+
+ifeq ($(DEBUG),1)
+	CFLAGS += -DDEBUG
+else
+	CFLAGS += -O3 -march=native -flto -fno-plt -fomit-frame-pointer
+endif
 
 BUILD := build
 
