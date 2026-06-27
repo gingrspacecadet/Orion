@@ -62,7 +62,7 @@ The Flags register is a private register containing all CPU system states.
 - `opcode(6)` `imm(26)`
 
 `B-type` (Conditional Branches):
-- `opcode(6)` `cond(4)` `rn(4)` `rd(4)` `absolute?(1)` `reserved(1)` `imm(12)`
+- `opcode(6)` `cond(4)` `rn(4)` `rd(4)` `imm(12)` `register?(1)` `absolute?(1)`
 
 `A-type`:
 - `opcode(6)` `rn(4)` `rd(4)` `(rm(4) | imm(16))` `register?(1)` `reserved(1)`

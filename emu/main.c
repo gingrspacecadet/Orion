@@ -219,17 +219,20 @@ static INLINE void step(Cpu *cpu) {
             uint8_t cond = (word >> 22) & 0xF;
             uint8_t rn = (word >> 18) & 0xF;
             uint8_t rd = (word >> 14) & 0xF;
-            bool absolute = (word >> 13) & 0x1;
-            uint16_t imm = ((word) & 0xFFF) << 2;
+            uint16_t imm = (word >> 2) & 0xFFF;
+            bool is_reg = (word >> 1) & 0x1;
+            bool absolute = (word) & 0x1;
+
+            uint32_t op = is_reg ? cpu->r[rd] : rd;
 
             bool jump = false;
             switch (cond) {
-                case COND_JEQ: if (cpu->r[rn] == cpu->r[rd]) jump = true; break;
-                case COND_JNE: if (cpu->r[rn] != cpu->r[rd]) jump = true; break;
-                case COND_JLT: if ((int32_t)cpu->r[rn] <  (int32_t)cpu->r[rd]) jump = true; break;
-                case COND_JGE: if ((int32_t)cpu->r[rn] >= (int32_t)cpu->r[rd]) jump = true; break;
-                case COND_JLTU:if (cpu->r[rn] <  cpu->r[rd]) jump = true; break;
-                case COND_JGEU:if (cpu->r[rn] >= cpu->r[rd]) jump = true; break;
+                case COND_JEQ: if (cpu->r[rn] == op) jump = true; break;
+                case COND_JNE: if (cpu->r[rn] != op) jump = true; break;
+                case COND_JLT: if ((int32_t)cpu->r[rn] <  (int32_t)op) jump = true; break;
+                case COND_JGE: if ((int32_t)cpu->r[rn] >= (int32_t)op) jump = true; break;
+                case COND_JLTU:if (cpu->r[rn] <  op) jump = true; break;
+                case COND_JGEU:if (cpu->r[rn] >= op) jump = true; break;
                 default: raise_exception(cpu, EX_INVALID_INSTR); return;
             }
             if (jump) {

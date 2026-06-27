@@ -126,7 +126,7 @@ typedef struct Instr {
     bool is_signed;
     bool is_absolute;
     bool is_write;
-    uint16_t imm;
+    uint32_t imm;
 } Instr;
 
 static INLINE const char *opcode_name(uint8_t op) {
@@ -205,10 +205,12 @@ static INLINE int opcode_type(uint8_t opcode) {
         case OP_LDRB:
         case OP_STRB:
             return TYPE_M;
+            
+        case OP_JXX:
+            return TYPE_B;
 
         case OP_JMP:
         case OP_JMPA:
-        case OP_JXX:
         case OP_CALL:
         case OP_CALLA:
         case OP_RET:
@@ -244,8 +246,15 @@ static INLINE Instr isa_decode(uint32_t word) {
             break;
 
         case TYPE_J:
+            instr.imm = (word) & 0x4000000;
+            break;
+
+        case TYPE_B:
             instr.cond = (word >> COND_SHIFT) & COND_MASK;
-            instr.is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
+            instr.rn = (word >> (COND_SHIFT - 4)) & RN_MASK;
+            instr.rd = (word >> (COND_SHIFT - 8)) & RD_MASK;
+            instr.imm = (word >> 2) & 0xFFF;
+            instr.is_absolute = (word) & 0x1;
             break;
 
         case TYPE_S:
@@ -281,8 +290,8 @@ static INLINE size_t isa_disassemble(char *dst, size_t cap, uint32_t pc, uint32_
             : (pc + (uint32_t)((int16_t)((uint32_t)d.imm << 2)));
 
         return (size_t)snprintf(dst, cap,
-                                "j%s r%u, r%u, 0x%08" PRIX32,
-                                cond_name(d.cond), d.rn, d.rd, target);
+                                "j%s r%u, %c%u, 0x%08" PRIX32,
+                                cond_name(d.cond), d.rn, d.is_reg, d.rd, target);
     }
 
     if (d.opcode == OP_FLAGS) {

@@ -8,6 +8,8 @@
 #include "obj.h"
 #include "codegen.h"
 
+#define assert(cond, err) if (!(cond)){ fprintf(stderr, __FILE__ ":%d: assert " #cond " failed: " err "\n", __LINE__); exit(1); }
+
 Section sections[MAX_SECTIONS];
 int section_count = 0;
 Section *active_section = NULL;
@@ -82,14 +84,15 @@ static uint32_t encode_j(uint32_t opcode, uint32_t imm) {
     return w;    
 }
 
-static uint32_t encode_b(uint32_t opcode, uint8_t cond, uint8_t rn, uint8_t rd, bool absolute, uint16_t imm) {
+static uint32_t encode_b(uint32_t opcode, uint8_t cond, uint8_t rn, uint8_t rd, uint16_t imm, bool reg, bool absolute) {
     uint32_t w = 0;
     w |= (opcode & 0x3F) << 26;
     w |= (cond & 0xF) << 22;
     w |= (rn & 0xF) << 18;
     w |= (rd & 0xF) << 14;
-    w |= (absolute & 0x1) << 13;
-    w |= (imm & 0xFFF);
+    w |= (imm & 0xFFF) << 2;
+    w |= (reg & 0x1) << 1;
+    w |= (absolute & 0x1);
     return w;
 }
 
@@ -499,8 +502,11 @@ void codegen(instr_array *instrs) {
                     fprintf(stderr, "Assembler Error (Line %d): Unknown condition \"%s\"\n", instr.line_num, instr.mnemonic);
                     exit(1);
                 }
-                write_active_u32(encode_b(opcode, cond, instr.ops[0].reg, instr.ops[1].reg, false, instr.ops[2].val));
-                continue;
+                printf("%s\n", instr.mnemonic);
+                assert(instr.ops[0].mode == AM_REG, "e")
+                assert(instr.ops[1].mode == AM_REG || instr.ops[1].mode == AM_IMM, "f")
+                write_active_u32(encode_b(opcode, cond, instr.ops[0].reg, instr.ops[1].reg, instr.ops[2].val, instr.ops[1].mode == AM_REG, false));
+                break;
             }
         }
     }
