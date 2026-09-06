@@ -2,3 +2,4 @@ build/
 out.bin
 *.o
 perf*
+a.out

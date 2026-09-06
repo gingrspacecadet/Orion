@@ -118,14 +118,16 @@ typedef enum {
 
 typedef struct Instr {
     uint8_t opcode;
+
     uint8_t rn;
     uint8_t rd;
     uint8_t rm;
     uint8_t cond;
+
     bool is_reg;
-    bool is_signed;
     bool is_absolute;
     bool is_write;
+
     uint32_t imm;
 } Instr;
 
@@ -206,16 +208,23 @@ static INLINE int opcode_type(uint8_t opcode) {
         case OP_STRB:
             return TYPE_M;
             
-        case OP_JXX:
-            return TYPE_B;
-
         case OP_JMP:
         case OP_JMPA:
         case OP_CALL:
         case OP_CALLA:
+            return TYPE_J;
+
+        case OP_JXX:
+            return TYPE_B;
+
         case OP_RET:
         case OP_IRET:
-            return TYPE_J;
+        case OP_NOP:
+        case OP_HALT:
+        case OP_RPC:
+        case OP_SYSCALL:
+        case OP_FENCE:
+            return TYPE_X;
 
         case OP_FLAGS:
             return TYPE_S;
@@ -230,7 +239,6 @@ static INLINE Instr isa_decode(uint32_t word) {
 
     instr.opcode = (word >> 26) & 0x3F;
     instr.is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK;
-    instr.is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK;
 
     if (instr.is_reg) {
         instr.rm = (word >> IMM_RM_SHIFT) & RM_MASK;
@@ -258,15 +266,17 @@ static INLINE Instr isa_decode(uint32_t word) {
             break;
 
         case TYPE_S:
-            instr.is_write = word & 0x1;
+            instr.is_write = (word >> 0) & 1;
+            instr.is_reg = (word >> 1) & 1;
+
             if (instr.is_write) {
                 if (instr.is_reg) {
-                    instr.rm = (word >> 10) & 0x3F;
+                    instr.rm = (word >> 22) & 0xF;
                 } else {
-                    instr.imm = (word >> 10) & 0xFFFF;
+                    instr.imm = (word >> 6) & 0xFFFF;
                 }
             } else {
-                instr.rd = (word >> 10) & 0x3F;
+                instr.rd = (word >> 22) & 0xF;
             }
             break;
 
@@ -277,6 +287,11 @@ static INLINE Instr isa_decode(uint32_t word) {
     return instr;
 }
 
+static INLINE int32_t sign_extend(uint32_t value, unsigned bits) {
+    uint32_t shift = 32 - bits;
+    return (int32_t)(value << shift) >> shift;
+}
+
 static INLINE size_t isa_disassemble(char *dst, size_t cap, uint32_t pc, uint32_t word) {
     Instr d = isa_decode(word);
 
@@ -285,9 +300,11 @@ static INLINE size_t isa_disassemble(char *dst, size_t cap, uint32_t pc, uint32_
     }
 
     if (d.opcode == OP_JXX) {
+        int32_t offset = sign_extend(d.imm, 12);
+
         uint32_t target = d.is_absolute
-            ? ((uint32_t)d.imm << 2)
-            : (pc + (uint32_t)((int16_t)((uint32_t)d.imm << 2)));
+            ? d.imm
+            : pc + offset;
 
         return (size_t)snprintf(dst, cap,
                                 "j%s r%u, %c%u, 0x%08" PRIX32,
@@ -308,10 +325,6 @@ static INLINE size_t isa_disassemble(char *dst, size_t cap, uint32_t pc, uint32_
         if (d.is_reg) {
             return (size_t)snprintf(dst, cap, "%s r%u, r%u, r%u",
                                     opcode_name(d.opcode), d.rd, d.rn, d.rm);
-        }
-        if (d.is_signed) {
-            return (size_t)snprintf(dst, cap, "%s r%u, r%u, %" PRId16,
-                                    opcode_name(d.opcode), d.rd, d.rn, (int16_t)d.imm);
         }
         return (size_t)snprintf(dst, cap, "%s r%u, r%u, %" PRIu16,
                                 opcode_name(d.opcode), d.rd, d.rn, d.imm);
