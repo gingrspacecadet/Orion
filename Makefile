@@ -11,7 +11,7 @@ $(1): $$(BUILD)/$(1)
 
 $$(BUILD)/$(1): $$($(1)_OBJ)
 	@mkdir -p "$$(dir $$@)"
-	$(CC) $(LDFLAGS) $$($(1)_OBJ) -o $$@
+	$(CC) $$($(1)_OBJ) $(LDFLAGS) -o $$@
 
 $$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
 	@mkdir -p "$$(dir $$@)"
@@ -20,22 +20,31 @@ $$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
 endef
 
 CC := gcc -g
-CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Iinclude $(shell pkg-config --cflags sdl2)
-LDFLAGS :=$(shell pkg-config --libs sdl2)
+CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Wno-override-init -Iinclude $(shell pkg-config --cflags sdl2)
+LDFLAGS := $(shell pkg-config --libs sdl2) -g
 
 # optimisations
-
 ifeq ($(DEBUG),1)
-	CFLAGS += -DDEBUG
+    CFLAGS += -DDEBUG -g -O0
+    LDFLAGS += -g
 else
-	CFLAGS += -O3 -march=native -flto -fno-plt -fomit-frame-pointer
+    OPT_FLAGS := -O3 -march=native -flto=auto -fno-plt -fomit-frame-pointer
+    
+    ifeq ($(PGO),gen)
+        OPT_FLAGS += -fprofile-generate
+    else ifeq ($(PGO),use)
+        OPT_FLAGS += -fprofile-use -fprofile-correction
+    endif
+
+    CFLAGS += $(OPT_FLAGS)
+    LDFLAGS += $(OPT_FLAGS)
 endif
 
 BUILD := build
 
 TARGETS := asm disasm emu ld
 
-.Phony: all
+.PHONY: all
 all: $(TARGETS) boot
 
 override BOOT_SRC := $(shell find boot/ -type f -name '*.s' 2>/dev/null | LC_ALL=C sort)
@@ -61,7 +70,7 @@ $(BUILD)/boot/boot: $(BOOT_OBJ) | $(BUILD)/ld
 run: boot emu
 	$(BUILD)/emu $(BUILD)/boot/boot
 
-.Phony: clean
+.PHONY: clean
 clean:
 	@rm -rf $(BUILD)
 

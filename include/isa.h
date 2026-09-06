@@ -8,7 +8,7 @@
 #include <stdio.h>
 
 #ifndef DEBUG
-    #define INLINE __always_inline
+    #define INLINE
 #else
     #define INLINE
 #endif

@@ -133,172 +133,188 @@ static INLINE void sync_pc_cache(Cpu *cpu) {
 
 #define sign_extend26(d) ((((int32_t)(d)) << 8) >> 8)
 
-static INLINE void step(Cpu *cpu) {
-    if (unlikely((cpu->pc & 0x3) != 0)) {
-        raise_exception(cpu, EX_MISALIGNED_PC);
-        return;
-    }
+static int run_cpu_batch(Cpu *cpu, int max_cycles) {
+    if (unlikely(!cpu->running || max_cycles <= 0)) return 0;
+
+    static const void *dispatch_table[64] = {
+        [0 ... 63] = &&do_invalid,
+        [OP_ADD]   = &&do_OP_ADD,
+        [OP_SUB]   = &&do_OP_SUB,
+        [OP_XOR]   = &&do_OP_XOR,
+        [OP_OR]    = &&do_OP_OR,
+        [OP_SHL]   = &&do_OP_SHL,
+        [OP_SHR]   = &&do_OP_SHR,
+        [OP_AND]   = &&do_OP_AND,
+        [OP_LDR]   = &&do_OP_LDR,
+        [OP_LDRB]  = &&do_OP_LDRB,
+        [OP_STR]   = &&do_OP_STR,
+        [OP_STRB]  = &&do_OP_STRB,
+        [OP_LUI]   = &&do_OP_LUI,
+        [OP_JXX]   = &&do_OP_JXX,
+        [OP_CALL]  = &&do_OP_CALL,
+        [OP_RET]   = &&do_OP_RET,
+        [OP_HALT]  = &&do_OP_HALT,
+        [OP_IRET]  = &&do_OP_IRET,
+        [OP_FLAGS] = &&do_OP_FLAGS,
+    };
 
     uint32_t word;
+    uint8_t opcode, rm, rn, rd;
+    bool is_reg, is_signed;
+    uint32_t imm, op_b;
+    int executed = 0;
 
-    sync_pc_cache(cpu);
+    #define NEXT_INSTR() \
+        do { \
+            if (unlikely((cpu->pc & 0x3) != 0)) { \
+                raise_exception(cpu, EX_MISALIGNED_PC); \
+                return executed; \
+            } \
+            sync_pc_cache(cpu); \
+            uint32_t offset = cpu->pc & 4095; \
+            if (likely(cpu->pc_page_ptr && offset <= 4092)) { \
+                word = *(const uint32_t *)&cpu->pc_page_ptr[offset]; \
+            } else { \
+                word = bus_read32(cpu->bus, cpu->pc); \
+            } \
+            opcode = (word >> 26) & 0x3F; \
+            is_reg = (word >> IS_REG_SHIFT) & IS_REG_MASK; \
+            is_signed = (word >> SIGNED_SHIFT) & SIGNED_MASK; \
+            rm = (word >> IMM_RM_SHIFT) & RM_MASK; \
+            imm = (word >> IMM_RM_SHIFT) & IMM_MASK; \
+            rn = (word >> RN_SHIFT) & RN_MASK; \
+            rd = (word >> RD_SHIFT) & RD_MASK; \
+            op_b = is_reg ? cpu->r[rm] : (is_signed ? (int32_t)((int16_t)imm) : imm); \
+            goto *dispatch_table[opcode]; \
+        } while (0)
 
-    uint32_t offset = cpu->pc & 4095;
-    if (likely(cpu->pc_page_ptr && offset <= 4092)) {
-        word = *(const uint32_t *)&cpu->pc_page_ptr[offset];
-    } else {
-        word = bus_read32(cpu->bus, cpu->pc);
+    #define FINISH_INSTR() \
+        do { \
+            cpu->pc += 4; \
+            executed++; \
+            if (likely(executed < max_cycles && cpu->running)) NEXT_INSTR(); \
+            return executed; \
+        } while(0)
+
+    #define FINISH_BRANCH() \
+        do { \
+            executed++; \
+            if (likely(executed < max_cycles && cpu->running)) NEXT_INSTR(); \
+            return executed; \
+        } while(0)
+
+    NEXT_INSTR();
+
+do_OP_ADD:
+    cpu->r[rd] = cpu->r[rn] + op_b;
+    FINISH_INSTR();
+
+do_OP_SUB:
+    cpu->r[rd] = cpu->r[rn] - op_b;
+    FINISH_INSTR();
+
+do_OP_XOR:
+    cpu->r[rd] = cpu->r[rn] ^ op_b;
+    FINISH_INSTR();
+
+do_OP_OR:
+    cpu->r[rd] = cpu->r[rn] | op_b;
+    FINISH_INSTR();
+
+do_OP_SHL:
+    cpu->r[rd] = cpu->r[rn] << op_b;
+    FINISH_INSTR();
+
+do_OP_SHR:
+    cpu->r[rd] = cpu->r[rn] >> op_b;
+    FINISH_INSTR();
+
+do_OP_AND:
+    cpu->r[rd] = cpu->r[rn] & op_b;
+    FINISH_INSTR();
+
+do_OP_LDR:
+    cpu->r[rd] = bus_read32(cpu->bus, cpu->r[rn] + op_b);
+    FINISH_INSTR();
+
+do_OP_LDRB:
+    cpu->r[rd] = bus_read8(cpu->bus, cpu->r[rn] + op_b);
+    FINISH_INSTR();
+
+do_OP_STR:
+    bus_write32(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
+    FINISH_INSTR();
+
+do_OP_STRB:
+    bus_write8(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
+    FINISH_INSTR();
+
+do_OP_LUI:
+    cpu->r[rd] = op_b << 16;
+    FINISH_INSTR();
+
+do_OP_JXX: {
+    uint8_t cond = (word >> 22) & 0xF;
+    uint8_t jxx_rn = (word >> 18) & 0xF;
+    uint8_t jxx_rd = (word >> 14) & 0xF;
+    uint16_t jxx_imm = (word >> 2) & 0xFFF;
+    bool jxx_is_reg = (word >> 1) & 0x1;
+    bool absolute = (word) & 0x1;
+
+    uint32_t op = jxx_is_reg ? cpu->r[jxx_rd] : jxx_rd;
+    bool jump = false;
+
+    switch (cond) {
+        case COND_JEQ:  jump = (cpu->r[jxx_rn] == op); break;
+        case COND_JNE:  jump = (cpu->r[jxx_rn] != op); break;
+        case COND_JLT:  jump = ((int32_t)cpu->r[jxx_rn] <  (int32_t)op); break;
+        case COND_JGE:  jump = ((int32_t)cpu->r[jxx_rn] >= (int32_t)op); break;
+        case COND_JLTU: jump = (cpu->r[jxx_rn] <  op); break;
+        case COND_JGEU: jump = (cpu->r[jxx_rn] >= op); break;
+        default: raise_exception(cpu, EX_INVALID_INSTR); return executed;
     }
 
-    uint8_t opcode   = (word >> 26) & 0x3F;
-    bool is_reg      = (word >> IS_REG_SHIFT) & IS_REG_MASK;
-    bool is_signed   = (word >> SIGNED_SHIFT) & SIGNED_MASK;
-    uint8_t rm       = (word >> IMM_RM_SHIFT) & RM_MASK;
-    uint32_t imm     = (word >> IMM_RM_SHIFT) & IMM_MASK;
-    
-    uint8_t rn       = (word >> RN_SHIFT) & RN_MASK;
-    uint8_t rd       = (word >> RD_SHIFT) & RD_MASK;
-
-    uint32_t op_b = is_reg ? cpu->r[rm] : (is_signed ? (int32_t)((int16_t)imm) : imm);
-    bool update_pc = true;
-
-    switch (opcode) {
-        case OP_ADD: {
-            uint32_t a = cpu->r[rn];
-            uint32_t res = a + op_b;
-            cpu->r[rd] = res;
-            break;
-        }
-
-        case OP_SUB: {
-            uint32_t a = cpu->r[rn];
-            uint32_t res = a - op_b;
-            cpu->r[rd] = res;
-            break;
-        }
-
-        case OP_XOR: {
-            cpu->r[rd] = cpu->r[rn] ^ op_b;
-            break;
-        }
-
-        case OP_OR: {
-            cpu->r[rd] = cpu->r[rn] | op_b;
-            break;
-        }
-
-        case OP_SHL: {
-            cpu->r[rd] = cpu->r[rn] << op_b;
-            break;
-        }
-
-        case OP_SHR: {
-            cpu->r[rd] = cpu->r[rn] >> op_b;
-            break;
-        }
-
-        case OP_AND: {
-            cpu->r[rd] = cpu->r[rn] & op_b;
-            break;
-        }
-
-        case OP_LDR: {
-            cpu->r[rd] = bus_read32(cpu->bus, cpu->r[rn] + op_b);
-            break;
-        }
-
-        case OP_LDRB: {
-            cpu->r[rd] = bus_read8(cpu->bus, cpu->r[rn] + op_b);
-            break;
-        }
-
-        case OP_STR: {
-            bus_write32(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
-            break;
-        }
-
-        case OP_STRB: {
-            bus_write8(cpu->bus, cpu->r[rn] + op_b, cpu->r[rd]);
-            break;
-        }
-
-        case OP_LUI: {
-            cpu->r[rd] = op_b << 16;
-            break;
-        }
-
-        case OP_JXX: {
-            uint8_t cond = (word >> 22) & 0xF;
-            uint8_t rn = (word >> 18) & 0xF;
-            uint8_t rd = (word >> 14) & 0xF;
-            uint16_t imm = (word >> 2) & 0xFFF;
-            bool is_reg = (word >> 1) & 0x1;
-            bool absolute = (word) & 0x1;
-
-            uint32_t op = is_reg ? cpu->r[rd] : rd;
-
-            bool jump = false;
-            switch (cond) {
-                case COND_JEQ: if (cpu->r[rn] == op) jump = true; break;
-                case COND_JNE: if (cpu->r[rn] != op) jump = true; break;
-                case COND_JLT: if ((int32_t)cpu->r[rn] <  (int32_t)op) jump = true; break;
-                case COND_JGE: if ((int32_t)cpu->r[rn] >= (int32_t)op) jump = true; break;
-                case COND_JLTU:if (cpu->r[rn] <  op) jump = true; break;
-                case COND_JGEU:if (cpu->r[rn] >= op) jump = true; break;
-                default: raise_exception(cpu, EX_INVALID_INSTR); return;
-            }
-            if (jump) {
-                cpu->pc = absolute
-                    ? imm
-                    : cpu->pc + (int16_t)imm;
-
-                update_pc = false;
-            }
-            break;
-        }
-
-        case OP_CALL: {
-            if (!push32(cpu, cpu->pc + 4)) return;
-            cpu->pc = cpu->pc + sign_extend26(word & 0x3FFFFFF);
-            update_pc = false;
-            break;
-        }
-
-        case OP_RET: {
-            if (!pop32(cpu, &cpu->pc)) return;
-            update_pc = false;
-            break;
-        }
-
-        case OP_HALT: {
-            cpu->running = false;
-            break;
-        }
-
-        case OP_IRET: {
-            if (!pop32(cpu, &cpu->pc)) return;
-            if (!pop32(cpu, &cpu->flags)) return;
-            update_pc = false;
-            break;
-        }
-
-        case OP_FLAGS: {
-            if (word & 0x1) {   // write
-                cpu->flags = (word >> 6) & (is_reg ? 0xF : 0xFFFF);
-            } else {    // read
-                rd = (word >> 6) & 0xF;
-                cpu->r[rd] = cpu->flags;
-            }
-            break;
-        }
-
-        default: {
-            raise_exception(cpu, EX_INVALID_INSTR);
-            return;
-        }
+    if (jump) {
+        cpu->pc = absolute ? jxx_imm : cpu->pc + (int16_t)jxx_imm;
+        FINISH_BRANCH();
     }
+    FINISH_INSTR();
+}
 
-    if (update_pc) cpu->pc += 4;
+do_OP_CALL:
+    if (unlikely(!push32(cpu, cpu->pc + 4))) return executed;
+    cpu->pc = cpu->pc + sign_extend26(word & 0x3FFFFFF);
+    FINISH_BRANCH();
+
+do_OP_RET:
+    if (unlikely(!pop32(cpu, &cpu->pc))) return executed;
+    FINISH_BRANCH();
+
+do_OP_HALT:
+    cpu->running = false;
+    FINISH_INSTR();
+
+do_OP_IRET:
+    if (unlikely(!pop32(cpu, &cpu->pc))) return executed;
+    if (unlikely(!pop32(cpu, &cpu->flags))) return executed;
+    FINISH_BRANCH();
+
+do_OP_FLAGS:
+    if (word & 0x1) { // write
+        cpu->flags = (word >> 6) & (is_reg ? 0xF : 0xFFFF);
+    } else { // read
+        rd = (word >> 6) & 0xF;
+        cpu->r[rd] = cpu->flags;
+    }
+    FINISH_INSTR();
+
+do_invalid:
+    raise_exception(cpu, EX_INVALID_INSTR);
+    return executed;
+
+    #undef NEXT_INSTR
+    #undef FINISH_INSTR
+    #undef FINISH_BRANCH
 }
 
 static uint8_t find_highest_priority(IcuDevice *icu, uint32_t active) {
@@ -539,7 +555,7 @@ static void debugger_shell(Cpu *cpu, Debugger *dbg) {
         }
 
         if (!strcmp(cmd, "s") || !strcmp(cmd, "step")) {
-            step(cpu);
+            run_cpu_batch(cpu, 1);
             if (cpu->running) {
                 show_current_instruction(cpu);
                 dump_regs(cpu);
@@ -585,7 +601,7 @@ static void debugger_shell(Cpu *cpu, Debugger *dbg) {
     enable_rawmode();
 }
 
-#define BATCH_SIZE  128
+#define BATCH_SIZE  4096
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -669,19 +685,15 @@ int main(int argc, char **argv) {
         if (cpu.running) {
             int executed = 0;
 
-            for (; executed < BATCH_SIZE; executed++) {
-                if (unlikely(dbg.enabled)) {
-                    if (debugger_has_breakpoint(&dbg, cpu.pc)) {
-                        debugger_shell(&cpu, &dbg);
-                    }
+            if (unlikely(dbg.enabled || atomic_load_explicit(&pause_requested, memory_order_relaxed))) {
+                // SLOW PATH: Debugger active, check breakpoints every single instruction
+                if (dbg.enabled && debugger_has_breakpoint(&dbg, cpu.pc)) {
+                    debugger_shell(&cpu, &dbg);
                 }
-
-                step(&cpu);
-
-                if (unlikely(!cpu.running)) break;
-                if (unlikely(atomic_load_explicit(&pause_requested, memory_order_relaxed))) {
-                    break;
-                }
+                executed = run_cpu_batch(&cpu, 1);
+            } else {
+                // FAST PATH: Run 4096 instructions at full speed
+                executed = run_cpu_batch(&cpu, 4096); 
             }
 
             cycles += (uint64_t)executed;

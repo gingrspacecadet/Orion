@@ -45,46 +45,42 @@ static inline BusDevice *find_device(Bus *bus, uint32_t addr) {
 
 static __always_inline uint32_t bus_read32(Bus *bus, uint32_t addr) {
     uint32_t page = addr >> 12;
+    BusDevice *dev = bus->page_map[page];
     
-    if (__builtin_expect(bus->page_map[page] != NULL, 0)) {
-        BusDevice *dev = find_device(bus, addr);
-        if (dev) return dev->read(dev->state, addr - dev->base_addr, 4);
+    if (__builtin_expect(dev != NULL, 0)) {
+        return dev->read(dev->state, addr - dev->base_addr, 4);
     }
     return mem_read32(bus->mem, addr);
 }
 
 static __always_inline void bus_write32(Bus *bus, uint32_t addr, uint32_t val) {
     uint32_t page = addr >> 12;
+    BusDevice *dev = bus->page_map[page];
     
-    if (__builtin_expect(bus->page_map[page] != NULL, 0)) {
-        BusDevice *dev = find_device(bus, addr);
-        if (dev) {
-            dev->write(dev->state, addr - dev->base_addr, val, 4);
-            return;
-        }
+    if (__builtin_expect(dev != NULL, 0)) {
+        dev->write(dev->state, addr - dev->base_addr, val, 4);
+        return;
     }
     mem_write32(bus->mem, addr, val);
 }
 
 static __always_inline uint8_t bus_read8(Bus *bus, uint32_t addr) {
     uint32_t page = addr >> 12;
+    BusDevice *dev = bus->page_map[page];
     
-    if (__builtin_expect(bus->page_map[page] != NULL, 0)) {
-        BusDevice *dev = find_device(bus, addr);
-        if (dev) return dev->read(dev->state, addr - dev->base_addr, 1);
+    if (__builtin_expect(dev != NULL, 0)) {
+        return dev->read(dev->state, addr - dev->base_addr, 1);
     }
     return mem_read8(bus->mem, addr);
 }
 
 static __always_inline void bus_write8(Bus *bus, uint32_t addr, uint8_t val) {
     uint32_t page = addr >> 12;
+    BusDevice *dev = bus->page_map[page];
     
-    if (__builtin_expect(bus->page_map[page] != NULL, 0)) {
-        BusDevice *dev = find_device(bus, addr);
-        if (dev) {
-            dev->write(dev->state, addr - dev->base_addr, val, 1);
-            return;
-        }
+    if (__builtin_expect(dev != NULL, 0)) {
+        dev->write(dev->state, addr - dev->base_addr, val, 1);
+        return;
     }
     mem_write8(bus->mem, addr, val);
 }
