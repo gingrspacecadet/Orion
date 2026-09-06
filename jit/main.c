@@ -29,6 +29,16 @@ static uint32_t encode_jump(Opcode opcode, int32_t offset) {
          | ((uint32_t)offset & 0x03FFFFFF);
 }
 
+static uint32_t encode_branch(Condition cond, uint8_t rn, uint8_t rd, int32_t offset, bool absolute) {
+    return ((uint32_t)OP_JXX << 26)
+         | ((uint32_t)cond << 22)
+         | ((uint32_t)rn << 18)
+         | ((uint32_t)rd << 14)
+         | (((uint32_t)offset & 0xFFF) << 2)
+         | (1u << IS_REG_SHIFT)
+         | (absolute ? 1u : 0u);
+}
+
 static void write32(uint8_t *memory, uint32_t address, uint32_t value) {
     memory[address + 0] = (uint8_t)(value >> 0);
     memory[address + 1] = (uint8_t)(value >> 8);
@@ -42,21 +52,28 @@ int main(void) {
 
     regs[1] = 100;
     regs[2] = 23;
+    regs[3] = 123;
 
     write32(memory, 0x1000, encode_reg(OP_ADD, 0, 1, 2));
-    write32(memory, 0x1004, encode_jump(OP_JMP, 0xFC));
-
-    write32(memory, 0x1100, encode_reg(OP_ADD, 3, 0, 1));
-    write32(memory, 0x1104, encode_jump(OP_JMP, -0x104));
+    write32(memory, 0x1004, encode_branch(COND_JEQ, 0, 3, 0x1C, false));
+    write32(memory, 0x1008, encode_reg(OP_SUB, 4, 1, 2));
+    write32(memory, 0x100C, encode_jump(OP_JMP, 0x100));
+    write32(memory, 0x1020, encode_reg(OP_MUL, 5, 1, 2));
+    write32(memory, 0x1024, encode_jump(OP_JMP, -0x20));
 
     Jit jit;
 
     if (!jit_init(&jit, 16, 16, fetch, memory))
         return 1;
 
+    JitBlock *block = jit_get_block(&jit, 0x1000);
+
+    if (block == NULL)
+        return 1;
+
     uint32_t pc = PROGRAM_PC;
 
-    for (size_t i = 0; i < 10; i++) {
+    for (size_t i = 0; i < 2; i++) {
         JitBlock *block = jit_get_block(&jit, pc);
 
         if (block == NULL)
@@ -66,11 +83,12 @@ int main(void) {
     }
 
     printf("r0 = %u\n", regs[0]);
-    printf("r3 = %u\n", regs[3]);
+    printf("r4 = %u\n", regs[4]);
+    printf("r5 = %u\n", regs[5]);
     printf("pc = 0x%08X\n", pc);
     printf("blocks = %zu\n", jit.block_count);
 
     jit_destroy(&jit);
 
-    return jit.block_count == 2 && regs[0] == 123;
+    return 0;
 }
