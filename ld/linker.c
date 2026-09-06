@@ -246,7 +246,7 @@ void write_executable(const char *out_path) {
         exit(1);
     }
 
-    // 1. Sort sections by VMA layout mapping (Bubble Sort)
+    // bubble sort!
     for (int i = 0; i < exec_section_count - 1; i++) {
         for (int j = 0; j < exec_section_count - i - 1; j++) {
             if (get_section_vma(exec_sections[j].name) > get_section_vma(exec_sections[j + 1].name)) {
@@ -257,7 +257,6 @@ void write_executable(const char *out_path) {
         }
     }
 
-    // Find the absolute base VMA of our executable binary image
     uint32_t binary_base_vma = 0xFFFFFFFF;
     for (int i = 0; i < exec_section_count; i++) {
         if (exec_sections[i].size > 0) {
@@ -276,13 +275,11 @@ void write_executable(const char *out_path) {
 
     printf("Linker: Binary base image VMA established at 0x%08X\n", binary_base_vma);
 
-    // 2. Write out sections, calculating explicit file offsets
     for (int i = 0; i < exec_section_count; i++) {
         if (exec_sections[i].size == 0) continue;
 
         uint32_t section_vma = get_section_vma(exec_sections[i].name);
         
-        // Calculate exactly where this section belongs relative to the file start
         long expected_file_offset = (long)(section_vma - binary_base_vma);
         long current_file_offset = ftell(f);
 
@@ -292,7 +289,6 @@ void write_executable(const char *out_path) {
             exit(1);
         }
 
-        // Pad up to the exact file offset required
         if (expected_file_offset > current_file_offset) {
             long padding_needed = expected_file_offset - current_file_offset;
             uint8_t zero = 0;
@@ -301,7 +297,6 @@ void write_executable(const char *out_path) {
             }
         }
 
-        // Write the consolidated payload block cleanly
         printf(" -> Writing section '%s' at file offset 0x%08lX (%u bytes)\n", 
                exec_sections[i].name, ftell(f), exec_sections[i].size);
                

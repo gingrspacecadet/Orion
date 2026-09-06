@@ -94,6 +94,7 @@ static INLINE bool push32(Cpu *cpu, const uint32_t v) {
     bus_write32(cpu->bus, cpu->r[SP], v);
     return true;
 }
+
 [[nodiscard]]
 static INLINE bool pop32(Cpu *cpu, uint32_t *out) {
     if (unlikely(cpu->r[SP] > UINT32_MAX - 4)) {
