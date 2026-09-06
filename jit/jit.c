@@ -30,6 +30,25 @@ static void patch32(JitEmit *emit, size_t offset, int32_t value) {
     emit->data[offset + 3] = (uint8_t)(value >> 24);
 }
 
+static void emit_load_regs(JitEmit *emit) {
+    emit8(emit, 0x4C);
+    emit8(emit, 0x8B);
+    emit8(emit, 0xB7);
+    emit32(emit, offsetof(Cpu, regs));
+}
+
+static void emit_load_pc(JitEmit *emit) {
+    emit8(emit, 0x8B);
+    emit8(emit, 0x87);
+    emit32(emit, offsetof(Cpu, pc));
+}
+
+static void emit_store_pc(JitEmit *emit) {
+    emit8(emit, 0x89);
+    emit8(emit, 0x87);
+    emit32(emit, offsetof(Cpu, pc));
+}
+
 static JitPage *jit_new_page(Jit *jit) {
     if (jit->page_count == jit->page_cap)
         return NULL;
@@ -48,20 +67,23 @@ static JitPage *jit_new_page(Jit *jit) {
 }
 
 static void emit_load_eax(JitEmit *emit, uint8_t reg) {
+    emit8(emit, 0x41);
     emit8(emit, 0x8B);
-    emit8(emit, 0x87);
+    emit8(emit, 0x86);
     emit32(emit, (uint32_t)reg * 4);
 }
 
 static void emit_load_ecx(JitEmit *emit, uint8_t reg) {
+    emit8(emit, 0x41);
     emit8(emit, 0x8B);
-    emit8(emit, 0x8F);
+    emit8(emit, 0x8E);
     emit32(emit, (uint32_t)reg * 4);
 }
 
 static void emit_store_eax(JitEmit *emit, uint8_t reg) {
+    emit8(emit, 0x41);
     emit8(emit, 0x89);
-    emit8(emit, 0x87);
+    emit8(emit, 0x86);
     emit32(emit, (uint32_t)reg * 4);
 }
 
@@ -232,6 +254,18 @@ static bool emit_branch(JitEmit *emit, uint32_t pc, const Instr *instr) {
     return true;
 }
 
+static bool emit_jump(JitEmit *emit, uint32_t pc, const Instr *instr) {
+    uint32_t target = instr->opcode == OP_JMPA
+        ? instr->imm
+        : pc + (uint32_t)sign_extend(instr->imm, 26);
+
+    emit_mov_eax_imm(emit, target);
+    emit_store_pc(emit);
+    emit_ret(emit);
+
+    return true;
+}
+
 static bool emit_instruction(JitEmit *emit, uint32_t pc, const Instr *instr, bool *terminate) {
     switch (instr->opcode) {
     case OP_NOP:
@@ -249,29 +283,25 @@ static bool emit_instruction(JitEmit *emit, uint32_t pc, const Instr *instr, boo
         return emit_alu(emit, instr);
 
     case OP_JMP:
-    case OP_JMPA: {
-        uint32_t target = instr->opcode == OP_JMPA
-            ? instr->imm
-            : pc + (uint32_t)sign_extend(instr->imm, 26);
-
-        emit_mov_eax_imm(emit, target);
-        emit_ret(emit);
-
+    case OP_JMPA:
         *terminate = true;
-
-        return true;
-    }
+        return emit_jump(emit, pc, instr);
 
     case OP_JXX:
         *terminate = true;
         return emit_branch(emit, pc, instr);
+
+    case OP_RPC:
+        emit_load_pc(emit);
+        emit_store_eax(emit, instr->rd);
+        return true;
 
     default:
         return false;
     }
 }
 
-static JitFn jit_compile(Jit *jit, uint32_t pc) {
+JitFn jit_compile(Jit *jit, uint32_t pc) {
     JitPage *page = jit_new_page(jit);
 
     if (page == NULL)
@@ -281,6 +311,8 @@ static JitFn jit_compile(Jit *jit, uint32_t pc) {
         .data = page->code,
         .cap = page->size,
     };
+
+    emit_load_regs(&emit);
 
     uint32_t current_pc = pc;
 
@@ -298,6 +330,7 @@ static JitFn jit_compile(Jit *jit, uint32_t pc) {
     }
 
     emit_mov_eax_imm(&emit, current_pc);
+    emit_store_pc(&emit);
     emit_ret(&emit);
 
 finalise:

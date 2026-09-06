@@ -5,9 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "cpu.h"
 #include "isa.h"
 
-typedef uint32_t (*JitFn)(uint32_t *regs);
+typedef void (*JitFn)(Cpu *cpu);
 typedef uint32_t (*JitFetch)(void *ctx, uint32_t pc);
 
 typedef struct JitPage {

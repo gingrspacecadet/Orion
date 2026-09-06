@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "cpu.h"
 #include "isa.h"
 #include "jit.h"
 
@@ -48,11 +49,19 @@ static void write32(uint8_t *memory, uint32_t address, uint32_t value) {
 
 int main(void) {
     uint8_t memory[MEMORY_SIZE] = {0};
-    uint32_t regs[16] = {0};
 
-    regs[1] = 100;
-    regs[2] = 23;
-    regs[3] = 123;
+    Cpu cpu = {
+        .pc = PROGRAM_PC,
+        .flags = 0x00000002,
+        .memory = memory,
+        .memory_size = sizeof(memory),
+    };
+
+    cpu.regs = cpu.ksr;
+
+    cpu.regs[1] = 100;
+    cpu.regs[2] = 23;
+    cpu.regs[3] = 123;
 
     write32(memory, 0x1000, encode_reg(OP_ADD, 0, 1, 2));
     write32(memory, 0x1004, encode_branch(COND_JEQ, 0, 3, 0x1C, false));
@@ -66,26 +75,19 @@ int main(void) {
     if (!jit_init(&jit, 16, 16, fetch, memory))
         return 1;
 
-    JitBlock *block = jit_get_block(&jit, 0x1000);
-
-    if (block == NULL)
-        return 1;
-
-    uint32_t pc = PROGRAM_PC;
-
     for (size_t i = 0; i < 2; i++) {
-        JitBlock *block = jit_get_block(&jit, pc);
+        JitBlock *block = jit_get_block(&jit, cpu.pc);
 
         if (block == NULL)
             return 1;
 
-        pc = block->fn(regs);
+        block->fn(&cpu);
     }
 
-    printf("r0 = %u\n", regs[0]);
-    printf("r4 = %u\n", regs[4]);
-    printf("r5 = %u\n", regs[5]);
-    printf("pc = 0x%08X\n", pc);
+    printf("r0 = %u\n", cpu.regs[0]);
+    printf("r4 = %u\n", cpu.regs[4]);
+    printf("r5 = %u\n", cpu.regs[5]);
+    printf("pc = 0x%08X\n", cpu.pc);
     printf("blocks = %zu\n", jit.block_count);
 
     jit_destroy(&jit);
