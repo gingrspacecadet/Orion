@@ -19,9 +19,9 @@ $$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
 
 endef
 
-CC := gcc -g
+CC := gcc
 CFLAGS := -Wall -Wextra -std=gnu23 -MMD -MP -Wno-sign-compare -Wno-unused -Wno-override-init -Iinclude $(shell pkg-config --cflags sdl2)
-LDFLAGS := $(shell pkg-config --libs sdl2) -g
+LDFLAGS := $(shell pkg-config --libs sdl2)
 
 # optimisations
 ifeq ($(DEBUG),1)
@@ -37,7 +37,7 @@ else
     endif
 
     CFLAGS += $(OPT_FLAGS)
-    LDFLAGS += $(OPT_FLAGS)
+    LDFLAGS += $(OPT_FLAGS) -s
 endif
 
 BUILD := build
