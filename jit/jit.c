@@ -168,23 +168,18 @@ static bool emit_alu(JitEmit *emit, const Instr *instr) {
         case OP_ADD:
             emit_add_eax_imm(emit, sign_extend(instr->imm, 16));
             break;
-
         case OP_SUB:
             emit_sub_eax_imm(emit, sign_extend(instr->imm, 16));
             break;
-
         case OP_AND:
             emit_and_eax_imm(emit, instr->imm);
             break;
-
         case OP_OR:
             emit_or_eax_imm(emit, instr->imm);
             break;
-
         case OP_XOR:
             emit_xor_eax_imm(emit, instr->imm);
             break;
-
         default:
             return false;
         }
@@ -211,8 +206,7 @@ static bool emit_branch(JitEmit *emit, uint32_t pc, const Instr *instr) {
     case COND_JGE:  jcc = 0x8D; break;
     case COND_JLTU: jcc = 0x82; break;
     case COND_JGEU: jcc = 0x83; break;
-    default:
-        return false;
+    default: return false;
     }
 
     emit8(emit, 0x0F);
@@ -277,36 +271,7 @@ static bool emit_instruction(JitEmit *emit, uint32_t pc, const Instr *instr, boo
     }
 }
 
-bool jit_init(Jit *jit, size_t page_cap, JitFetch fetch, void *fetch_ctx) {
-    *jit = (Jit){0};
-
-    jit->page_size = (size_t)sysconf(_SC_PAGESIZE);
-
-    if (jit->page_size == 0)
-        return false;
-
-    jit->pages = calloc(page_cap, sizeof(*jit->pages));
-
-    if (jit->pages == NULL)
-        return false;
-
-    jit->page_cap = page_cap;
-    jit->fetch = fetch;
-    jit->fetch_ctx = fetch_ctx;
-
-    return true;
-}
-
-void jit_destroy(Jit *jit) {
-    for (size_t i = 0; i < jit->page_count; i++)
-        munmap(jit->pages[i].code, jit->pages[i].size);
-
-    free(jit->pages);
-
-    *jit = (Jit){0};
-}
-
-JitFn jit_compile(Jit *jit, uint32_t pc) {
+static JitFn jit_compile(Jit *jit, uint32_t pc) {
     JitPage *page = jit_new_page(jit);
 
     if (page == NULL)
@@ -340,4 +305,78 @@ finalise:
         return NULL;
 
     return (JitFn)(void *)page->code;
+}
+
+static JitBlock *jit_find(Jit *jit, uint32_t pc) {
+    for (size_t i = 0; i < jit->block_count; i++) {
+        if (jit->blocks[i].pc == pc)
+            return &jit->blocks[i];
+    }
+
+    return NULL;
+}
+
+static JitBlock *jit_add_block(Jit *jit, uint32_t pc, JitFn fn) {
+    if (jit->block_count == jit->block_cap)
+        return NULL;
+
+    JitBlock *block = &jit->blocks[jit->block_count++];
+
+    block->pc = pc;
+    block->fn = fn;
+
+    return block;
+}
+
+bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch, void *fetch_ctx) {
+    *jit = (Jit){0};
+
+    jit->page_size = (size_t)sysconf(_SC_PAGESIZE);
+
+    if (jit->page_size == 0)
+        return false;
+
+    jit->pages = calloc(page_cap, sizeof(*jit->pages));
+
+    if (jit->pages == NULL)
+        return false;
+
+    jit->blocks = calloc(block_cap, sizeof(*jit->blocks));
+
+    if (jit->blocks == NULL) {
+        free(jit->pages);
+        *jit = (Jit){0};
+        return false;
+    }
+
+    jit->page_cap = page_cap;
+    jit->block_cap = block_cap;
+    jit->fetch = fetch;
+    jit->fetch_ctx = fetch_ctx;
+
+    return true;
+}
+
+void jit_destroy(Jit *jit) {
+    for (size_t i = 0; i < jit->page_count; i++)
+        munmap(jit->pages[i].code, jit->pages[i].size);
+
+    free(jit->pages);
+    free(jit->blocks);
+
+    *jit = (Jit){0};
+}
+
+JitBlock *jit_get_block(Jit *jit, uint32_t pc) {
+    JitBlock *block = jit_find(jit, pc);
+
+    if (block != NULL)
+        return block;
+
+    JitFn fn = jit_compile(jit, pc);
+
+    if (fn == NULL)
+        return NULL;
+
+    return jit_add_block(jit, pc, fn);
 }

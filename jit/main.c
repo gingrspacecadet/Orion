@@ -5,7 +5,7 @@
 #include "jit.h"
 
 #define MEMORY_SIZE 0x2000
-#define PROGRAM_PC 0x1000
+#define PROGRAM_PC  0x1000
 
 static uint32_t fetch(void *ctx, uint32_t pc) {
     uint8_t *memory = ctx;
@@ -24,8 +24,9 @@ static uint32_t encode_reg(Opcode opcode, uint8_t rd, uint8_t rn, uint8_t rm) {
          | (1u << IS_REG_SHIFT);
 }
 
-static uint32_t encode_jump(Opcode opcode, uint32_t target) {
-    return ((uint32_t)opcode << 26) | (target & 0x03FFFFFF);
+static uint32_t encode_jump(Opcode opcode, int32_t offset) {
+    return ((uint32_t)opcode << 26)
+         | ((uint32_t)offset & 0x03FFFFFF);
 }
 
 static void write32(uint8_t *memory, uint32_t address, uint32_t value) {
@@ -41,38 +42,35 @@ int main(void) {
 
     regs[1] = 100;
     regs[2] = 23;
-    regs[4] = 10;
-    regs[6] = 0xFF;
 
-    write32(memory, PROGRAM_PC + 0, encode_reg(OP_ADD, 0, 1, 2));
-    write32(memory, PROGRAM_PC + 4, encode_reg(OP_SUB, 3, 0, 4));
-    write32(memory, PROGRAM_PC + 8, encode_reg(OP_XOR, 5, 3, 6));
-    write32(memory, PROGRAM_PC + 12, encode_reg(OP_ADD, 7, 5, 0));
-    write32(memory, PROGRAM_PC + 16, encode_jump(OP_JMP, 0xF0));
+    write32(memory, 0x1000, encode_reg(OP_ADD, 0, 1, 2));
+    write32(memory, 0x1004, encode_jump(OP_JMP, 0xFC));
+
+    write32(memory, 0x1100, encode_reg(OP_ADD, 3, 0, 1));
+    write32(memory, 0x1104, encode_jump(OP_JMP, -0x104));
 
     Jit jit;
 
-    if (!jit_init(&jit, 16, fetch, memory))
+    if (!jit_init(&jit, 16, 16, fetch, memory))
         return 1;
 
-    JitFn fn = jit_compile(&jit, PROGRAM_PC);
+    uint32_t pc = PROGRAM_PC;
 
-    if (fn == NULL)
-        return 1;
+    for (size_t i = 0; i < 10; i++) {
+        JitBlock *block = jit_get_block(&jit, pc);
 
-    uint32_t pc = fn(regs);
+        if (block == NULL)
+            return 1;
+
+        pc = block->fn(regs);
+    }
 
     printf("r0 = %u\n", regs[0]);
     printf("r3 = %u\n", regs[3]);
-    printf("r5 = %u\n", regs[5]);
-    printf("r7 = %u\n", regs[7]);
     printf("pc = 0x%08X\n", pc);
+    printf("blocks = %zu\n", jit.block_count);
 
     jit_destroy(&jit);
 
-    return pc == PROGRAM_PC + 16
-        && regs[0] == 123
-        && regs[3] == 113
-        && regs[5] == (113u ^ 0xFFu)
-        && regs[7] == regs[5] + 123;
+    return jit.block_count == 2 && regs[0] == 123;
 }

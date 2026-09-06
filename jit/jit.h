@@ -15,18 +15,27 @@ typedef struct JitPage {
     size_t size;
 } JitPage;
 
+typedef struct JitBlock {
+    uint32_t pc;
+    JitFn fn;
+} JitBlock;
+
 typedef struct Jit {
     JitPage *pages;
     size_t page_count;
     size_t page_cap;
     size_t page_size;
 
+    JitBlock *blocks;
+    size_t block_count;
+    size_t block_cap;
+
     JitFetch fetch;
     void *fetch_ctx;
 } Jit;
 
-bool jit_init(Jit *jit, size_t page_cap, JitFetch fetch, void *fetch_ctx);
+bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch, void *fetch_ctx);
 void jit_destroy(Jit *jit);
-JitFn jit_compile(Jit *jit, uint32_t pc);
+JitBlock *jit_get_block(Jit *jit, uint32_t pc);
 
 #endif
