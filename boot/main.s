@@ -44,7 +44,7 @@ __entry:
     mov r3, #0xFFFF
     call $draw_string
 
-.word #0xFFFFFFFF ; TODO: SHOULD FAULT!!
+; .word #0xFFFFFFFF ; TODO: SHOULD FAULT!!
 
 spin:
     halt

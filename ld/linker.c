@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include "isa.h"
 #include "linker.h"
 
 static SectionLayout layout[MAX_SECTIONS];
@@ -216,8 +217,11 @@ void resolve_relocations(void) {
                 exit(1);
             }
             
-            uint32_t imm16 = ((uint32_t)offset) & 0xFFFF;
-            instr = (instr & ~0x0003FFFC) | (imm16 << 2);
+            uint32_t imm26 = ((uint32_t)offset) & 0x3FFFFFF;
+            instr = (instr & ~0x3FFFFFF) | imm26;
+            char e[64];
+            isa_disassemble(e, sizeof(e), instr_addr, instr);
+            printf("== %s\n", e);
         }
         else if (def->reloc.patch_type == RELOC_HI16) {
             uint32_t hi16 = (target_addr >> 16) & 0xFFFF;

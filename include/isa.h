@@ -246,7 +246,7 @@ static INLINE Instr isa_decode(uint32_t word) {
             break;
 
         case TYPE_J:
-            instr.imm = (word) & 0x4000000;
+            instr.imm = (word) & 0x3FFFFFF;
             break;
 
         case TYPE_B:
@@ -315,6 +315,10 @@ static INLINE size_t isa_disassemble(char *dst, size_t cap, uint32_t pc, uint32_
         }
         return (size_t)snprintf(dst, cap, "%s r%u, r%u, %" PRIu16,
                                 opcode_name(d.opcode), d.rd, d.rn, d.imm);
+    }
+
+    if (opcode_type(d.opcode) == TYPE_J) {
+        return (size_t)snprintf(dst, cap, "%s 0x%06X (%d)", opcode_name(d.opcode), d.imm, d.imm);
     }
 
     return (size_t)snprintf(dst, cap, "%s", opcode_name(d.opcode));

@@ -80,7 +80,7 @@ static uint32_t encode_m(uint32_t opcode, int rn, int rd, bool is_reg, bool is_s
 static uint32_t encode_j(uint32_t opcode, uint32_t imm) {
     uint32_t w = 0;
     w |= (opcode & 0x3F) << 26;
-    w |= (opcode & 0x4000000);
+    w |= (imm & 0x3FFFFFF);
     return w;    
 }
 
@@ -491,7 +491,6 @@ void codegen(instr_array *instrs) {
 
             case FMT_JUMP: {
                 immrm = encode_operand(instr.ops[0], RELOC_PC_REL, &is_reg);
-
                 write_active_u32(encode_j(opcode, immrm));
                 break;
             }
@@ -502,7 +501,6 @@ void codegen(instr_array *instrs) {
                     fprintf(stderr, "Assembler Error (Line %d): Unknown condition \"%s\"\n", instr.line_num, instr.mnemonic);
                     exit(1);
                 }
-                printf("%s\n", instr.mnemonic);
                 assert(instr.ops[0].mode == AM_REG, "e")
                 assert(instr.ops[1].mode == AM_REG || instr.ops[1].mode == AM_IMM, "f")
                 write_active_u32(encode_b(opcode, cond, instr.ops[0].reg, instr.ops[1].reg, instr.ops[2].val, instr.ops[1].mode == AM_REG, false));

@@ -21,6 +21,13 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
 
+static atomic_bool pause_requested
+#ifdef DEBUG  // start in debug mode
+    = true;
+#else
+    = false;
+#endif
+
 static uint8_t *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (!f) { perror("fopen"); exit(1); }
@@ -70,7 +77,9 @@ static INLINE void push32_nocheck(Cpu *cpu, const uint32_t v) {
 }
 
 static void raise_exception(Cpu *cpu, uint8_t e) {
-    // fprintf(stderr, "exception %d\n", e); exit(1);
+    fprintf(stderr, "exception %d\n", e);
+    pause_requested = true;
+    return;
 
     // build the exception frame
     // to avoid recursive exceptions
@@ -121,6 +130,8 @@ static INLINE void sync_pc_cache(Cpu *cpu) {
 }
 
 #define get_rm_or_imm(d) (d.is_reg ? cpu->r[d.rm] : (d.is_signed ? (int32_t)((int16_t)d.imm) : d.imm))
+
+#define sign_extend26(d) ((((int32_t)(d)) << 8) >> 8)
 
 static INLINE void step(Cpu *cpu) {
     if (unlikely((cpu->pc & 0x3) != 0)) {
@@ -248,8 +259,7 @@ static INLINE void step(Cpu *cpu) {
 
         case OP_CALL: {
             if (!push32(cpu, cpu->pc + 4)) return;
-            bool is_absolute = (word >> ABS_SHIFT) & ABS_MASK;
-            cpu->pc = op_b + (is_absolute ? 0 : cpu->pc);
+            cpu->pc = cpu->pc + sign_extend26(word & 0x3FFFFFF);
             update_pc = false;
             break;
         }
@@ -327,13 +337,6 @@ static void icu_check_and_fire(Cpu *cpu, IcuDevice *icu) {
     uint8_t vec = icu->vec[irq] + 0x20;
     cpu->pc = bus_read32(cpu->bus, IHVT_BASE + (vec * 4));
 }
-
-static atomic_bool pause_requested
-#ifdef DEBUG  // start in debug mode
-    = true;
-#else
-    = false;
-#endif
 
 static atomic_bool quit_requested  = false;
 
@@ -459,6 +462,7 @@ static void show_current_instruction(const Cpu *cpu) {
 
 static void debugger_shell(Cpu *cpu, Debugger *dbg) {
     char line[256];
+    char prev[256];
 
     disable_rawmode();
     puts("\n[paused]");
@@ -470,6 +474,10 @@ static void debugger_shell(Cpu *cpu, Debugger *dbg) {
             break;
         }
 
+        //! TODO: remember last command for more than one line
+        if (*line != '\0')
+            memcpy(prev, line, sizeof(line));
+
         fputs("(orion) ", stdout);
         fflush(stdout);
 
@@ -480,7 +488,8 @@ static void debugger_shell(Cpu *cpu, Debugger *dbg) {
 
         char *cmd = strtok(line, " \t\r\n");
         if (!cmd) {
-            continue;
+            cmd = strtok(prev, " \t\r\n");
+            if (!cmd) continue;
         }
 
         if (!strcmp(cmd, "u") || !strcmp(cmd, "dis")) {
