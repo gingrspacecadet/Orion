@@ -14,7 +14,7 @@ typedef enum JitExit {
 } JitExit;
 
 typedef JitExit (*JitFn)(Cpu *cpu);
-typedef uint32_t (*JitFetch)(void *ctx, uint32_t pc);
+typedef CpuMemResult (*JitFetch)(Cpu *cpu, uint32_t pc, uint32_t *value);
 
 typedef struct JitPage {
     uint8_t *code;
@@ -37,11 +37,10 @@ typedef struct Jit {
     size_t block_cap;
 
     JitFetch fetch;
-    void *fetch_ctx;
 } Jit;
 
-bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch, void *fetch_ctx);
+bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch);
 void jit_destroy(Jit *jit);
-JitBlock *jit_get_block(Jit *jit, uint32_t pc);
+JitBlock *jit_get_block(Jit *jit, Cpu *cpu, uint32_t pc);
 
 #endif

@@ -587,7 +587,7 @@ static bool emit_instruction(JitEmit *emit, uint32_t pc, const Instr *instr, boo
     }
 }
 
-static JitFn jit_compile(Jit *jit, uint32_t pc) {
+static JitFn jit_compile(Jit *jit, Cpu *cpu, uint32_t pc) {
     JitPage *page = jit_new_page(jit);
 
     if (page == NULL)
@@ -604,7 +604,12 @@ static JitFn jit_compile(Jit *jit, uint32_t pc) {
     uint32_t current_pc = pc;
 
     for (size_t i = 0; i < JIT_MAX_INSNS; i++) {
-        Instr instr = isa_decode(jit->fetch(jit->fetch_ctx, current_pc));
+        uint32_t word;
+
+        if (jit->fetch(cpu, current_pc, &word) != CPU_MEM_OK)
+            return NULL;
+
+        Instr instr = isa_decode(word);
         bool terminate = false;
 
         if (!emit_instruction(&emit, current_pc, &instr, &terminate))
@@ -648,7 +653,7 @@ static JitBlock *jit_add_block(Jit *jit, uint32_t pc, JitFn fn) {
     return block;
 }
 
-bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch, void *fetch_ctx) {
+bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch) {
     *jit = (Jit){0};
 
     jit->page_size = (size_t)sysconf(_SC_PAGESIZE);
@@ -672,7 +677,6 @@ bool jit_init(Jit *jit, size_t page_cap, size_t block_cap, JitFetch fetch, void 
     jit->page_cap = page_cap;
     jit->block_cap = block_cap;
     jit->fetch = fetch;
-    jit->fetch_ctx = fetch_ctx;
 
     return true;
 }
@@ -687,13 +691,13 @@ void jit_destroy(Jit *jit) {
     *jit = (Jit){0};
 }
 
-JitBlock *jit_get_block(Jit *jit, uint32_t pc) {
+JitBlock *jit_get_block(Jit *jit, Cpu *cpu, uint32_t pc) {
     JitBlock *block = jit_find(jit, pc);
 
     if (block != NULL)
         return block;
 
-    JitFn fn = jit_compile(jit, pc);
+    JitFn fn = jit_compile(jit, cpu, pc);
 
     if (fn == NULL)
         return NULL;

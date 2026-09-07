@@ -128,3 +128,7 @@ CpuMemResult cpu_store8(Cpu *cpu, uint32_t address, uint32_t value) {
 CpuMemResult cpu_store32(Cpu *cpu, uint32_t address, uint32_t value) {
     return memory_write32(cpu, address, value);
 }
+
+CpuMemResult cpu_fetch32(Cpu *cpu, uint32_t address, uint32_t *value) {
+    return memory_read32(cpu, address, value);
+}
