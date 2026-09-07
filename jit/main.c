@@ -4,14 +4,17 @@
 #include "cpu.h"
 #include "isa.h"
 #include "jit.h"
+#include "memory.h"
 
-#define MEMORY_SIZE 0x2000
-#define PROGRAM_PC  0x1000
-#define STACK_TOP   0x1800
-#define DATA_ADDR   0x1200
-#define STORE_ADDR  0x1204
-#define BYTE_ADDR   0x1201
-#define BYTE_DST    0x1203
+#define PROGRAM_SIZE  0x2000
+#define PROGRAM_PC    0x1000
+#define RAM_SIZE      0x2000
+#define RAM_BASE      0x00020000
+#define STACK_TOP     0x00021000
+#define DATA_ADDR     0x00020100
+#define STORE_ADDR    0x00020104
+#define BYTE_ADDR     0x00020101
+#define BYTE_DST      0x00020103
 
 static uint32_t fetch(void *ctx, uint32_t pc) {
     uint8_t *memory = ctx;
@@ -45,30 +48,34 @@ static uint32_t read32(const uint8_t *memory, uint32_t address) {
 }
 
 int main(void) {
-    uint8_t memory[MEMORY_SIZE] = {0};
+    uint8_t program[PROGRAM_SIZE] = {0};
+    uint8_t ram[RAM_SIZE] = {0};
+
+    Memory memory;
+
+    memory_init(&memory, ram, sizeof(ram));
 
     Cpu cpu = {
         .pc = PROGRAM_PC,
         .flags = 0x00000002,
-        .memory = memory,
-        .memory_size = sizeof(memory),
+        .memory = &memory,
     };
 
     cpu.regs = cpu.ksr;
+
     cpu.regs[SP] = STACK_TOP;
     cpu.regs[1] = BYTE_ADDR;
     cpu.regs[2] = BYTE_DST;
     cpu.regs[3] = 0;
 
-    write32(memory, DATA_ADDR, 1234);
-    memory[BYTE_ADDR] = 0xAB;
+    ram[BYTE_ADDR - RAM_BASE] = 0xAB;
 
-    write32(memory, 0x1000, encode_reg(OP_LDRB, 0, 1, 3));
-    write32(memory, 0x1004, encode_reg(OP_STRB, 0, 2, 3));
+    write32(program, 0x1000, encode_reg(OP_LDRB, 0, 1, 3));
+    write32(program, 0x1004, encode_reg(OP_STRB, 0, 2, 3));
 
     Jit jit;
 
-    if (!jit_init(&jit, 16, 16, fetch, memory))
+    if (!jit_init(&jit, 16, 16, fetch, program))
         return 1;
 
     for (size_t i = 0; i < 2; i++) {
@@ -89,10 +96,15 @@ int main(void) {
 
     printf("pc = 0x%08X\n", cpu.pc);
     printf("r0 = 0x%08X\n", cpu.regs[0]);
-    printf("stored = 0x%02X\n", memory[BYTE_DST]);
+    printf("stored = 0x%02X\n", ram[BYTE_DST - RAM_BASE]);
     printf("blocks = %zu\n", jit.block_count);
 
     jit_destroy(&jit);
 
-    return 0;
+    return cpu.pc == 0x1008
+        && cpu.regs[0] == 0xAB
+        && ram[BYTE_DST - RAM_BASE] == 0xAB
+        && jit.block_count == 2
+        ? 0
+        : 1;
 }
