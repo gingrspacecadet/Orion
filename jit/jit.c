@@ -316,6 +316,51 @@ static bool emit_str(JitEmit *emit, uint32_t pc, const Instr *instr) {
     return true;
 }
 
+static JitExit jit_ldrb(Cpu *cpu, uint32_t rd, uint32_t address, uint32_t next_pc) {
+    uint32_t value;
+
+    if (cpu_load8(cpu, address, &value) != CPU_MEM_OK)
+        return JIT_EXIT_FAULT;
+
+    cpu->regs[rd] = value;
+    cpu->pc = next_pc;
+
+    return JIT_EXIT_NEXT;
+}
+
+static JitExit jit_strb(Cpu *cpu, uint32_t rd, uint32_t address, uint32_t next_pc) {
+    if (cpu_store8(cpu, address, cpu->regs[rd]) != CPU_MEM_OK)
+        return JIT_EXIT_FAULT;
+
+    cpu->pc = next_pc;
+
+    return JIT_EXIT_NEXT;
+}
+
+static bool emit_ldrb(JitEmit *emit, uint32_t pc, const Instr *instr) {
+    emit_address(emit, instr);
+    emit_mov_esi_imm(emit, instr->rd);
+    emit_mov_ecx_imm(emit, pc + 4);
+    emit_sub_rsp_8(emit);
+    emit_call_abs(emit, jit_ldrb);
+    emit_add_rsp_8(emit);
+    emit_return(emit);
+
+    return true;
+}
+
+static bool emit_strb(JitEmit *emit, uint32_t pc, const Instr *instr) {
+    emit_address(emit, instr);
+    emit_mov_esi_imm(emit, instr->rd);
+    emit_mov_ecx_imm(emit, pc + 4);
+    emit_sub_rsp_8(emit);
+    emit_call_abs(emit, jit_strb);
+    emit_add_rsp_8(emit);
+    emit_return(emit);
+
+    return true;
+}
+
 static bool emit_alu(JitEmit *emit, const Instr *instr) {
     emit_load_eax(emit, instr->rn);
 
@@ -491,6 +536,14 @@ static bool emit_instruction(JitEmit *emit, uint32_t pc, const Instr *instr, boo
     case OP_STR:
         *terminate = true;
         return emit_str(emit, pc, instr);
+
+    case OP_LDRB:
+        *terminate = true;
+        return emit_ldrb(emit, pc, instr);
+
+    case OP_STRB:
+        *terminate = true;
+        return emit_strb(emit, pc, instr);
 
     default:
         return false;
