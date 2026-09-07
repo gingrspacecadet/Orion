@@ -11,6 +11,7 @@
 typedef enum JitExit {
     JIT_EXIT_NEXT,
     JIT_EXIT_FAULT,
+    JIT_EXIT_TLB_MISS,
 } JitExit;
 
 typedef JitExit (*JitFn)(Cpu *cpu);

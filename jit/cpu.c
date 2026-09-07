@@ -1,6 +1,17 @@
 #include "cpu.h"
 #include "memory.h"
 
+#define FLAG_PRV (1u << 1)
+#define FLAG_VM  (1u << 2)
+
+#define TLB_HI_VALID 0x1u
+#define TLB_HI_ASID_MASK 0x7FEu
+
+#define TLB_LO_W  (1u << 3)
+#define TLB_LO_U  (1u << 2)
+#define TLB_LO_C  (1u << 1)
+#define TLB_LO_WI (1u << 0)
+
 static CpuMemResult memory_read8(Cpu *cpu, uint32_t address, uint32_t *value) {
     Memory *memory = cpu->memory;
 
@@ -61,10 +72,10 @@ static CpuMemResult memory_read32(Cpu *cpu, uint32_t address, uint32_t *value) {
     if (memory_read8(cpu, address + 3, &b3) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
-    *value = b0
-           | b1 << 8
-           | b2 << 16
-           | b3 << 24;
+    *value = b0 |
+             b1 << 8 |
+             b2 << 16 |
+             b3 << 24;
 
     return CPU_MEM_OK;
 }
@@ -79,7 +90,7 @@ static CpuMemResult memory_write8(Cpu *cpu, uint32_t address, uint32_t value) {
         return CPU_MEM_FAULT;
 
     if (address >= ORION_IHVT_BASE && address < ORION_IHVT_END)
-        return CPU_MEM_OK;
+        return CPU_MEM_FAULT;
 
     if (address >= ORION_RAM_BASE) {
         uint32_t offset = address - ORION_RAM_BASE;
@@ -98,37 +109,114 @@ static CpuMemResult memory_write32(Cpu *cpu, uint32_t address, uint32_t value) {
     if (address & 3)
         return CPU_MEM_MISALIGNED;
 
-    if (memory_write8(cpu, address + 0, value >> 0) != CPU_MEM_OK)
+    if (memory_write8(cpu, address + 0, value & 0xFF) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
-    if (memory_write8(cpu, address + 1, value >> 8) != CPU_MEM_OK)
+    if (memory_write8(cpu, address + 1, (value >> 8) & 0xFF) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
-    if (memory_write8(cpu, address + 2, value >> 16) != CPU_MEM_OK)
+    if (memory_write8(cpu, address + 2, (value >> 16) & 0xFF) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
-    if (memory_write8(cpu, address + 3, value >> 24) != CPU_MEM_OK)
+    if (memory_write8(cpu, address + 3, (value >> 24) & 0xFF) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
     return CPU_MEM_OK;
 }
 
+CpuMemResult cpu_translate(Cpu *cpu, uint32_t vaddr, bool write, bool execute, uint32_t *paddr) {
+    if ((cpu->flags & FLAG_VM) == 0) {
+        *paddr = vaddr;
+        return CPU_MEM_OK;
+    }
+
+    uint32_t vpn = vaddr >> PAGE_SHIFT;
+    uint32_t offset = vaddr & PAGE_MASK;
+
+    for (size_t i = 0; i < TLB_ENTRIES; i++) {
+        TlbEntry *entry = &cpu->tlb[i];
+
+        if ((entry->hi & TLB_HI_VALID) == 0)
+            continue;
+
+        uint32_t entry_vpn = entry->hi >> PAGE_SHIFT;
+        uint16_t entry_asid = (entry->hi & TLB_HI_ASID_MASK) >> 1;
+
+        if (entry_vpn != vpn)
+            continue;
+
+        if (entry_asid != cpu->asid)
+            continue;
+
+        if (!write && !execute && (cpu->flags & FLAG_PRV) == 0 && (entry->lo & TLB_LO_U) == 0)
+            return CPU_MEM_FAULT;
+
+        if (write && (entry->lo & TLB_LO_W) == 0)
+            return CPU_MEM_FAULT;
+
+        uint32_t pfn = entry->lo >> PAGE_SHIFT;
+        *paddr = (pfn << PAGE_SHIFT) | offset;
+        return CPU_MEM_OK;
+    }
+
+    return CPU_MEM_TLB_MISS;
+}
+
 CpuMemResult cpu_load8(Cpu *cpu, uint32_t address, uint32_t *value) {
-    return memory_read8(cpu, address, value);
+    uint32_t physical;
+
+    CpuMemResult result = cpu_translate(cpu, address, false, false, &physical);
+    if (result != CPU_MEM_OK)
+        return result;
+
+    return memory_read8(cpu, physical, value);
 }
 
 CpuMemResult cpu_load32(Cpu *cpu, uint32_t address, uint32_t *value) {
-    return memory_read32(cpu, address, value);
+    if (address & 3)
+        return CPU_MEM_MISALIGNED;
+
+    uint32_t physical;
+
+    CpuMemResult result = cpu_translate(cpu, address, false, false, &physical);
+    if (result != CPU_MEM_OK)
+        return result;
+
+    return memory_read32(cpu, physical, value);
 }
 
 CpuMemResult cpu_store8(Cpu *cpu, uint32_t address, uint32_t value) {
-    return memory_write8(cpu, address, value);
+    uint32_t physical;
+
+    CpuMemResult result = cpu_translate(cpu, address, true, false, &physical);
+    if (result != CPU_MEM_OK)
+        return result;
+
+    return memory_write8(cpu, physical, value);
 }
 
 CpuMemResult cpu_store32(Cpu *cpu, uint32_t address, uint32_t value) {
-    return memory_write32(cpu, address, value);
+    if (address & 3)
+        return CPU_MEM_MISALIGNED;
+
+    uint32_t physical;
+
+    CpuMemResult result = cpu_translate(cpu, address, true, false, &physical);
+    if (result != CPU_MEM_OK)
+        return result;
+
+    return memory_write32(cpu, physical, value);
 }
 
 CpuMemResult cpu_fetch32(Cpu *cpu, uint32_t address, uint32_t *value) {
-    return memory_read32(cpu, address, value);
+    if (address & 3)
+        return CPU_MEM_MISALIGNED;
+
+    uint32_t physical;
+
+    CpuMemResult result = cpu_translate(cpu, address, false, true, &physical);
+    if (result != CPU_MEM_OK)
+        return result;
+
+    return memory_read32(cpu, physical, value);
 }

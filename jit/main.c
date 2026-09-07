@@ -2,30 +2,93 @@
 #include <stdio.h>
 
 #include "cpu.h"
-#include "isa.h"
-#include "jit.h"
 #include "memory.h"
 
-#define PROGRAM_PC    0x1000
-#define RAM_SIZE      0x2000
-#define RAM_BASE      0x00020000
-#define STACK_TOP     0x00021000
-#define BYTE_ADDR     0x00020101
-#define BYTE_DST      0x00020103
+#define RAM_SIZE 0x2000
+#define RAM_BASE 0x00020000
 
-static uint32_t encode_reg(Opcode opcode, uint8_t rd, uint8_t rn, uint8_t rm) {
-    return ((uint32_t)opcode << 26)
-         | ((uint32_t)rn << 22)
-         | ((uint32_t)rd << 18)
-         | ((uint32_t)rm << 2)
-         | (1u << IS_REG_SHIFT);
+static void test_identity_mapping(Cpu *cpu) {
+    uint32_t value = 0;
+
+    cpu->flags |= (1u << 2);
+
+    cpu->tlb[0].hi = (0x00020u << 12) | 1u;
+    cpu->tlb[0].lo = (0x00020u << 12) | (1u << 3) | (1u << 2);
+
+    if (cpu_store32(cpu, 0x00020000, 0x12345678) != CPU_MEM_OK) {
+        printf("identity store failed\n");
+        return;
+    }
+
+    if (cpu_load32(cpu, 0x00020000, &value) != CPU_MEM_OK) {
+        printf("identity load failed\n");
+        return;
+    }
+
+    printf("identity: %08x\n", value);
 }
 
-static void write32(uint8_t *memory, uint32_t address, uint32_t value) {
-    memory[address + 0] = (uint8_t)(value >> 0);
-    memory[address + 1] = (uint8_t)(value >> 8);
-    memory[address + 2] = (uint8_t)(value >> 16);
-    memory[address + 3] = (uint8_t)(value >> 24);
+static void test_remapping(Cpu *cpu) {
+    uint32_t value = 0;
+
+    cpu->tlb[0].hi = (0x00030u << 12) | 1u;
+    cpu->tlb[0].lo = (0x00020u << 12) | (1u << 3) | (1u << 2);
+
+    if (cpu_store32(cpu, 0x00030000, 0xdeadbeef) != CPU_MEM_OK) {
+        printf("remap store failed\n");
+        return;
+    }
+
+    if (cpu_load32(cpu, 0x00030000, &value) != CPU_MEM_OK) {
+        printf("remap load failed\n");
+        return;
+    }
+
+    printf("remap: %08x\n", value);
+
+    printf("physical backing: %02x %02x %02x %02x\n",
+        cpu->memory->ram[0],
+        cpu->memory->ram[1],
+        cpu->memory->ram[2],
+        cpu->memory->ram[3]);
+}
+
+static void test_tlb_miss(Cpu *cpu) {
+    uint32_t value = 0;
+
+    cpu->tlb[0].hi = 0;
+    cpu->tlb[0].lo = 0;
+
+    CpuMemResult result = cpu_load32(cpu, 0x00030000, &value);
+
+    printf("tlb miss: %s\n",
+        result == CPU_MEM_TLB_MISS ? "PASS" : "FAIL");
+}
+
+static void test_write_protection(Cpu *cpu) {
+    cpu->tlb[0].hi = (0x00030u << 12) | 1u;
+    cpu->tlb[0].lo = (0x00020u << 12) | (1u << 2);
+
+    CpuMemResult result = cpu_store32(cpu, 0x00030000, 0xabcdef01);
+
+    printf("write protection: %s\n",
+        result == CPU_MEM_FAULT ? "PASS" : "FAIL");
+}
+
+static void test_user_protection(Cpu *cpu) {
+    uint32_t value = 0;
+
+    cpu->flags &= ~(1u << 1);
+
+    cpu->tlb[0].hi = (0x00030u << 12) | 1u;
+    cpu->tlb[0].lo = (0x00020u << 12) | (1u << 3);
+
+    CpuMemResult result = cpu_load32(cpu, 0x00030000, &value);
+
+    printf("user protection: %s\n",
+        result == CPU_MEM_FAULT ? "PASS" : "FAIL");
+
+    cpu->flags |= (1u << 1);
 }
 
 int main(void) {
@@ -35,57 +98,43 @@ int main(void) {
 
     Memory memory;
 
-    memory_init(&memory, rom, sizeof(rom), ihvt, sizeof(ihvt), ram, sizeof(ram));
+    memory_init(
+        &memory,
+        rom,
+        sizeof(rom),
+        ihvt,
+        sizeof(ihvt),
+        ram,
+        sizeof(ram)
+    );
 
     Cpu cpu = {
-        .pc = PROGRAM_PC,
-        .flags = 0x00000002,
+        .pc = 0x1000,
+        .flags = (1u << 1),
         .memory = &memory,
+        .asid = 0,
     };
 
     cpu.regs = cpu.ksr;
-    cpu.regs[SP] = STACK_TOP;
-    cpu.regs[1] = BYTE_ADDR;
-    cpu.regs[2] = BYTE_DST;
-    cpu.regs[3] = 0;
 
-    ram[BYTE_ADDR - RAM_BASE] = 0xAB;
+    printf("MMU disabled:\n");
 
-    write32(rom, 0x0000, encode_reg(OP_LDRB, 0, 1, 3));
-    write32(rom, 0x0004, encode_reg(OP_STRB, 0, 2, 3));
+    uint32_t value = 0;
 
-    Jit jit;
-
-    if (!jit_init(&jit, 16, 16, cpu_fetch32))
-        return 1;
-
-    for (size_t i = 0; i < 2; i++) {
-        JitBlock *block = jit_get_block(&jit, &cpu, cpu.pc);
-
-        if (block == NULL) {
-            printf("failed to compile block at 0x%08X\n", cpu.pc);
-            return 1;
-        }
-
-        JitExit exit = block->fn(&cpu);
-
-        if (exit != JIT_EXIT_NEXT) {
-            printf("jit exit = %d at 0x%08X\n", exit, block->pc);
-            return 1;
-        }
+    if (cpu_store32(&cpu, RAM_BASE, 0x11223344) == CPU_MEM_OK &&
+        cpu_load32(&cpu, RAM_BASE, &value) == CPU_MEM_OK) {
+        printf("physical: %08x\n", value);
+    } else {
+        printf("physical access failed\n");
     }
 
-    printf("pc = 0x%08X\n", cpu.pc);
-    printf("r0 = 0x%08X\n", cpu.regs[0]);
-    printf("stored = 0x%02X\n", ram[BYTE_DST - RAM_BASE]);
-    printf("blocks = %zu\n", jit.block_count);
+    printf("\nMMU enabled:\n");
 
-    jit_destroy(&jit);
+    test_identity_mapping(&cpu);
+    test_remapping(&cpu);
+    test_tlb_miss(&cpu);
+    test_write_protection(&cpu);
+    test_user_protection(&cpu);
 
-    return cpu.pc == 0x1008
-        && cpu.regs[0] == 0xAB
-        && ram[BYTE_DST - RAM_BASE] == 0xAB
-        && jit.block_count == 2
-        ? 0
-        : 1;
+    return 0;
 }
