@@ -8,10 +8,11 @@
 #include "cpu.h"
 #include "isa.h"
 
-typedef enum JitExit {
+typedef enum {
     JIT_EXIT_NEXT,
     JIT_EXIT_FAULT,
-    JIT_EXIT_TLB_MISS,
+    JIT_EXIT_ITLB_MISS,
+    JIT_EXIT_DTLB_MISS,
 } JitExit;
 
 typedef JitExit (*JitFn)(Cpu *cpu);

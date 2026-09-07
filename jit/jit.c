@@ -240,7 +240,7 @@ static JitExit jit_call(Cpu *cpu, uint32_t target, uint32_t return_pc) {
     CpuMemResult result = cpu_store32(cpu, sp, return_pc);
 
     if (result == CPU_MEM_TLB_MISS)
-        return JIT_EXIT_TLB_MISS;
+        return JIT_EXIT_DTLB_MISS;
 
     if (result != CPU_MEM_OK)
         return JIT_EXIT_FAULT;
@@ -286,7 +286,7 @@ static JitExit jit_ldr(Cpu *cpu, uint32_t rd, uint32_t address, uint32_t next_pc
     CpuMemResult result = cpu_load32(cpu, address, &value);
 
     if (result == CPU_MEM_TLB_MISS)
-        return JIT_EXIT_TLB_MISS;
+        return JIT_EXIT_DTLB_MISS;
 
     if (result != CPU_MEM_OK)
         return JIT_EXIT_FAULT;
@@ -301,9 +301,10 @@ static bool emit_ldr(JitEmit *emit, uint32_t pc, const Instr *instr) {
     emit_address(emit, instr);
     emit_mov_esi_imm(emit, instr->rd);
     emit_mov_ecx_imm(emit, pc + 4);
+    emit_sub_rsp_8(emit);
     emit_call_abs(emit, jit_ldr);
+    emit_add_rsp_8(emit);
     emit_return(emit);
-
     return true;
 }
 
@@ -311,7 +312,7 @@ static JitExit jit_str(Cpu *cpu, uint32_t rd, uint32_t address, uint32_t next_pc
     CpuMemResult result = cpu_store32(cpu, address, cpu->regs[rd]);
 
     if (result == CPU_MEM_TLB_MISS)
-        return JIT_EXIT_TLB_MISS;
+        return JIT_EXIT_DTLB_MISS;
 
     if (result != CPU_MEM_OK)
         return JIT_EXIT_FAULT;
@@ -325,9 +326,10 @@ static bool emit_str(JitEmit *emit, uint32_t pc, const Instr *instr) {
     emit_address(emit, instr);
     emit_mov_esi_imm(emit, instr->rd);
     emit_mov_ecx_imm(emit, pc + 4);
+    emit_sub_rsp_8(emit);
     emit_call_abs(emit, jit_str);
+    emit_add_rsp_8(emit);
     emit_return(emit);
-
     return true;
 }
 
@@ -336,7 +338,7 @@ static JitExit jit_ldrb(Cpu *cpu, uint32_t rd, uint32_t address, uint32_t next_p
     CpuMemResult result = cpu_load8(cpu, address, &value);
 
     if (result == CPU_MEM_TLB_MISS)
-        return JIT_EXIT_TLB_MISS;
+        return JIT_EXIT_DTLB_MISS;
 
     if (result != CPU_MEM_OK)
         return JIT_EXIT_FAULT;
@@ -351,7 +353,7 @@ static JitExit jit_strb(Cpu *cpu, uint32_t rd, uint32_t address, uint32_t next_p
     CpuMemResult result = cpu_store8(cpu, address, cpu->regs[rd]);
 
     if (result == CPU_MEM_TLB_MISS)
-        return JIT_EXIT_TLB_MISS;
+        return JIT_EXIT_DTLB_MISS;
 
     if (result != CPU_MEM_OK)
         return JIT_EXIT_FAULT;
@@ -497,7 +499,7 @@ static JitExit jit_ret(Cpu *cpu) {
     CpuMemResult result = cpu_load32(cpu, sp, &pc);
 
     if (result == CPU_MEM_TLB_MISS)
-        return JIT_EXIT_TLB_MISS;
+        return JIT_EXIT_DTLB_MISS;
 
     if (result != CPU_MEM_OK)
         return JIT_EXIT_FAULT;
@@ -597,7 +599,11 @@ static JitFn jit_compile(Jit *jit, Cpu *cpu, uint32_t pc) {
     for (size_t i = 0; i < JIT_MAX_INSNS; i++) {
         uint32_t word;
 
-        if (jit->fetch(cpu, current_pc, &word) != CPU_MEM_OK)
+        CpuMemResult result = jit->fetch(cpu, pc, &word);
+        if (result == CPU_MEM_TLB_MISS)
+            return NULL;
+
+        if (result != CPU_MEM_OK)
             return NULL;
 
         Instr instr = isa_decode(word);

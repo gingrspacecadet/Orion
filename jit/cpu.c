@@ -1,5 +1,6 @@
 #include "cpu.h"
 #include "memory.h"
+#include "isa.h"
 
 #define FLAG_PRV (1u << 1)
 #define FLAG_VM  (1u << 2)
@@ -11,6 +12,11 @@
 #define TLB_LO_U  (1u << 2)
 #define TLB_LO_C  (1u << 1)
 #define TLB_LO_WI (1u << 0)
+
+#define FLAG_IE  (1u << 0)
+#define FLAG_PRV (1u << 1)
+#define FLAG_VM  (1u << 2)
+#define FLAG_TM  (1u << 3)
 
 static CpuMemResult memory_read8(Cpu *cpu, uint32_t address, uint32_t *value) {
     Memory *memory = cpu->memory;
@@ -219,4 +225,42 @@ CpuMemResult cpu_fetch32(Cpu *cpu, uint32_t address, uint32_t *value) {
         return result;
 
     return memory_read32(cpu, physical, value);
+}
+
+CpuMemResult cpu_raise_exception(Cpu *cpu, uint8_t vector) {
+    uint32_t *old_regs = cpu->regs;
+    uint32_t old_sp = old_regs[15];
+
+    cpu->flags |= FLAG_PRV;
+    cpu->flags &= ~FLAG_IE;
+
+    cpu->regs = cpu->ksr;
+
+    uint32_t sp = cpu->regs[15];
+
+    if (sp < 8)
+        return CPU_MEM_FAULT;
+
+    sp -= 4;
+
+    if (memory_write32(cpu, sp, cpu->pc) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    sp -= 4;
+
+    if (memory_write32(cpu, sp, cpu->flags) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    cpu->regs[15] = sp;
+
+    uint32_t handler;
+
+    if (memory_read32(cpu, IHVT_BASE + (uint32_t)vector * 4, &handler) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    cpu->pc = handler;
+
+    (void)old_sp;
+
+    return CPU_MEM_OK;
 }
