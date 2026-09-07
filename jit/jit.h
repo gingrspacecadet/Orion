@@ -8,7 +8,12 @@
 #include "cpu.h"
 #include "isa.h"
 
-typedef void (*JitFn)(Cpu *cpu);
+typedef enum JitExit {
+    JIT_EXIT_NEXT,
+    JIT_EXIT_FAULT,
+} JitExit;
+
+typedef JitExit (*JitFn)(Cpu *cpu);
 typedef uint32_t (*JitFetch)(void *ctx, uint32_t pc);
 
 typedef struct JitPage {

@@ -92,6 +92,15 @@ static void emit_mov_eax_imm(JitEmit *emit, uint32_t value) {
     emit32(emit, value);
 }
 
+static void emit_ret(JitEmit *emit) {
+    emit8(emit, 0xC3);
+}
+
+static void emit_exit(JitEmit *emit, JitExit exit) {
+    emit_mov_eax_imm(emit, exit);
+    emit_ret(emit);
+}
+
 static void emit_add_eax_ecx(JitEmit *emit) {
     emit8(emit, 0x01);
     emit8(emit, 0xC8);
@@ -163,8 +172,58 @@ static void emit_shr_eax_cl(JitEmit *emit) {
     emit8(emit, 0xE8);
 }
 
-static void emit_ret(JitEmit *emit) {
-    emit8(emit, 0xC3);
+static void emit_mov_esi_imm(JitEmit *emit, uint32_t value) {
+    emit8(emit, 0xBE);
+    emit32(emit, value);
+}
+
+static void emit_mov_edx_imm(JitEmit *emit, uint32_t value) {
+    emit8(emit, 0xBA);
+    emit32(emit, value);
+}
+
+static void emit_mov_eax_exit(JitEmit *emit, JitExit exit) {
+    emit_mov_eax_imm(emit, exit);
+    emit_ret(emit);
+}
+
+static void emit_call_abs(JitEmit *emit, void *fn) {
+    emit8(emit, 0x48);
+    emit8(emit, 0xB8);
+    emit32(emit, (uint32_t)(uintptr_t)fn);
+    emit32(emit, (uint32_t)((uint64_t)(uintptr_t)fn >> 32));
+    emit8(emit, 0xFF);
+    emit8(emit, 0xD0);
+}
+
+static JitExit jit_call(Cpu *cpu, uint32_t target, uint32_t return_pc) {
+    uint32_t sp = cpu->regs[SP];
+
+    if (sp < 4)
+        return JIT_EXIT_FAULT;
+
+    sp -= 4;
+
+    if (cpu_store32(cpu, sp, return_pc) != CPU_MEM_OK)
+        return JIT_EXIT_FAULT;
+
+    cpu->regs[SP] = sp;
+    cpu->pc = target;
+
+    return JIT_EXIT_NEXT;
+}
+
+static bool emit_call(JitEmit *emit, uint32_t pc, const Instr *instr) {
+    uint32_t target = instr->opcode == OP_CALLA
+        ? instr->imm
+        : pc + (uint32_t)sign_extend(instr->imm, 26);
+
+    emit_mov_esi_imm(emit, target);
+    emit_mov_edx_imm(emit, pc + 4);
+    emit_call_abs(emit, jit_call);
+    emit_ret(emit);
+
+    return true;
 }
 
 static bool emit_alu(JitEmit *emit, const Instr *instr) {
@@ -222,13 +281,13 @@ static bool emit_branch(JitEmit *emit, uint32_t pc, const Instr *instr) {
     uint8_t jcc;
 
     switch (instr->cond) {
-    case COND_JEQ:  jcc = 0x84; break;
-    case COND_JNE:  jcc = 0x85; break;
-    case COND_JLT:  jcc = 0x8C; break;
-    case COND_JGE:  jcc = 0x8D; break;
-    case COND_JLTU: jcc = 0x82; break;
-    case COND_JGEU: jcc = 0x83; break;
-    default: return false;
+        case COND_JEQ:  jcc = 0x84; break;
+        case COND_JNE:  jcc = 0x85; break;
+        case COND_JLT:  jcc = 0x8C; break;
+        case COND_JGE:  jcc = 0x8D; break;
+        case COND_JLTU: jcc = 0x82; break;
+        case COND_JGEU: jcc = 0x83; break;
+        default: return false;
     }
 
     emit8(emit, 0x0F);
@@ -238,7 +297,8 @@ static bool emit_branch(JitEmit *emit, uint32_t pc, const Instr *instr) {
     emit32(emit, 0);
 
     emit_mov_eax_imm(emit, pc + 4);
-    emit_ret(emit);
+    emit_store_pc(emit);
+    emit_exit(emit, JIT_EXIT_NEXT);
 
     size_t target_offset = emit->len;
 
@@ -247,7 +307,8 @@ static bool emit_branch(JitEmit *emit, uint32_t pc, const Instr *instr) {
         : pc + (uint32_t)sign_extend(instr->imm, 12);
 
     emit_mov_eax_imm(emit, target);
-    emit_ret(emit);
+    emit_store_pc(emit);
+    emit_exit(emit, JIT_EXIT_NEXT);
 
     patch32(emit, branch_offset, (int32_t)(target_offset - (branch_offset + 4)));
 
@@ -261,6 +322,26 @@ static bool emit_jump(JitEmit *emit, uint32_t pc, const Instr *instr) {
 
     emit_mov_eax_imm(emit, target);
     emit_store_pc(emit);
+    emit_exit(emit, JIT_EXIT_NEXT);
+
+    return true;
+}
+
+static JitExit jit_ret(Cpu *cpu) {
+    uint32_t sp = cpu->regs[SP];
+    uint32_t pc;
+
+    if (cpu_load32(cpu, sp, &pc) != CPU_MEM_OK)
+        return JIT_EXIT_FAULT;
+
+    cpu->regs[SP] = sp + 4;
+    cpu->pc = pc;
+
+    return JIT_EXIT_NEXT;
+}
+
+static bool emit_ret_instruction(JitEmit *emit) {
+    emit_call_abs(emit, jit_ret);
     emit_ret(emit);
 
     return true;
@@ -295,6 +376,15 @@ static bool emit_instruction(JitEmit *emit, uint32_t pc, const Instr *instr, boo
         emit_load_pc(emit);
         emit_store_eax(emit, instr->rd);
         return true;
+
+    case OP_CALLA:
+    case OP_CALL:
+        *terminate = true;
+        return emit_call(emit, pc, instr);
+
+    case OP_RET:
+        *terminate = true;
+        return emit_ret_instruction(emit);
 
     default:
         return false;
@@ -331,7 +421,7 @@ JitFn jit_compile(Jit *jit, uint32_t pc) {
 
     emit_mov_eax_imm(&emit, current_pc);
     emit_store_pc(&emit);
-    emit_ret(&emit);
+    emit_exit(&emit, JIT_EXIT_NEXT);
 
 finalise:
     if (mprotect(page->code, page->size, PROT_READ | PROT_EXEC) != 0)

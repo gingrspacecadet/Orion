@@ -7,6 +7,7 @@
 
 #define MEMORY_SIZE 0x2000
 #define PROGRAM_PC  0x1000
+#define STACK_TOP   0x1800
 
 static uint32_t fetch(void *ctx, uint32_t pc) {
     uint8_t *memory = ctx;
@@ -30,21 +31,18 @@ static uint32_t encode_jump(Opcode opcode, int32_t offset) {
          | ((uint32_t)offset & 0x03FFFFFF);
 }
 
-static uint32_t encode_branch(Condition cond, uint8_t rn, uint8_t rd, int32_t offset, bool absolute) {
-    return ((uint32_t)OP_JXX << 26)
-         | ((uint32_t)cond << 22)
-         | ((uint32_t)rn << 18)
-         | ((uint32_t)rd << 14)
-         | (((uint32_t)offset & 0xFFF) << 2)
-         | (1u << IS_REG_SHIFT)
-         | (absolute ? 1u : 0u);
-}
-
 static void write32(uint8_t *memory, uint32_t address, uint32_t value) {
     memory[address + 0] = (uint8_t)(value >> 0);
     memory[address + 1] = (uint8_t)(value >> 8);
     memory[address + 2] = (uint8_t)(value >> 16);
     memory[address + 3] = (uint8_t)(value >> 24);
+}
+
+static uint32_t read32(const uint8_t *memory, uint32_t address) {
+    return (uint32_t)memory[address + 0]
+         | (uint32_t)memory[address + 1] << 8
+         | (uint32_t)memory[address + 2] << 16
+         | (uint32_t)memory[address + 3] << 24;
 }
 
 int main(void) {
@@ -59,16 +57,15 @@ int main(void) {
 
     cpu.regs = cpu.ksr;
 
+    cpu.regs[SP] = STACK_TOP;
     cpu.regs[1] = 100;
     cpu.regs[2] = 23;
-    cpu.regs[3] = 123;
 
-    write32(memory, 0x1000, encode_reg(OP_ADD, 0, 1, 2));
-    write32(memory, 0x1004, encode_branch(COND_JEQ, 0, 3, 0x1C, false));
-    write32(memory, 0x1008, encode_reg(OP_SUB, 4, 1, 2));
-    write32(memory, 0x100C, encode_jump(OP_JMP, 0x100));
-    write32(memory, 0x1020, encode_reg(OP_MUL, 5, 1, 2));
-    write32(memory, 0x1024, encode_jump(OP_JMP, -0x20));
+    write32(memory, 0x1000, encode_jump(OP_CALL, 0x100));
+    write32(memory, 0x1004, encode_jump(OP_JMP, 0));
+
+    write32(memory, 0x1100, encode_reg(OP_ADD, 0, 1, 2));
+    write32(memory, 0x1104, ((uint32_t)OP_RET << 26));
 
     Jit jit;
 
@@ -81,12 +78,12 @@ int main(void) {
         if (block == NULL)
             return 1;
 
-        block->fn(&cpu);
+        if (block->fn(&cpu) != JIT_EXIT_NEXT)
+            return 1;
     }
 
     printf("r0 = %u\n", cpu.regs[0]);
-    printf("r4 = %u\n", cpu.regs[4]);
-    printf("r5 = %u\n", cpu.regs[5]);
+    printf("sp = 0x%08X\n", cpu.regs[SP]);
     printf("pc = 0x%08X\n", cpu.pc);
     printf("blocks = %zu\n", jit.block_count);
 
