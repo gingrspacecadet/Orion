@@ -49,11 +49,13 @@ static uint32_t read32(const uint8_t *memory, uint32_t address) {
 
 int main(void) {
     uint8_t program[PROGRAM_SIZE] = {0};
+    uint8_t rom[ORION_ROM_END - ORION_ROM_BASE] = {0};
+    uint8_t ihvt[ORION_IHVT_END - ORION_IHVT_BASE] = {0};
     uint8_t ram[RAM_SIZE] = {0};
 
     Memory memory;
 
-    memory_init(&memory, ram, sizeof(ram));
+    memory_init(&memory, rom, sizeof(rom), ihvt, sizeof(ihvt), ram, sizeof(ram));
 
     Cpu cpu = {
         .pc = PROGRAM_PC,
@@ -68,7 +70,7 @@ int main(void) {
     cpu.regs[2] = BYTE_DST;
     cpu.regs[3] = 0;
 
-    ram[BYTE_ADDR - RAM_BASE] = 0xAB;
+    ram[BYTE_ADDR - ORION_RAM_BASE] = 0xAB;
 
     write32(program, 0x1000, encode_reg(OP_LDRB, 0, 1, 3));
     write32(program, 0x1004, encode_reg(OP_STRB, 0, 2, 3));
@@ -96,14 +98,14 @@ int main(void) {
 
     printf("pc = 0x%08X\n", cpu.pc);
     printf("r0 = 0x%08X\n", cpu.regs[0]);
-    printf("stored = 0x%02X\n", ram[BYTE_DST - RAM_BASE]);
+    printf("stored = 0x%02X\n", ram[BYTE_DST - ORION_RAM_BASE]);
     printf("blocks = %zu\n", jit.block_count);
 
     jit_destroy(&jit);
 
     return cpu.pc == 0x1008
         && cpu.regs[0] == 0xAB
-        && ram[BYTE_DST - RAM_BASE] == 0xAB
+        && ram[BYTE_DST - ORION_RAM_BASE] == 0xAB
         && jit.block_count == 2
         ? 0
         : 1;

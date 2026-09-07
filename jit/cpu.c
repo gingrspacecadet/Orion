@@ -1,85 +1,130 @@
 #include "cpu.h"
 #include "memory.h"
 
-#define ORION_ZERO_PAGE_END 0x00001000u
-#define ORION_RAM_BASE      0x00020000u
+static CpuMemResult memory_read8(Cpu *cpu, uint32_t address, uint32_t *value) {
+    Memory *memory = cpu->memory;
 
-CpuMemResult cpu_load8(Cpu *cpu, uint32_t address, uint32_t *value) {
-    if (address < ORION_ZERO_PAGE_END)
+    if (address < ORION_ZERO_END)
         return CPU_MEM_FAULT;
 
-    if (address < ORION_RAM_BASE)
+    if (address >= ORION_ROM_BASE && address < ORION_ROM_END) {
+        uint32_t offset = address - ORION_ROM_BASE;
+
+        if ((uint64_t)offset >= memory->rom_size)
+            return CPU_MEM_FAULT;
+
+        *value = memory->rom[offset];
+        return CPU_MEM_OK;
+    }
+
+    if (address >= ORION_IHVT_BASE && address < ORION_IHVT_END) {
+        uint32_t offset = address - ORION_IHVT_BASE;
+
+        if ((uint64_t)offset >= memory->ihvt_size)
+            return CPU_MEM_FAULT;
+
+        *value = memory->ihvt[offset];
+        return CPU_MEM_OK;
+    }
+
+    if (address >= ORION_RAM_BASE) {
+        uint32_t offset = address - ORION_RAM_BASE;
+
+        if ((uint64_t)offset >= memory->ram_size)
+            return CPU_MEM_FAULT;
+
+        *value = memory->ram[offset];
+        return CPU_MEM_OK;
+    }
+
+    return CPU_MEM_FAULT;
+}
+
+static CpuMemResult memory_read32(Cpu *cpu, uint32_t address, uint32_t *value) {
+    if (address & 3)
+        return CPU_MEM_MISALIGNED;
+
+    uint32_t b0;
+    uint32_t b1;
+    uint32_t b2;
+    uint32_t b3;
+
+    if (memory_read8(cpu, address + 0, &b0) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
-    uint32_t offset = address - ORION_RAM_BASE;
-
-    if ((uint64_t)offset >= cpu->memory->ram_size)
+    if (memory_read8(cpu, address + 1, &b1) != CPU_MEM_OK)
         return CPU_MEM_FAULT;
 
-    *value = cpu->memory->ram[offset];
+    if (memory_read8(cpu, address + 2, &b2) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    if (memory_read8(cpu, address + 3, &b3) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    *value = b0
+           | b1 << 8
+           | b2 << 16
+           | b3 << 24;
 
     return CPU_MEM_OK;
+}
+
+static CpuMemResult memory_write8(Cpu *cpu, uint32_t address, uint32_t value) {
+    Memory *memory = cpu->memory;
+
+    if (address < ORION_ZERO_END)
+        return CPU_MEM_FAULT;
+
+    if (address >= ORION_ROM_BASE && address < ORION_ROM_END)
+        return CPU_MEM_FAULT;
+
+    if (address >= ORION_IHVT_BASE && address < ORION_IHVT_END)
+        return CPU_MEM_OK;
+
+    if (address >= ORION_RAM_BASE) {
+        uint32_t offset = address - ORION_RAM_BASE;
+
+        if ((uint64_t)offset >= memory->ram_size)
+            return CPU_MEM_FAULT;
+
+        memory->ram[offset] = (uint8_t)value;
+        return CPU_MEM_OK;
+    }
+
+    return CPU_MEM_FAULT;
+}
+
+static CpuMemResult memory_write32(Cpu *cpu, uint32_t address, uint32_t value) {
+    if (address & 3)
+        return CPU_MEM_MISALIGNED;
+
+    if (memory_write8(cpu, address + 0, value >> 0) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    if (memory_write8(cpu, address + 1, value >> 8) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    if (memory_write8(cpu, address + 2, value >> 16) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    if (memory_write8(cpu, address + 3, value >> 24) != CPU_MEM_OK)
+        return CPU_MEM_FAULT;
+
+    return CPU_MEM_OK;
+}
+
+CpuMemResult cpu_load8(Cpu *cpu, uint32_t address, uint32_t *value) {
+    return memory_read8(cpu, address, value);
 }
 
 CpuMemResult cpu_load32(Cpu *cpu, uint32_t address, uint32_t *value) {
-    if (address & 3)
-        return CPU_MEM_MISALIGNED;
-
-    if (address < ORION_ZERO_PAGE_END)
-        return CPU_MEM_FAULT;
-
-    if (address < ORION_RAM_BASE)
-        return CPU_MEM_FAULT;
-
-    uint32_t offset = address - ORION_RAM_BASE;
-
-    if ((uint64_t)offset + 4 > cpu->memory->ram_size)
-        return CPU_MEM_FAULT;
-
-    *value = (uint32_t)cpu->memory->ram[offset + 0]
-           | (uint32_t)cpu->memory->ram[offset + 1] << 8
-           | (uint32_t)cpu->memory->ram[offset + 2] << 16
-           | (uint32_t)cpu->memory->ram[offset + 3] << 24;
-
-    return CPU_MEM_OK;
+    return memory_read32(cpu, address, value);
 }
 
 CpuMemResult cpu_store8(Cpu *cpu, uint32_t address, uint32_t value) {
-    if (address < ORION_ZERO_PAGE_END)
-        return CPU_MEM_FAULT;
-
-    if (address < ORION_RAM_BASE)
-        return CPU_MEM_FAULT;
-
-    uint32_t offset = address - ORION_RAM_BASE;
-
-    if ((uint64_t)offset >= cpu->memory->ram_size)
-        return CPU_MEM_FAULT;
-
-    cpu->memory->ram[offset] = (uint8_t)value;
-
-    return CPU_MEM_OK;
+    return memory_write8(cpu, address, value);
 }
 
 CpuMemResult cpu_store32(Cpu *cpu, uint32_t address, uint32_t value) {
-    if (address & 3)
-        return CPU_MEM_MISALIGNED;
-
-    if (address < ORION_ZERO_PAGE_END)
-        return CPU_MEM_FAULT;
-
-    if (address < ORION_RAM_BASE)
-        return CPU_MEM_FAULT;
-
-    uint32_t offset = address - ORION_RAM_BASE;
-
-    if ((uint64_t)offset + 4 > cpu->memory->ram_size)
-        return CPU_MEM_FAULT;
-
-    cpu->memory->ram[offset + 0] = (uint8_t)(value >> 0);
-    cpu->memory->ram[offset + 1] = (uint8_t)(value >> 8);
-    cpu->memory->ram[offset + 2] = (uint8_t)(value >> 16);
-    cpu->memory->ram[offset + 3] = (uint8_t)(value >> 24);
-
-    return CPU_MEM_OK;
+    return memory_write32(cpu, address, value);
 }
