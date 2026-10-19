@@ -1,0 +1,35 @@
+CC := gcc
+CFLAGS := -MMD -MP -Wall -Wextra -Wpedantic -Werror -Wno-unused-variable
+LDFLAGS :=
+
+BUILD := build
+
+TARGETS := emu asm
+
+.PHONY: all, clean
+all: $(TARGETS)
+run: emu
+	@$(BUILD)/emu image.bin
+clean:
+	@rm -rf $(BUILD)
+
+define TARGET_TEMPLATE
+override $(1)_SRC := $$(shell find $(1)/ -type f -name '*.c' 2>/dev/null | LC_ALL=C sort)
+override $(1)_OBJ := $$(addprefix $$(BUILD)/frag/$(1)/, $$(notdir $$($(1)_SRC:.c=.c.o)))
+override $(1)_DEPS := $$(addprefix $$(BUILD)/frag/, $$($(1)_SRC:.c=.c.d))
+
+-include $$($(1)_DEPS)
+
+$(1): $$(BUILD)/$(1)
+
+$$(BUILD)/$(1): $$($(1)_OBJ)
+	@mkdir -p "$$(dir $$@)"
+	$(CC) $$($(1)_OBJ) $(LDFLAGS) -o $$@
+
+$$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
+	@mkdir -p "$$(dir $$@)"
+	$(CC) $(CFLAGS) -c $$< -o $$@
+
+endef
+
+$(foreach t,$(TARGETS),$(eval $(call TARGET_TEMPLATE,$(t))))
