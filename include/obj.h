@@ -7,6 +7,9 @@ typedef uint32_t section_id_t; // 0 == undefined
 typedef uint32_t symbol_id_t;
 typedef uint32_t stroff_t; // offset into string pool
 typedef uint32_t dataoff_t; // offset into data pool
+typedef enum {
+    SYMFLAG_GLOBAL = 1 << 0,
+} symbol_flag_t;
 
 typedef enum {
     RELOC_ABS32 = 1,
@@ -37,7 +40,7 @@ typedef struct {
     stroff_t name;
     uint32_t offset;
     section_id_t section;
-    uint8_t flags; // global
+    symbol_flag_t flags; // global
 } obj_symbol_t;
 
 typedef struct {

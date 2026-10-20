@@ -1,6 +1,6 @@
 CC := gcc
-CFLAGS := -MMD -MP -Wall -Wextra -Wpedantic -Werror -Wno-unused-variable
-LDFLAGS :=
+CFLAGS := -MMD -MP -Wall -Wextra -Wpedantic -Werror -Wno-unused -I include
+LDFLAGS := 
 
 BUILD := build
 

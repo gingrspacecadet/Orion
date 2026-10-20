@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include "codegen.h"
 #include "parser.h"
 #include "lexer.h"
 
@@ -40,7 +41,12 @@ int main(int argc, char **argv) {
 
     source.offset = 0;
 
+    // temporary; this leaks memory
     for (Instr i = parse(&source); i.is_eof != true; i = parse(&source)) {
         printf("Instruction name %s\n", i.name);
     }
+
+    source.offset = 0;
+
+    codegen(NULL, &source);
 }

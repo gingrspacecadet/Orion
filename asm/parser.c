@@ -41,6 +41,7 @@ Operand parse_operand(Source *source) {
         }
 
         case TK_REF:
+        case TK_MNEM:
         case TK_DIRECTIVE: {
             advance(source);
             out.mode = AM_REF;
@@ -122,7 +123,7 @@ Instr parse(Source *source) {
             out.is_directive = (t.type == TK_DIRECTIVE);
             uint8_t cap = 2;
             strncpy(out.name, t.string, 31);
-            while (peek(source).type != TK_EOF && peek(source).type != TK_MNEM && peek(source).type != TK_LABEL && peek(source).type != TK_DIRECTIVE) {
+            while (peek(source).line_num == t.line_num) {
                 if (!out.ops)
                     out.ops = malloc(sizeof(Operand) * cap);
 

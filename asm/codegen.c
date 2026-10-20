@@ -1,8 +1,11 @@
 #include <stdbool.h>
+#include <stdarg.h>
+#include <stdlib.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
 
+#include "codegen.h"
 #include "parser.h"
 #include "obj.h"
 
@@ -21,13 +24,6 @@ typedef struct {
 
     section_id_t active_section;
 } Codegen;
-
-static inline Instr peek(Source *source) {
-    size_t old = source->offset;
-    Instr i = parse(source);
-    source->offset = old;
-    return i;
-}
 
 static inline obj_section_t *active_section(Codegen *builder) {
     if (builder->active_section == 0 ||
@@ -196,28 +192,156 @@ static bool add_relocation(Codegen *builder, uint32_t offset, reloc_type_t type,
     return true;
 }
 
+static void asm_error(int line, const char *fmt, ...) {
+    va_list args;
+    fprintf(stderr, "Assembler Error (line %d): ", line);
+
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+
+    fputc('\n', stderr);
+}
+
+#define REQUIRE(I, COND, ...) \
+    do { \
+        if (!(COND)) { \
+            asm_error((I)->line_num, __VA_ARGS__); \
+            return false; \
+        } \
+    } while (0)
+
+#define REQUIRE_OP_COUNT(I, N) \
+    REQUIRE((I), (I)->op_count == (N), \
+        "%s expects %u operand%s", (I)->name, \
+        (unsigned)(N), (N) == 1 ? "" : "s")
+
+#define REQUIRE_OP_MODE(I, INDEX, MODE, DESC) \
+    REQUIRE((I), (I)->ops[(INDEX)].mode == (MODE), \
+        "%s operand %zu must be %s", (I)->name, \
+        (size_t)(INDEX) + 1, (DESC))
+
+static bool handle_align(Codegen *builder, const Instr *i) {
+    REQUIRE_OP_COUNT(i, 1);
+    REQUIRE_OP_MODE(i, 0, AM_IMM, "an immediate");
+
+    int64_t requested = i->ops[0].val;
+    REQUIRE(i, requested > 0, ".align must be positive");
+
+    obj_section_t *section = active_section(builder);
+    REQUIRE(i, section != NULL, "no active section");
+    REQUIRE(i, section->size <= MAX_SECTION_SIZE, "section size exceeds capacity");
+
+    size_t alignment = (size_t)requested;
+    size_t padding = (alignment - section->size % alignment) % alignment;
+
+    REQUIRE(i, padding <= MAX_SECTION_SIZE - section->size, ".align exceeds section capacity");
+
+    for (size_t n = 0; n < padding; n++)
+        REQUIRE(i, emit_byte(builder, 0), "failed to emit alignment padding");
+
+    return true;
+}
+
+static bool handle_section(Codegen *builder, const Instr *i) {
+    REQUIRE_OP_COUNT(i, 1);
+    REQUIRE_OP_MODE(i, 0, AM_REF, "a section");
+
+    bool ok = switch_section(builder, i->ops[0].label);
+    REQUIRE(i, ok, "failed to switch to section %s", i->ops[0].label);
+
+    return ok;
+}
+
+static bool handle_byte(Codegen *builder, const Instr *i) {
+    REQUIRE(i, i->op_count > 0, "missing argument to .byte");
+    for (uint8_t j = 0; j < i->op_count; j++) {
+        REQUIRE_OP_MODE(i, j, AM_IMM, "an immediate");
+        REQUIRE(i, i->ops[j].val >= -UINT8_MAX && i->ops[j].val <= UINT8_MAX, "argument must be within the byte range");
+    }
+
+    bool ok = true;
+    for (uint8_t j = 0; j < i->op_count; j++) {
+        bool r = emit_byte(builder, (uint8_t)i->ops[j].val);
+        REQUIRE(i, r, "Failed to emit byte");
+        if (!r) ok = false;
+    }
+
+    return ok;
+}
+
+static bool handle_word(Codegen *builder, const Instr *i) {
+    REQUIRE(i, i->op_count > 0, "missing argument to .word");
+    for (uint8_t j = 0; j < i->op_count; j++) {
+        REQUIRE_OP_MODE(i, j, AM_IMM, "an immediate");
+        REQUIRE(i, i->ops[j].val >= -UINT32_MAX && i->ops[j].val <= UINT32_MAX, "argument must be within the word range");
+    }
+
+    bool ok = true;
+    for (uint8_t j = 0; j < i->op_count; j++) {
+        bool r = emit_word(builder, (uint32_t)i->ops[j].val);
+        REQUIRE(i, r, "Failed to emit word");
+        if (!r) ok = false;
+    }
+
+    return ok;
+}
+
+static bool handle_global(Codegen *builder, const Instr *i) {
+    REQUIRE_OP_COUNT(i, 1);
+    REQUIRE_OP_MODE(i, 0, AM_REF, "a symbol");
+
+    symbol_id_t id;
+    REQUIRE(i, get_or_create_symbol(builder, i->ops[0].label, &id), "Failed to create symbol %s", i->ops[0].label);
+
+    builder->syms[id].flags |= SYMFLAG_GLOBAL;
+
+    return true;
+}
+
+struct {
+    const char *const name;
+    bool (*fn)(Codegen *, const Instr *);
+} directives[] = {
+    {".align", handle_align},
+    {".section", handle_section},
+    {".byte", handle_byte},
+    {".word", handle_word},
+    {".global", handle_global},
+};
+
 void codegen(FILE *out, Source *source) {
     Codegen builder = {
         .header = {
             .magic = 0x4F52004E,
             .version = 0x01000100,
-            .sections = 1,
         },
-        .active_section = 1,
-        .sections[0] = {
-            .name = 0,
-            .data = 0,
-            .align = 1,
-            .size = 0,
-            .id = 1,
-        },
-        .string_pool = ".text",
-        .string_pool_offset = sizeof(".text"),
     };
+
+    switch_section(&builder, ".text");
 
     (void)out;
     (void)source;
 
-    // TODO: parse instructions/directives, emit bytes, then serialise
-    // the completed object.
+    bool ok = true;
+    for (Instr i = parse(source); i.is_eof != true; i = parse(source)) {
+        if (i.is_directive) {
+            bool found = false;
+
+            for (size_t j = 0; j < sizeof(directives) / sizeof(directives[0]); j++) {
+                if (strcmp(i.name, directives[j].name) == 0) {
+                    ok = directives[j].fn(&builder, &i) ? ok : false;
+                    found = true;
+                }
+            }
+
+            if (!found) {
+                asm_error(i.line_num, "Unknown directive %s", i.name);
+                ok = false;
+            }
+        } else if (i.is_label) {
+            if (!define_symbol(&builder, i.name))
+                fprintf(stderr, "Assembler Error (line %d): Failed to create symbol %s\n", i.line_num, i.name);
+        }
+    }
 }
