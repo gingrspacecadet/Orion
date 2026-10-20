@@ -138,7 +138,7 @@ Token lex(Source *source) {
                     break;
                 }
 
-                fprintf(stderr, "Assembler Error (line %zu): Unexpected character\n", source->line);
+                fprintf(stderr, "Assembler Error (line %zu): Unexpected character %c\n", source->line, peek(source));
             }
         }
 

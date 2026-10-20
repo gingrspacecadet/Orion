@@ -48,5 +48,6 @@ int main(int argc, char **argv) {
 
     source.offset = 0;
 
-    codegen(NULL, &source);
+    FILE *out = fopen("a.out", "wb");
+    codegen(out, &source);
 }

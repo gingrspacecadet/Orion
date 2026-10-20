@@ -1,1 +1,1 @@
-.section .bss
+add r1, r2, #-1

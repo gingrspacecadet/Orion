@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -8,6 +9,7 @@
 #include "codegen.h"
 #include "parser.h"
 #include "obj.h"
+#include "isa.h"
 
 #define MAX_ENTRIES UINT8_MAX
 #define MAX_SECTION_SIZE UINT8_MAX
@@ -213,8 +215,8 @@ static void asm_error(int line, const char *fmt, ...) {
 
 #define REQUIRE_OP_COUNT(I, N) \
     REQUIRE((I), (I)->op_count == (N), \
-        "%s expects %u operand%s", (I)->name, \
-        (unsigned)(N), (N) == 1 ? "" : "s")
+        "%s expects %u operand%s, got %u", (I)->name, \
+        (unsigned)(N), (N) == 1 ? "" : "s", (I)->op_count)
 
 #define REQUIRE_OP_MODE(I, INDEX, MODE, DESC) \
     REQUIRE((I), (I)->ops[(INDEX)].mode == (MODE), \
@@ -310,6 +312,86 @@ struct {
     {".global", handle_global},
 };
 
+static uint32_t encode_x(Opcodes code) {
+    uint32_t word = 0;
+    word |= (code & 0x7F) << 26;
+    return word;
+}
+
+static uint32_t encode_a(Opcodes code, uint8_t rn, uint8_t rd, uint16_t operand, bool reg) {
+    uint32_t word = 0;
+    word |= (code & 0x7F) << 26;
+    word |= (rn & 0xF) << 22;
+    word |= (rd & 0xF) << 18;
+    if (reg) word |= (operand & 0xF) << 13;
+    else     word |= (operand & 0xFFFF) << 2;
+    word |= (reg & 0x1) << 1;
+    return word;
+}
+
+static uint32_t encode_m(Opcodes code, uint8_t rn, uint8_t rd, uint16_t operand, bool reg) {
+    return encode_a(code, rn, rd, operand, reg);
+}
+
+struct {
+    const char *const name;
+    OpcodeTypes type;
+    Opcodes code;
+} opcodes[] = {
+    {"nop", TYPE_X, OP_NOP},
+    {"add", TYPE_A, OP_ADD},
+    {"lui", TYPE_M, OP_LUI},
+    {"ldr", TYPE_M, OP_LDR},
+};
+
+static bool emit_instr(Codegen *builder, const Instr *i) {
+    OpcodeTypes type = 0;
+    Opcodes code;
+    for (size_t j = 0; j < sizeof(opcodes) / sizeof(opcodes[0]); j++) {
+        if (strcasecmp(i->name, opcodes[j].name) == 0) {
+            type = opcodes[j].type;
+            code = opcodes[j].code;
+        }
+    }
+
+    if (type == 0) {
+        asm_error(i->line_num, "Unknown instruction type %s", i->name);
+        return false;
+    }
+
+    switch (type) {
+        case TYPE_X: {
+            REQUIRE_OP_COUNT(i, 0);
+            emit_word(builder, encode_x(code));
+            break;
+        }
+
+        case TYPE_A:
+        case TYPE_M: {
+            REQUIRE_OP_COUNT(i, 3);
+            REQUIRE_OP_MODE(i, 0, AM_REG, "a register"); REQUIRE_OP_MODE(i, 1, AM_REG, "a register");
+            if (i->ops[2].mode == AM_REG) {
+                emit_word(builder, encode_a(code, i->ops[1].reg, i->ops[0].reg, i->ops[2].reg, true));
+            } else if (i->ops[2].mode == AM_IMM) {
+                emit_word(builder, encode_a(code, i->ops[1].reg, i->ops[0].reg, i->ops[2].val, false));
+                printf("2 = %lu\n", i->ops[2].val);
+            } else {
+                asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
+                return false;
+            }
+
+            break;
+        }
+
+        default: {
+            asm_error(i->line_num, "unimplemented instruction %s", i->name);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void codegen(FILE *out, Source *source) {
     Codegen builder = {
         .header = {
@@ -319,9 +401,6 @@ void codegen(FILE *out, Source *source) {
     };
 
     switch_section(&builder, ".text");
-
-    (void)out;
-    (void)source;
 
     bool ok = true;
     for (Instr i = parse(source); i.is_eof != true; i = parse(source)) {
@@ -342,6 +421,12 @@ void codegen(FILE *out, Source *source) {
         } else if (i.is_label) {
             if (!define_symbol(&builder, i.name))
                 fprintf(stderr, "Assembler Error (line %d): Failed to create symbol %s\n", i.line_num, i.name);
+        } else {
+            emit_instr(&builder, &i);
         }
     }
+
+    obj_section_t *section = active_section(&builder);
+    if (section)
+        fwrite(builder.data_pool[section->id - 1], 1, section->size, out);
 }
