@@ -17,6 +17,7 @@
     X(PLUS) \
     X(MINUS) \
     X(DIRECTIVE) \
+    X(NEWLINE) \
     X(EOF)
 
 #define X(name) TK_##name,

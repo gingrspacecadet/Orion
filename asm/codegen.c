@@ -333,11 +333,13 @@ static uint32_t encode_m(Opcodes code, uint8_t rn, uint8_t rd, uint16_t operand,
     return encode_a(code, rn, rd, operand, reg);
 }
 
-struct {
-    const char *const name;
+typedef struct {
+    const char *name;
     OpcodeTypes type;
     Opcodes code;
-} opcodes[] = {
+} OpConfig;
+
+const OpConfig opcodes[] = {
     {"nop", TYPE_X, OP_NOP},
     {"add", TYPE_A, OP_ADD},
     {"lui", TYPE_M, OP_LUI},
@@ -345,24 +347,22 @@ struct {
 };
 
 static bool emit_instr(Codegen *builder, const Instr *i) {
-    OpcodeTypes type = 0;
-    Opcodes code;
+    OpConfig conf = {0};
     for (size_t j = 0; j < sizeof(opcodes) / sizeof(opcodes[0]); j++) {
         if (strcasecmp(i->name, opcodes[j].name) == 0) {
-            type = opcodes[j].type;
-            code = opcodes[j].code;
+            conf = opcodes[j];
         }
     }
 
-    if (type == 0) {
+    if (conf.type == 0) {
         asm_error(i->line_num, "Unknown instruction type %s", i->name);
         return false;
     }
 
-    switch (type) {
+    switch (conf.type) {
         case TYPE_X: {
             REQUIRE_OP_COUNT(i, 0);
-            emit_word(builder, encode_x(code));
+            emit_word(builder, encode_x(conf.code));
             break;
         }
 
@@ -371,10 +371,9 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
             REQUIRE_OP_COUNT(i, 3);
             REQUIRE_OP_MODE(i, 0, AM_REG, "a register"); REQUIRE_OP_MODE(i, 1, AM_REG, "a register");
             if (i->ops[2].mode == AM_REG) {
-                emit_word(builder, encode_a(code, i->ops[1].reg, i->ops[0].reg, i->ops[2].reg, true));
+                emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].reg, true));
             } else if (i->ops[2].mode == AM_IMM) {
-                emit_word(builder, encode_a(code, i->ops[1].reg, i->ops[0].reg, i->ops[2].val, false));
-                printf("2 = %lu\n", i->ops[2].val);
+                emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].val, false));
             } else {
                 asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
                 return false;

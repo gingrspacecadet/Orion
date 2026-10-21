@@ -1,8 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "codegen.h"
-#include "parser.h"
-#include "lexer.h"
 
 static char *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
@@ -34,19 +32,6 @@ int main(int argc, char **argv) {
         .line = 1,
         .offset = 0,
     };
-    
-    for (Token t = lex(&source); t.type != TK_EOF; t = lex(&source)) {
-        printf("Token %s\n", token_names[t.type]);
-    }
-
-    source.offset = 0;
-
-    // temporary; this leaks memory
-    for (Instr i = parse(&source); i.is_eof != true; i = parse(&source)) {
-        printf("Instruction name %s\n", i.name);
-    }
-
-    source.offset = 0;
 
     FILE *out = fopen("a.out", "wb");
     codegen(out, &source);

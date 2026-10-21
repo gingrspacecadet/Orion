@@ -123,7 +123,7 @@ Instr parse(Source *source) {
             out.is_directive = (t.type == TK_DIRECTIVE);
             uint8_t cap = 2;
             strncpy(out.name, t.string, 31);
-            while (peek(source).line_num == t.line_num && peek(source).type != TK_EOF) {
+            while (peek(source).type != TK_NEWLINE && peek(source).type != TK_EOF) {
                 if (!out.ops)
                     out.ops = malloc(sizeof(Operand) * cap);
 
@@ -137,6 +137,8 @@ Instr parse(Source *source) {
                 if (peek(source).type == TK_COMMA) advance(source);
                 else break;
             }
+
+            if (peek(source).type == TK_NEWLINE) advance(source);
 
             break;
         }

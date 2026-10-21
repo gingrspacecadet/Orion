@@ -52,7 +52,8 @@ Token lex(Source *source) {
         if (peek(source) == '\n') {
             source->line++;
             advance(source);
-            continue;
+            t.type = TK_NEWLINE;
+            return t;
         }
 
         if (peek(source) == ';') {
