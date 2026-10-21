@@ -10,6 +10,12 @@ typedef uint32_t dataoff_t; // offset into data pool
 typedef enum {
     SYMFLAG_GLOBAL = 1 << 0,
 } symbol_flag_t;
+typedef enum {
+    FLAG_R = 1 << 7,
+    FLAG_W = 1 << 6,
+    FLAG_X = 1 << 5,
+    FLAG_U = 1 << 4,
+} section_flag_t;
 
 typedef enum {
     RELOC_ABS32 = 1,
@@ -25,6 +31,8 @@ typedef struct {
     uint32_t sections;
     uint32_t syms;
     uint32_t relocations;
+    uint32_t data_pool_size;
+    uint32_t string_pool_size;
 } obj_header_t;
 
 typedef struct {

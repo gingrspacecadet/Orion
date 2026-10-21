@@ -118,7 +118,7 @@ Token lex(Source *source) {
 
                     if (is_ref) advance(source);
 
-                    while (peek(source) != '\0' && (isalnum(peek(source)) || peek(source) == '_')) {
+                    while (peek(source) != '\0' && peek(source) != '\n' && (isalnum(peek(source)) || peek(source) == '_')) {
                         if (i < 31) t.string[i++] = peek(source);
                         else fprintf(stderr, "Assembler Error (line %zu): String too long\n", source->line);
                         advance(source);

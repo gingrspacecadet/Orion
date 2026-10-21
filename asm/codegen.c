@@ -76,6 +76,7 @@ static bool switch_section(Codegen *builder, const char *name) {
     section->data = (dataoff_t)(index * sizeof(builder->data_pool[0]));
     section->align = 1;
     section->id = (section_id_t)(index + 1);
+    section->flags = FLAG_R | FLAG_X; 
 
     builder->header.sections++;
     builder->active_section = section->id;
@@ -437,7 +438,20 @@ void codegen(FILE *out, Source *source) {
         }
     }
 
-    obj_section_t *section = active_section(&builder);
-    if (section)
-        fwrite(builder.data_pool[section->id - 1], 1, section->size, out);
+    for (uint32_t i = 0; i < builder.header.sections; i++) {
+        builder.header.data_pool_size += builder.sections[i].size;
+    }
+
+    builder.header.string_pool_size = sizeof(builder.string_pool) / sizeof(builder.string_pool[0]) - builder.string_pool_offset;
+
+    fwrite(&builder.header, sizeof(obj_header_t), 1, out);
+    fwrite(&builder.sections[0], sizeof(obj_section_t), builder.header.sections, out);
+    fwrite(&builder.syms[0], sizeof(obj_symbol_t), builder.header.syms, out);
+    fwrite(&builder.relocations[0], sizeof(obj_reloc_t), builder.header.relocations, out);
+
+    for (uint32_t i = 0; i < builder.header.sections; i++) {
+        fwrite(builder.data_pool[i], sizeof(uint8_t), builder.sections[i].size, out);
+    }
+
+    fwrite(builder.string_pool, sizeof(uint8_t), builder.header.string_pool_size, out);
 }

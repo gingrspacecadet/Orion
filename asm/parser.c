@@ -111,6 +111,9 @@ Instr parse(Source *source) {
     Instr out = {.line_num = peek(source).line_num};
     Token t = lex(source);
     
+    while (t.type == TK_NEWLINE)
+        t = consume(source);
+
     switch (t.type) {
         case TK_LABEL: {
             out.is_label = true;

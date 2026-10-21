@@ -1,10 +1,10 @@
 CC := gcc
-CFLAGS := -MMD -MP -Wall -Wextra -Wpedantic -Werror -Wno-unused -I include
+CFLAGS := -ggdb -MMD -MP -Wall -Wextra -Wpedantic -Werror -Wno-unused -I include
 LDFLAGS := 
 
 BUILD := build
 
-TARGETS := emu asm disasm
+TARGETS := emu asm disasm objdump
 
 .PHONY: all, clean
 all: $(TARGETS)
