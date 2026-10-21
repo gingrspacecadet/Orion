@@ -359,6 +359,18 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
         return false;
     }
 
+    // handle special cases like LUI
+
+    if (conf.code == OP_LUI) {
+        REQUIRE_OP_COUNT(i, 2);
+        REQUIRE_OP_MODE(i, 0, AM_REG, "a register");
+        REQUIRE_OP_MODE(i, 1, AM_IMM, "an immediate");
+
+        emit_word(builder, encode_a(OP_LUI, 0, i->ops[0].reg, i->ops[1].val, false));
+
+        return true;
+    }
+
     switch (conf.type) {
         case TYPE_X: {
             REQUIRE_OP_COUNT(i, 0);

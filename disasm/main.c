@@ -42,9 +42,11 @@ static void print_instr(uint32_t word) {
             printf("r%u, r%u, ", A_RD(word), A_RN(word));
             if (A_REGISTER(word))
                 printf("r%u", A_OPERAND(word) >> 11);
+            else if ((int16_t)A_OPERAND(word) < 0)
+                printf("#%u (%d)", A_OPERAND(word), (int16_t)A_OPERAND(word));
             else
-                printf("#%u (%d)", (uint16_t)A_OPERAND(word), (int16_t)A_OPERAND(word));
-            
+                printf("#%u", A_OPERAND(word));
+                
             break;
         }
 
