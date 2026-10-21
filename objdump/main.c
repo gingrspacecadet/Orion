@@ -1,5 +1,7 @@
 #include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
+#define X_RELOC_TYPE_IMPL
 #include "obj.h"
 #include "isa.h"
 
@@ -41,8 +43,6 @@ static void print_instr(uint32_t word) {
             break;
         }
     }
-
-    putchar('\n');
 }
 
 int main(int argc, char **argv) {
@@ -97,11 +97,17 @@ int main(int argc, char **argv) {
             uint32_t word;
             memcpy(&word, &data_pool[section.data + j], sizeof(word));
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            x = __builtin_bswap32(x);
+            word = __builtin_bswap32(word);
 #endif
             
             printf("    ");
             print_instr(word);
+            for (uint32_t k = 0; k < header.relocations; k++) {
+                if (relocs[k].section == section.id && relocs[k].offset == j) {
+                    printf("\t; %s %s%+" PRId32, reloc_type_names[relocs[k].type], &string_pool[symbols[relocs[k].symbol].name], relocs[k].addend);
+                }
+            }
+            putchar('\n');
         }
     }
 

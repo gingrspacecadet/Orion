@@ -334,6 +334,13 @@ static uint32_t encode_m(Opcodes code, uint8_t rn, uint8_t rd, uint16_t operand,
     return encode_a(code, rn, rd, operand, reg);
 }
 
+static uint32_t encode_j(Opcodes code, uint32_t displacement) {
+    uint32_t word = 0;
+    word |= (code & 0x7F) << 26;
+    word |= (displacement & 0x3FFFFFF);
+    return word;
+}
+
 typedef struct {
     const char *name;
     OpcodeTypes type;
@@ -345,7 +352,20 @@ const OpConfig opcodes[] = {
     {"add", TYPE_A, OP_ADD},
     {"lui", TYPE_M, OP_LUI},
     {"ldr", TYPE_M, OP_LDR},
+    {"jmp", TYPE_J, OP_JMP},
+    {"call", TYPE_J, OP_CALL},
 };
+
+static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, dataoff_t offset) {
+    obj_reloc_t *reloc = &builder->relocations[builder->header.relocations++];
+
+    reloc->type = type;
+    reloc->section = active_section(builder)->id;
+    reloc->offset = offset;
+    reloc->symbol = symbol;
+
+    return true;
+}
 
 static bool emit_instr(Codegen *builder, const Instr *i) {
     OpConfig conf = {0};
@@ -390,6 +410,23 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
             } else {
                 asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
                 return false;
+            }
+
+            break;
+        }
+
+        case TYPE_J: {
+            REQUIRE_OP_COUNT(i, 1);
+            if (i->ops[0].mode == AM_IMM) {
+                REQUIRE(i, (uint32_t)i->ops[0].val < 0x3FFFFFF, "%s argument must fit in 26 bits\n", i->name);
+                emit_word(builder, encode_j(conf.code, i->ops[0].val));
+            } else if (i->ops[0].mode == AM_REF) {
+                symbol_id_t id;
+                get_or_create_symbol(builder, i->ops[0].label, &id);
+                emit_word(builder, encode_j(conf.code, 0));
+                emit_reloc(builder, id, RELOC_PCREL26, active_section(builder)->size - sizeof(uint32_t));
+            } else {
+
             }
 
             break;
@@ -442,7 +479,7 @@ void codegen(FILE *out, Source *source) {
         builder.header.data_pool_size += builder.sections[i].size;
     }
 
-    builder.header.string_pool_size = sizeof(builder.string_pool) / sizeof(builder.string_pool[0]) - builder.string_pool_offset;
+    builder.header.string_pool_size = builder.string_pool_offset;
 
     fwrite(&builder.header, sizeof(obj_header_t), 1, out);
     fwrite(&builder.sections[0], sizeof(obj_section_t), builder.header.sections, out);

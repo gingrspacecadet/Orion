@@ -5,3 +5,5 @@ ldr r2, r3, r4
 symbol:
 lui r4, #42
 
+jmp $symbol
+call $extern

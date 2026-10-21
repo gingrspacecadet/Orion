@@ -45,6 +45,14 @@ typedef enum {
 } Opcodes;
 #undef X
 
+#ifdef X_OPCODES_IMPL
+#define X(NAME) #NAME,
+const char *const opcode_names[] = {
+    X_OPCODES
+};
+#undef X
+#endif
+
 typedef enum {
     COND_JEQ = 1,
     COND_JNE,

@@ -17,13 +17,29 @@ typedef enum {
     FLAG_U = 1 << 4,
 } section_flag_t;
 
+#define X_RELOC_TYPE    \
+    X(ERR)              \
+    X(ABS32)            \
+    X(PCREL26)          \
+    X(PCREL13)          \
+    X(HI16)             \
+    X(LO16)             \
+
+#define X(NAME) RELOC_##NAME,
 typedef enum {
-    RELOC_ABS32 = 1,
-    RELOC_PCREL26,
-    RELOC_PCREL13,
-    RELOC_HI16,
-    RELOC_LO16,
+    X_RELOC_TYPE
 } reloc_type_t;
+#undef X
+
+#ifdef X_RELOC_TYPE_IMPL
+#define X(NAME) #NAME,
+const char *const reloc_type_names[] = {
+    X_RELOC_TYPE
+};
+#undef X
+#else
+extern const char *const reloc_type_names[];
+#endif
 
 typedef struct {
     uint32_t magic; // "OR\0N"
