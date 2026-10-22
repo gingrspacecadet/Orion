@@ -7,3 +7,4 @@ lui r4, #42
 
 jmp $symbol
 call $extern
+.section .data

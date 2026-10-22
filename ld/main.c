@@ -24,9 +24,10 @@ int find_or_create_section(char *name) {
     }
 
     strcpy((char*)&g_string_pool[g_string_pool_size], name);
-    g_string_pool_size += strlen(name) + 1;
+    g_sections[g_section_count].name = g_string_pool_size;
     g_sections[g_section_count].size = 0;
     g_sections[g_section_count].data = g_data_pool_size;
+    g_string_pool_size += strlen(name) + 1;
     return g_section_count++;
 }
 
@@ -91,12 +92,13 @@ bool link_file(char *name) {
         }
 
         strcpy((char*)&g_string_pool[g_string_pool_size], (char*)&string_pool[sym.name]);
-        g_string_pool_size += strlen((char*)&string_pool[sym.name]) + 1;
-
+        
         obj_symbol_t gsym = sym;
         gsym.section = local_to_global_idx[sym.section];
         gsym.offset += local_base_offsets[sym.section];
+        gsym.name = g_string_pool_size;
         g_symbols[g_symbol_count++] = gsym;
+        g_string_pool_size += strlen((char*)&string_pool[sym.name]) + 1;
     }
 
     for (uint32_t i = 0; i < header.relocations; i++) {
@@ -126,6 +128,14 @@ int main(int argc, char **argv) {
         if (!link_file(argv[i])) {
             return 1;
         }
+    }
+
+    for (size_t i = 0; i < g_section_count; i++) {
+        printf("Section %zu name %s\n", i, &g_string_pool[g_sections[i].name]);
+    }
+
+    for (size_t i = 0; i < g_symbol_count; i++) {
+        printf("Symbol %zu name %s\n", i, &g_string_pool[g_symbols[i].name]);
     }
 
     // patch();
