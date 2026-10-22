@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 typedef uint32_t section_id_t; // 0 == undefined
-typedef uint32_t symbol_id_t;
+typedef uint32_t symbol_id_t; // 0 == undeclared
 typedef uint32_t stroff_t; // offset into string pool
 typedef uint32_t dataoff_t; // offset into data pool
 typedef enum {
@@ -40,6 +40,8 @@ const char *const reloc_type_names[] = {
 #else
 extern const char *const reloc_type_names[];
 #endif
+
+#define OBJ_MAGIC 0x4F52004E
 
 typedef struct {
     uint32_t magic; // "OR\0N"

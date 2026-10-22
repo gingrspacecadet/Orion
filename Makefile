@@ -4,7 +4,7 @@ LDFLAGS :=
 
 BUILD := build
 
-TARGETS := emu asm disasm objdump
+TARGETS := emu asm disasm objdump ld
 
 .PHONY: all, clean
 all: $(TARGETS)
