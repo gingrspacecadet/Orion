@@ -2,9 +2,10 @@
 #define OBJ_H
 
 #include <stdint.h>
+#include <assert.h>
 
 typedef uint32_t section_id_t; // 0 == undefined
-typedef uint32_t symbol_id_t; // 0 == undeclared
+typedef uint32_t symbol_id_t;
 typedef uint32_t stroff_t; // offset into string pool
 typedef uint32_t dataoff_t; // offset into data pool
 typedef enum {
@@ -41,17 +42,19 @@ const char *const reloc_type_names[] = {
 extern const char *const reloc_type_names[];
 #endif
 
-#define OBJ_MAGIC 0x4F52004E
+#define OBJ_MAGIC 0x4F524E4F
+#define EXE_MAGIC 0x4F524E45
 
 typedef struct {
-    uint32_t magic; // "OR\0N"
+    uint32_t magic; // "ORNO"
     uint32_t version; // maj8 min8 isa8 pad8
     uint32_t sections;
-    uint32_t syms;
-    uint32_t relocations;
+    uint32_t symbols;
+    uint32_t relocs;
     uint32_t data_pool_size;
     uint32_t string_pool_size;
 } obj_header_t;
+static_assert(sizeof(obj_header_t) == 28, "obj_header_t layout changed");
 
 typedef struct {
     stroff_t name;
@@ -61,30 +64,34 @@ typedef struct {
     uint8_t flags; // RWX, uninit
     section_id_t id;
 } obj_section_t;
+static_assert(sizeof(obj_section_t) == 24, "obj_section_t layout changed");
 
 typedef struct {
     stroff_t name;
     uint32_t offset;
-    section_id_t section;
-    symbol_flag_t flags; // global
+    section_id_t section; // 0 == undefined
+    uint8_t flags; // global
 } obj_symbol_t;
+static_assert(sizeof(obj_symbol_t) == 16, "obj_symbol_t layout changed");
 
 typedef struct {
     uint32_t offset;
     section_id_t section;
     symbol_id_t symbol;
     int32_t addend;
-    reloc_type_t type;
+    uint8_t type;
 } obj_reloc_t;
+static_assert(sizeof(obj_reloc_t) == 20, "obj_reloc_t layout changed");
 
 typedef uint32_t addr_t;
 
 typedef struct {
-    uint32_t magic; // "OR\0N"
+    uint32_t magic; // "ORNE"
     uint32_t version; // maj8 min8 isa8 pad8
     addr_t entry;
     uint32_t sections;
 } exe_header_t;
+static_assert(sizeof(exe_header_t) == 16, "exe_header_t layout changed");
 
 typedef struct {
     addr_t address;
@@ -94,5 +101,6 @@ typedef struct {
     uint32_t align;
     uint8_t flags; // RWX
 } exe_section_t;
+static_assert(sizeof(exe_section_t) == 24, "exe_section_t layout changed");
 
 #endif

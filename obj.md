@@ -47,13 +47,27 @@ typedef struct {
 } obj_reloc_t;
 ```
 
+## Relocation Semantics
+
+`S` is the resolved symbol address, `A` is the signed addend, and `P` is the address of the four-byte instruction or word being patched. Relocation fields are encoded in little-endian words.
+
+| Type | Calculation and patch |
+|---|---|
+| `ABS32` | Write `S + A` as the full 32-bit word. |
+| `PCREL26` | Compute `(S + A - (P + 4)) / 4`; require word alignment and a signed 26-bit result; patch bits 25..0. |
+| `PCREL13` | Compute `(S + A - (P + 4)) / 4`; require word alignment and a signed 13-bit result; patch bits 13..1, preserving the other bits. |
+| `HI16` | Patch instruction immediate bits 17..2 with `((S + A + 0x8000) >> 16) & 0xffff`. This uses the signed-low-half convention for a `LUI` plus a sign-extending immediate operation. |
+| `LO16` | Patch instruction immediate bits 17..2 with `(S + A) & 0xffff`. |
+
+All calculations must be range-checked by the linker. `PCREL26` and `PCREL13` displacements are word counts, not byte counts. The `HI16` rounding adjustment is paired with `LO16` when the low half is consumed by a sign-extending immediate instruction such as `ADD`.
+
 ## Executable Images
 
 ```c
 typedef uint32_t addr_t;
 
 typedef struct {
-    uint32_t magic; // "OR\0N"
+    uint32_t magic; // "ORNE"
     uint32_t version; // maj8 min8 isa8 pad8
     addr_t entry;
     uint32_t sections;

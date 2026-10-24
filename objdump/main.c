@@ -67,17 +67,17 @@ int main(int argc, char **argv) {
 
     printf("== OrionObj v%d.%d.%d ==\n", (uint8_t)(header.version >> 24), (uint8_t)(header.version >> 16), (uint8_t)(header.version >> 8));
     printf("Sections    - %d\n", header.sections);
-    printf("Symbols     - %d\n", header.syms);
-    printf("Relocations - %d\n", header.relocations);
+    printf("Symbols     - %d\n", header.symbols);
+    printf("Relocations - %d\n", header.relocs);
     putchar('\n');
 
     obj_section_t sections[header.sections];
-    obj_symbol_t symbols[header.syms];
-    obj_reloc_t relocs[header.relocations];
+    obj_symbol_t symbols[header.symbols];
+    obj_reloc_t relocs[header.relocs];
 
     fread(sections, sizeof(obj_section_t), header.sections, f);
-    fread(symbols, sizeof(obj_symbol_t), header.syms, f);
-    fread(relocs, sizeof(obj_reloc_t), header.relocations, f);
+    fread(symbols, sizeof(obj_symbol_t), header.symbols, f);
+    fread(relocs, sizeof(obj_reloc_t), header.relocs, f);
 
     uint8_t data_pool[header.data_pool_size];
     fread(data_pool, sizeof(uint8_t), header.data_pool_size, f);
@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
             
             printf("    ");
             print_instr(word);
-            for (uint32_t k = 0; k < header.relocations; k++) {
+            for (uint32_t k = 0; k < header.relocs; k++) {
                 if (relocs[k].section == section.id && relocs[k].offset == j) {
                     printf("\t; %s %s%+" PRId32, reloc_type_names[relocs[k].type], &string_pool[symbols[relocs[k].symbol].name], relocs[k].addend);
                 }

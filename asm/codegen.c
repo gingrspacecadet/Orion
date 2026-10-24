@@ -17,8 +17,8 @@
 typedef struct {
     obj_header_t header;
     obj_section_t sections[MAX_ENTRIES];
-    obj_symbol_t syms[MAX_ENTRIES];
-    obj_reloc_t relocations[MAX_ENTRIES];
+    obj_symbol_t symbols[MAX_ENTRIES];
+    obj_reloc_t relocs[MAX_ENTRIES];
 
     char string_pool[MAX_ENTRIES];
     size_t string_pool_offset;
@@ -73,10 +73,20 @@ static bool switch_section(Codegen *builder, const char *name) {
     memset(section, 0, sizeof(*section));
 
     section->name = name_offset;
-    section->data = (dataoff_t)(index * sizeof(builder->data_pool[0]));
-    section->align = 1;
+    section->data = 0;
+    section->align = strcmp(name, ".text") == 0 ? 4 : 1;
     section->id = (section_id_t)(index + 1);
-    section->flags = FLAG_R | FLAG_X; 
+    // provide some defaults
+    if (strcmp(name, ".text") == 0)
+        section->flags = FLAG_R | FLAG_X;
+    else if (strcmp(name, ".rodata") == 0)
+        section->flags = FLAG_R;
+    else if (strcmp(name, ".data") == 0)
+        section->flags = FLAG_R | FLAG_W;
+    else if (strcmp(name, ".bss") == 0)
+        section->flags = FLAG_R | FLAG_W | FLAG_U;
+    else
+        section->flags = FLAG_R | FLAG_X;
 
     builder->header.sections++;
     builder->active_section = section->id;
@@ -113,8 +123,8 @@ static bool emit_word(Codegen *builder, uint32_t word) {
 }
 
 static bool find_symbol(Codegen *builder, const char *name, symbol_id_t *id) {
-    for (size_t i = 0; i < builder->header.syms; i++) {
-        obj_symbol_t *sym = &builder->syms[i];
+    for (size_t i = 0; i < builder->header.symbols; i++) {
+        obj_symbol_t *sym = &builder->symbols[i];
 
         if (sym->name >= builder->string_pool_offset)
             return false;
@@ -132,22 +142,22 @@ static bool get_or_create_symbol(Codegen *builder, const char *name, symbol_id_t
     if (find_symbol(builder, name, id))
         return true;
 
-    if (builder->header.syms >= MAX_ENTRIES)
+    if (builder->header.symbols >= MAX_ENTRIES)
         return false;
 
     stroff_t name_offset;
     if (!append_string(builder, name, &name_offset))
         return false;
 
-    size_t index = builder->header.syms;
-    obj_symbol_t *sym = &builder->syms[index];
+    size_t index = builder->header.symbols;
+    obj_symbol_t *sym = &builder->symbols[index];
     memset(sym, 0, sizeof(*sym));
 
     sym->name = name_offset;
     sym->section = 0; // undefined until defined by a label.
 
     *id = (symbol_id_t)index;
-    builder->header.syms++;
+    builder->header.symbols++;
 
     return true;
 }
@@ -161,7 +171,7 @@ static bool define_symbol(Codegen *builder, const char *name) {
     if (!get_or_create_symbol(builder, name, &id))
         return false;
 
-    obj_symbol_t *sym = &builder->syms[id];
+    obj_symbol_t *sym = &builder->symbols[id];
 
     if (sym->section != 0)
         return false; // Duplicate definition.
@@ -174,15 +184,15 @@ static bool define_symbol(Codegen *builder, const char *name) {
 
 static bool add_relocation(Codegen *builder, uint32_t offset, reloc_type_t type, symbol_id_t symbol, int32_t addend) {
     obj_section_t *section = active_section(builder);
-    if (section == NULL || symbol >= builder->header.syms ||
-        builder->header.relocations >= MAX_ENTRIES)
+    if (section == NULL || symbol >= builder->header.symbols ||
+        builder->header.relocs >= MAX_ENTRIES)
         return false;
 
     // all current relocation types patch a four-byte word.
     if (offset > section->size || section->size - offset < sizeof(uint32_t))
         return false;
 
-    obj_reloc_t *reloc = &builder->relocations[builder->header.relocations++];
+    obj_reloc_t *reloc = &builder->relocs[builder->header.relocs++];
 
     *reloc = (obj_reloc_t){
         .section = section->id,
@@ -297,7 +307,7 @@ static bool handle_global(Codegen *builder, const Instr *i) {
     symbol_id_t id;
     REQUIRE(i, get_or_create_symbol(builder, i->ops[0].label, &id), "Failed to create symbol %s", i->ops[0].label);
 
-    builder->syms[id].flags |= SYMFLAG_GLOBAL;
+    builder->symbols[id].flags |= SYMFLAG_GLOBAL;
 
     return true;
 }
@@ -357,7 +367,7 @@ const OpConfig opcodes[] = {
 };
 
 static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, dataoff_t offset) {
-    obj_reloc_t *reloc = &builder->relocations[builder->header.relocations++];
+    obj_reloc_t *reloc = &builder->relocs[builder->header.relocs++];
 
     reloc->type = type;
     reloc->section = active_section(builder)->id;
@@ -475,7 +485,10 @@ void codegen(FILE *out, Source *source) {
         }
     }
 
+    uint32_t data_offset = 0;
     for (uint32_t i = 0; i < builder.header.sections; i++) {
+        builder.sections[i].data = data_offset;
+        data_offset += builder.sections[i].size;
         builder.header.data_pool_size += builder.sections[i].size;
     }
 
@@ -483,8 +496,8 @@ void codegen(FILE *out, Source *source) {
 
     fwrite(&builder.header, sizeof(obj_header_t), 1, out);
     fwrite(&builder.sections[0], sizeof(obj_section_t), builder.header.sections, out);
-    fwrite(&builder.syms[0], sizeof(obj_symbol_t), builder.header.syms, out);
-    fwrite(&builder.relocations[0], sizeof(obj_reloc_t), builder.header.relocations, out);
+    fwrite(&builder.symbols[0], sizeof(obj_symbol_t), builder.header.symbols, out);
+    fwrite(&builder.relocs[0], sizeof(obj_reloc_t), builder.header.relocs, out);
 
     for (uint32_t i = 0; i < builder.header.sections; i++) {
         fwrite(builder.data_pool[i], sizeof(uint8_t), builder.sections[i].size, out);
