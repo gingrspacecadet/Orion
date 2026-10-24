@@ -1,55 +1,10 @@
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <assert.h>
 #include "obj.h"
-
-#if !defined(__GNUC__) && !defined(__clang__)
-#   error This project requires GNU C extensions.
-#endif
-
-#if __STDC_VERSION__ < 201112L
-#   error C11 required.
-#endif
-
-#define da_type(T)      \
-    struct {            \
-        T *data;        \
-        size_t len;     \
-        size_t cap;     \
-    }
-
-#define da_resize(da, elems)                                                        \
-    do {                                                                            \
-        __auto_type _da = da;                                                       \
-        size_t _n = elems;                                                          \
-        if (_n <= _da->cap) break;                                                  \
-        assert(_n <= SIZE_MAX / sizeof(*_da->data));                                \
-        typeof(_da->data) new_ptr = realloc(_da->data, _n * sizeof(*_da->data));    \
-        assert(new_ptr);                                                            \
-        _da->data = new_ptr;                                                        \
-        _da->cap = _n;                                                              \
-    } while (0)
-
-#define da_free(da)                 \
-    do {                            \
-        __auto_type _da = da;       \
-        free(_da->data);            \
-        _da->data = NULL;           \
-        _da->len  = 0;              \
-        _da->cap  = 0;              \
-    } while (0)
-
-#define da_push(da, value)                              \
-    do {                                                \
-        __auto_type _da = da;                           \
-        __auto_type _value = (value);                   \
-                                                        \
-        if (_da->len == _da->cap)                       \
-            da_resize(_da, _da.cap ? _da.cap * 2 : 16); \
-                                                        \
-        _da->data[_da->len++] = _value;                 \
-    } while (0)
+#include "da.h"
 
 typedef struct {
     obj_header_t header;
@@ -133,9 +88,10 @@ bool validate_object(InputObject *obj) {
     for (uint32_t i = 0; i < obj->header.sections; i++) {
         obj_section_t section = obj->sections.data[i];
         if (section.id == 0) return false;
-        if (section.data > obj->data_pool.cap || section.size > obj->data_pool.cap - section.data) return false;
+        if (section.id != i + 1) return false;
+        if ((section.flags & FLAG_U) == 0 && (section.data > obj->data_pool.cap || section.size > obj->data_pool.cap - section.data)) return false;
         if (section.align == 0 || (section.align & (section.align - 1)) != 0) return false;
-        if (section.name > obj->string_pool.cap) return false;
+        if (section.name >= obj->string_pool.cap) return false;
     }
 
     for (uint32_t i = 0; i < obj->header.symbols; i++) {
@@ -165,4 +121,235 @@ void destroy_object(InputObject *obj) {
     da_free(&obj->relocs);
     da_free(&obj->data_pool);
     da_free(&obj->string_pool);
+}
+
+typedef struct {
+    char *name;
+    da_type(uint8_t) data;
+    uint32_t memory_size;
+    uint32_t align;
+    uint8_t flags;
+    addr_t address;
+} OutputSection;
+
+typedef struct {
+    uint32_t output_section; // index into LinkContext.sections
+    uint32_t offset;         // offset within the output section
+} SectionPlacement;
+
+typedef struct {
+    InputObject *objects;
+    size_t object_count;
+
+    da_type(OutputSection) sections;
+
+    da_type(da_type(SectionPlacement)) placements;
+} LinkContext;
+
+static bool find_output_section(const LinkContext *ctx, const char *name, uint32_t *out_index) {
+    assert(ctx != NULL); assert(name != NULL); assert(out_index != NULL);
+
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        if (strcmp(ctx->sections.data[i].name, name) == 0) {
+            *out_index = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool create_output_section(LinkContext *ctx, const InputObject *obj, const obj_section_t *input, uint32_t *out_index) {
+    assert(ctx != NULL); assert(obj != NULL); assert(input != NULL); assert(out_index != NULL);
+
+    char *input_name = (char*)&obj->string_pool.data[input->name];
+    
+    OutputSection out = {
+        .align = input->align,
+        .flags = input->flags,
+        .memory_size = 0,
+    };
+
+    da_init(&out.data);
+
+    out.name = malloc(strlen(input_name) + 1);
+    if (!out.name) return false;
+    strcpy(out.name, input_name);
+
+    da_push(&ctx->sections, out);
+    *out_index = ctx->sections.len - 1;
+
+    return true;
+}
+
+
+
+static bool align_up_u32(uint32_t value, uint32_t alignment, uint32_t *out) {
+    uint64_t tmp;
+    if (!CHECK_ADD(value, alignment, &tmp)) return false;
+    tmp--;
+    tmp /= alignment;
+    if (!CHECK_MUL(tmp, alignment, &tmp)) return false;
+    
+    if (tmp > UINT32_MAX) return false;
+    *out = tmp;
+    return true;
+}
+
+static bool append_input_section(LinkContext *ctx, size_t object_index, size_t section_index) {
+    assert(ctx != NULL);
+
+    InputObject *obj = &ctx->objects[object_index];
+    obj_section_t *input = &obj->sections.data[section_index];
+
+    const char *name = (const char *)&obj->string_pool.data[input->name];
+
+    uint32_t output_index;
+    if (!find_output_section(ctx, name, &output_index))
+        if (!create_output_section(ctx, obj, input, &output_index)) return false;
+
+    OutputSection *output = &ctx->sections.data[output_index];
+    if (output->flags != input->flags) return false;
+
+    uint32_t offset;
+    if (!align_up_u32(output->memory_size, input->align, &offset)) return false;
+
+    uint32_t end;
+    if (!CHECK_ADD(offset, input->size, &end)) return false;
+
+    if ((input->flags & FLAG_U) == 0) {
+        da_resize(&output->data, end);
+    
+        if (offset > output->data.len)
+            memset(output->data.data + output->data.len, 0, offset - output->data.len);
+        
+        if (input->size != 0)
+            memcpy(output->data.data + offset, obj->data_pool.data + input->data, input->size);
+
+        output->data.len = end;
+    }
+    
+    output->memory_size = end;
+    if (input->align > output->align)
+        output->align = input->align;
+
+    SectionPlacement placement = {
+        .output_section = output_index,
+        .offset = offset,
+    };
+
+    ctx->placements.data[object_index].data[section_index] = placement;
+
+    return true;
+}
+
+bool link_context_init(LinkContext *ctx, InputObject *objects, size_t object_count) {
+    assert(ctx != NULL); assert(objects != NULL);
+
+    ctx->objects = objects;
+    ctx->object_count = object_count;
+
+    da_init(&ctx->sections);
+
+    da_resize(&ctx->placements, object_count);
+    ctx->placements.len = object_count;
+
+    for (size_t i = 0; i < object_count; i++) {
+        da_init(&ctx->placements.data[i]);
+
+        size_t count = objects[i].sections.len;
+        da_resize(&ctx->placements.data[i], count);
+        ctx->placements.data[i].len = count;
+
+        for (size_t j = 0; j < count; j++) {
+            ctx->placements.data[i].data[j] = (SectionPlacement) {
+                .output_section = UINT32_MAX,
+                .offset = 0,
+            };
+        }
+    }
+
+    return true;
+}
+
+void link_context_destroy(LinkContext *ctx) {
+    assert(ctx != NULL);
+
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        free(ctx->sections.data[i].name);
+        da_free(&ctx->sections.data[i].data);
+    }
+    da_free(&ctx->sections);
+
+    for (size_t i = 0; i < ctx->placements.len; i++) {
+        da_free(&ctx->placements.data[i]);
+    }
+
+    da_free(&ctx->placements);
+
+    return;
+}
+
+bool merge_sections(LinkContext *ctx) {
+    assert(ctx != NULL);
+
+    for (size_t i = 0; i < ctx->object_count; i++) {
+        InputObject *obj = &ctx->objects[i];
+
+        for (size_t j = 0; j < obj->sections.len; j++) {
+            if (!append_input_section(ctx, i, j))
+                return false;
+        }
+    }
+
+    return true;
+}
+bool layout_sections(LinkContext *ctx, addr_t base_address) {
+    assert(ctx != NULL);
+
+    uint64_t cursor = base_address;
+    const uint64_t address_space_end = (uint64_t)UINT32_MAX + 1;
+
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        OutputSection *section = &ctx->sections.data[i];
+
+        if (section->align == 0 ||
+            (section->align & (section->align - 1)) != 0)
+            return false;
+
+        uint64_t alignment = section->align;
+        uint64_t start = (cursor + alignment - 1) & ~(alignment - 1);
+
+        if (start > UINT32_MAX)
+            return false;
+
+        uint64_t end = start + section->memory_size;
+        if (end > address_space_end)
+            return false;
+
+        section->address = (addr_t)start;
+        cursor = end;
+    }
+
+    return true;
+}
+
+bool get_section_placement(const LinkContext *ctx, size_t object_index, section_id_t input_section_id, SectionPlacement *out) {
+    assert(ctx != NULL); assert(out != NULL);
+
+    if (object_index >= ctx->object_count) return false;
+
+    if (input_section_id == 0) return false;
+
+    const InputObject *obj = &ctx->objects[object_index];
+    if (input_section_id > obj->sections.len) return false;
+
+    SectionPlacement placement = ctx->placements.data[object_index].data[input_section_id - 1];
+
+    if (placement.output_section == UINT32_MAX) return false;
+
+    if (placement.output_section >= ctx->sections.len) return false;
+
+    *out = placement;
+    return true;
 }

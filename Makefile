@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -ggdb -MMD -MP -Wall -Wextra -Werror -Wno-unused -I include -std=gnu11
+CFLAGS := -ggdb -MMD -MP -Wall -Wextra -Werror -Wno-unused -Iinclude -std=gnu11
 LDFLAGS := 
 
 BUILD := build
