@@ -689,12 +689,13 @@ typedef struct {
     const char *script_path;
     const char *output_path;
     da_type(char *) input_paths;
+    bool flat;
 } LinkOptions;
 
 void print_usage(FILE *stream, const char *program) {
     assert(stream != NULL); assert(program != NULL);
 
-    fprintf(stream, "Usage: %s [-T script.ld] [-o output.oxe] input.o [input.o ...]\n", program);
+    fprintf(stream, "Usage: %s [-f] [-T script.ld] [-o output.oxe] input.o [input.o ...]\n", program);
 }
 
 int parse_args(int argc, char **argv, LinkOptions *out) {
@@ -705,7 +706,7 @@ int parse_args(int argc, char **argv, LinkOptions *out) {
 
     int opt;
 
-    while ((opt = getopt(argc, argv, ":T:o:h")) != -1) {
+    while ((opt = getopt(argc, argv, ":T:o:fh")) != -1) {
         switch (opt) {
             case 'T':
                 out->script_path = optarg;
@@ -713,6 +714,10 @@ int parse_args(int argc, char **argv, LinkOptions *out) {
 
             case 'o':
                 out->output_path = optarg;
+                break;
+
+            case 'f':
+                out->flat = true;
                 break;
 
             case ':':
@@ -800,9 +805,21 @@ int main(int argc, char **argv) {
 
     GlobalSymbol entry = ctx.global_symbols.data[entry_index];
 
-    if (!write_executable(&ctx, options.output_path, entry.address)) {
-        fprintf(stderr, "%s: failed to write executable\n", argv[0]);
-        return 1;
+    if (options.flat) {
+        FILE *out __attribute__((cleanup(fclosep))) = fopen(options.output_path, "wb");
+        if (!out) return 1;
+
+        for (size_t i = 0; i < ctx.sections.len; i++) {
+            size_t len = ctx.sections.data[i].data.len;
+
+            if (len != 0 && fwrite(ctx.sections.data[i].data.data, 1, len, out) != len)
+                return 1;
+        }
+    } else {
+        if (!write_executable(&ctx, options.output_path, entry.address)) {
+            fprintf(stderr, "%s: failed to write executable\n", argv[0]);
+            return 1;
+        }
     }
 
     return 0;
