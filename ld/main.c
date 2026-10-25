@@ -138,12 +138,27 @@ typedef struct {
 } SectionPlacement;
 
 typedef struct {
+    addr_t address;
+    bool resolved;
+} ResolvedSymbol;
+
+typedef struct {
+    const char *name;
+    addr_t address;
+    size_t object_index;
+    size_t symbol_index;
+} GlobalSymbol;
+
+typedef struct {
     InputObject *objects;
     size_t object_count;
 
     da_type(OutputSection) sections;
 
     da_type(da_type(SectionPlacement)) placements;
+
+    da_type(da_type(ResolvedSymbol)) resolved_symbols;
+    da_type(GlobalSymbol) global_symbols;
 } LinkContext;
 
 static bool find_output_section(const LinkContext *ctx, const char *name, uint32_t *out_index) {
@@ -351,5 +366,136 @@ bool get_section_placement(const LinkContext *ctx, size_t object_index, section_
     if (placement.output_section >= ctx->sections.len) return false;
 
     *out = placement;
+    return true;
+}
+
+bool resolve_defined_symbols(LinkContext *ctx) {
+    da_init(&ctx->resolved_symbols);
+    da_resize(&ctx->resolved_symbols, ctx->object_count);
+    ctx->resolved_symbols.len = ctx->object_count;
+
+    for (size_t i = 0; i < ctx->object_count; i++) {
+        InputObject object = ctx->objects[i];
+
+        da_init(&ctx->resolved_symbols.data[i]);
+        da_resize(&ctx->resolved_symbols.data[i], object.symbols.len);
+        ctx->resolved_symbols.data[i].len = object.symbols.len;
+
+        for (size_t j = 0; j < object.symbols.len; j++) {
+            obj_symbol_t symbol = object.symbols.data[j];
+            SectionPlacement placement;
+
+
+            if (symbol.section == 0)
+                continue;
+            
+            if (!get_section_placement(ctx, i, symbol.section, &placement)) return false;
+
+            OutputSection section = ctx->sections.data[placement.output_section];
+
+            uint64_t address;
+            if (!CHECK_ADD(section.address, placement.offset, &address)) return false;
+            if (!CHECK_ADD(address, symbol.offset, &address)) return false;
+
+            if (address > UINT32_MAX)
+                return false;
+
+            ctx->resolved_symbols.data[i].data[j] = (ResolvedSymbol){
+                .address = address,
+                .resolved = true,
+            };
+        }
+    }
+
+    return true;
+}
+
+bool find_global_symbol(const LinkContext *ctx, const char *name, size_t *out_index) {
+    assert(ctx != NULL); assert(name != NULL);
+
+    for (size_t i = 0; i < ctx->global_symbols.len; i++) {
+        if (strcmp(ctx->global_symbols.data[i].name, name) == 0) {
+            if (out_index) *out_index = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool build_global_symbol_table(LinkContext *ctx) {
+    for (size_t i = 0; i < ctx->object_count; i++) {
+        InputObject object = ctx->objects[i];
+
+        for (size_t j = 0; j < object.symbols.len; j++) {
+            obj_symbol_t symbol = object.symbols.data[j];
+
+            if ((symbol.flags & SYMFLAG_GLOBAL) == 0)
+                continue;
+
+            if (symbol.section == 0)
+                continue;
+
+            if (find_global_symbol(ctx, (char *)&object.string_pool[symbol.name], NULL)) {
+                // report duplicate symbol
+                return false;
+            }
+
+            ResolvedSymbol resolved = ctx->resolved_symbols.data[i].data[j];
+
+            if (!resolved.resolved)
+                return false;
+
+            GlobalSymbol out = {
+                .address = resolved.address,
+                .name = (char *)&object.string_pool[symbol.name],
+                .object_index = i,
+                .symbol_index = j,
+            };
+
+            da_push(&ctx->global_symbols, out);
+        }
+    }
+}
+
+bool resolve_undefined_symbols(LinkContext *ctx) {
+    assert(ctx != NULL);
+
+    for (size_t i = 0; i < ctx->object_count; i++) {
+        InputObject object = ctx->objects[i];
+        for (size_t j = 0; j < object.symbols.len; j++) {
+            obj_symbol_t symbol = object.symbols.data[j];
+
+            if (symbol.section != 0)
+                continue;
+
+            if ((symbol.flags & SYMFLAG_GLOBAL) == 0)
+                return false;
+
+            size_t index;
+            if (!find_global_symbol(ctx, (char *)&object.string_pool[symbol.name], &index))
+                return false;
+
+            ResolvedSymbol *resolved = &ctx->resolved_symbols.data[i].data[j];
+            resolved->address = ctx->global_symbols.data[index].address;
+            resolved->resolved = true;
+        }
+    }
+
+    return true;
+}
+
+bool resolve_symbols(LinkContext *ctx) {
+    assert(ctx != NULL);
+
+    if (!resolve_defined_symbols(ctx))
+        return false;
+
+    if (!build_global_symbol_table(ctx))
+        return false;
+
+    if (!resolve_undefined_symbols(ctx))
+        return false;
+
     return true;
 }
