@@ -388,6 +388,7 @@ bool resolve_defined_symbols(LinkContext *ctx) {
     for (size_t i = 0; i < ctx->object_count; i++) {
         InputObject object = ctx->objects[i];
 
+        memset(&ctx->resolved_symbols.data[i], 0, sizeof(da_type(int)));
         da_init(&ctx->resolved_symbols.data[i]);
         da_resize(&ctx->resolved_symbols.data[i], object.symbols.len);
 
@@ -480,9 +481,6 @@ bool resolve_undefined_symbols(LinkContext *ctx) {
 
             if (symbol.section != 0)
                 continue;
-
-            if ((symbol.flags & SYMFLAG_GLOBAL) == 0)
-                return false;
 
             size_t index;
             if (!find_global_symbol(ctx, (char *)&object.string_pool.data[symbol.name], &index))
@@ -590,7 +588,7 @@ bool apply_relocation(LinkContext *ctx, size_t object_index, const obj_reloc_t *
         // bit more complicated lol
         case RELOC_PCREL26: {
             uint64_t pc = (uint64_t)output->address + Q;
-            int64_t delta = target - (int64_t)(pc + 6);
+            int64_t delta = target - (int64_t)(pc + 4);
 
             if (delta % 4 != 0)
                 return false;

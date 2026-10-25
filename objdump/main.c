@@ -17,6 +17,7 @@ opcodes[] = {
     [OP_NOP] = {OP_NOP, TYPE_X},
     [OP_LDR] = {OP_LDR, TYPE_M},
     [OP_LUI] = {OP_LUI, TYPE_A},
+    [OP_CALL] = {OP_CALL, TYPE_J},
 };
 
 static void print_instr(uint32_t word) {
@@ -36,6 +37,18 @@ static void print_instr(uint32_t word) {
         }
 
         case TYPE_X: {
+            break;
+        }
+
+        case TYPE_J: {
+            uint32_t disp = J_DISPLACEMENT(word);
+
+            int32_t signed_disp = (disp & (1u << 25)) ? (int32_t)(disp | ~((1u << 26) - 1)) : (int32_t)disp;
+            
+            printf(" #%u", disp);
+
+            if (signed_disp < 0)
+                printf(" (%d)", signed_disp);
             break;
         }
 
@@ -73,7 +86,9 @@ void print_obj(FILE *f) {
         obj_symbol_t symbol = symbols[i];
         printf("Symbol %d \"%s\":\n", i + 1, &string_pool[symbol.name]);
         printf("  - offset = 0x%08X\n", symbol.offset);
-        printf("  - section = %d (\"%s\")\n", symbol.section, &string_pool[sections[symbol.section - 1].name]);
+        printf("  - section = %d", symbol.section);
+        if (symbol.section != 0)  printf(" (\"%s\")", &string_pool[sections[symbol.section - 1].name]);
+        putchar('\n');
         printf("  - flags  = %c\n", symbol.flags & SYMFLAG_GLOBAL ? 'g' : '-');
         putchar('\n');
     }
@@ -109,14 +124,19 @@ void print_exe(FILE *f) {
     exe_header_t header;
     fread(&header, sizeof(exe_header_t), 1, f);
 
+    exe_section_t sections[header.sections];
+    fread(sections, sizeof(exe_section_t), header.sections, f);
+
     printf("== OrionExe v%d.%d.%d ==\n", (uint8_t)(header.version >> 24), (uint8_t)(header.version >> 16), (uint8_t)(header.version >> 8));
     printf("Entry    - 0x%08X\n", header.entry);
     printf("Sections - %d\n", header.sections);
     putchar('\n');
 
     for (uint32_t i = 0; i < header.sections; i++) {
-        exe_section_t section;
-        fread(&section, sizeof(exe_section_t), 1, f);
+        exe_section_t section = sections[i];
+
+        uint8_t data_pool[section.file_size];
+        fread(data_pool, sizeof(uint8_t), section.file_size, f);
 
         printf("Section %d:\n", i + 1);
         printf("  - address     = 0x%08X\n", section.address);
@@ -125,7 +145,18 @@ void print_exe(FILE *f) {
         printf("  - file size   = %d\n", section.file_size);
         printf("  - align       = %d\n", section.align);
         printf("  - flags       = %c%c%c\n", section.flags & FLAG_R ? 'r' : '-', section.flags & FLAG_W ? 'w' : '-', section.flags & FLAG_X ? 'x' : '-');
-        putchar('\n');
+        printf("\n  Instructions:\n");
+        for (uint32_t j = 0; j < section.file_size; j += 4) {
+            uint32_t word;
+            memcpy(&word, &data_pool[j], sizeof(uint32_t));
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIANG
+            word = __builtin_bswap32(word);
+#endif
+            
+            printf("    ");
+            print_instr(word);
+            putchar('\n');
+        }
     }
 }
 
