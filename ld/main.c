@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stddef.h>
 #include <getopt.h>
 #include <string.h>
 #include <stdlib.h>
@@ -41,7 +42,7 @@ bool read_object(char *filename, InputObject *out_obj) {
     if (fseek(f, 0, SEEK_END) != 0) return false;
     long fsize = ftell(f);
     if (fsize < 0) return false;
-    if (fseek(f, 0, SEEK_SET) != 0) return false;
+    if (fseek(f, sizeof(obj_header_t), SEEK_SET) != 0) return false;
 
     size_t expected_size = 0;
     size_t tmp;
@@ -72,32 +73,43 @@ bool read_object(char *filename, InputObject *out_obj) {
     if (fread(obj.data_pool.data, sizeof(uint8_t), obj.header.data_pool_size, f) != obj.header.data_pool_size) return false;
     if (fread(obj.string_pool.data, sizeof(uint8_t), obj.header.string_pool_size, f) != obj.header.string_pool_size) return false;
 
-    obj.sections.len = obj.header.sections;
-    obj.symbols.len = obj.header.symbols;
-    obj.relocs.len = obj.header.relocs;
-    obj.data_pool.len = obj.header.data_pool_size;
-    obj.string_pool.len = obj.header.string_pool_size;
-
     *out_obj = obj;
 
     return true;
 }
+
+#define INVALID(...) do { \
+    fprintf(stderr, "invalid object \"%s\": ", obj->name); \
+    fprintf(stderr, __VA_ARGS__); \
+    fputc('\n', stderr); \
+    return false; \
+} while (0)
 
 bool validate_object(InputObject *obj) {
     assert(obj != NULL);
 
     for (uint32_t i = 0; i < obj->header.sections; i++) {
         obj_section_t section = obj->sections.data[i];
-        if (section.id == 0) return false;
-        if (section.id != i + 1) return false;
-        if ((section.flags & FLAG_U) == 0 && (section.data > obj->data_pool.cap || section.size > obj->data_pool.cap - section.data)) return false;
-        if (section.align == 0 || (section.align & (section.align - 1)) != 0) return false;
-        if (section.name >= obj->string_pool.cap) return false;
+
+        if (section.id == 0)
+            INVALID("section %u has ID 0", i + 1);
+
+        if (section.id != i + 1)
+            INVALID("section %u has ID %u", i + 1, section.id);
+
+        if ((section.flags & FLAG_U) == 0 && (section.data > obj->data_pool.len || section.size > obj->data_pool.len - section.data))
+            INVALID("section %u data range is invalid: offset=%u size=%u pool_size=%zu", i + 1, section.data, section.size, obj->data_pool.len);
+
+        if (section.align == 0 || (section.align & (section.align - 1)) != 0)
+            INVALID("section %u has invalid alignment %u", i + 1, section.align);
+
+        if (section.name >= obj->string_pool.len)
+            INVALID("section %u has invalid name offset %u", i + 1, section.name);
     }
 
     for (uint32_t i = 0; i < obj->header.symbols; i++) {
         obj_symbol_t symbol = obj->symbols.data[i];
-        if (symbol.name >= obj->string_pool.cap) return false;
+        if (symbol.name >= obj->string_pool.len) return false;
         if (symbol.section > obj->header.sections) return false;
         
         if (symbol.section != 0) {
@@ -241,8 +253,6 @@ static bool append_input_section(LinkContext *ctx, size_t object_index, size_t s
         
         if (input->size != 0)
             memcpy(output->data.data + offset, obj->data_pool.data + input->data, input->size);
-
-        output->data.len = end;
     }
     
     output->memory_size = end;
@@ -266,16 +276,17 @@ bool link_context_init(LinkContext *ctx, InputObject *objects, size_t object_cou
     ctx->object_count = object_count;
 
     da_init(&ctx->sections);
+    da_init(&ctx->global_symbols);
 
     da_resize(&ctx->placements, object_count);
-    ctx->placements.len = object_count;
 
     for (size_t i = 0; i < object_count; i++) {
+        memset(&ctx->placements.data[i], 0, sizeof(ctx->placements.data[i]));
+
         da_init(&ctx->placements.data[i]);
 
         size_t count = objects[i].sections.len;
         da_resize(&ctx->placements.data[i], count);
-        ctx->placements.data[i].len = count;
 
         for (size_t j = 0; j < count; j++) {
             ctx->placements.data[i].data[j] = (SectionPlacement) {
@@ -373,14 +384,12 @@ bool get_section_placement(const LinkContext *ctx, size_t object_index, section_
 bool resolve_defined_symbols(LinkContext *ctx) {
     da_init(&ctx->resolved_symbols);
     da_resize(&ctx->resolved_symbols, ctx->object_count);
-    ctx->resolved_symbols.len = ctx->object_count;
 
     for (size_t i = 0; i < ctx->object_count; i++) {
         InputObject object = ctx->objects[i];
 
         da_init(&ctx->resolved_symbols.data[i]);
         da_resize(&ctx->resolved_symbols.data[i], object.symbols.len);
-        ctx->resolved_symbols.data[i].len = object.symbols.len;
 
         for (size_t j = 0; j < object.symbols.len; j++) {
             obj_symbol_t symbol = object.symbols.data[j];
@@ -747,8 +756,55 @@ int main(int argc, char **argv) {
         default: break;
     }
 
+    da_type(InputObject) objects = {0};
+    da_init(&objects);
+    da_resize(&objects, options.input_paths.len);
+
     for (size_t i = 0; i < options.input_paths.len; i++) {
-        printf("Input file %zu = %s\n", i + 1, options.input_paths.data[i]);
+        if (!read_object(options.input_paths.data[i], &objects.data[i])) {
+            fprintf(stderr, "%s: failed to read object \"%s\"\n", argv[0], options.input_paths.data[i]);
+            return 1;
+        }
+        if (!validate_object(&objects.data[i])) {
+            fprintf(stderr, "%s: failed to validate object \"%s\"\n", argv[0], options.input_paths.data[i]);
+            return 1;
+        }
+    }
+
+    LinkContext ctx = {0};
+
+    if (!link_context_init(&ctx, objects.data, objects.len)) {
+        fprintf(stderr, "%s: failed to initialise linker context\n", argv[0]);
+        return 1;
+    }
+    if (!merge_sections(&ctx)) {
+        fprintf(stderr, "%s: failed to merge sections\n", argv[0]);
+        return 1;
+    }
+    if (!layout_sections(&ctx, 0x1000)) {
+        fprintf(stderr, "%s: failed to lay out sections\n", argv[0]);
+        return 1;
+    }
+    if (!resolve_symbols(&ctx)) {
+        fprintf(stderr, "%s: failed to resolve symbols\n", argv[0]);
+        return 1;
+    }
+    if (!apply_relocations(&ctx)) {
+        fprintf(stderr, "%s: failed to apply relocations\n", argv[0]);
+        return 1;
+    }
+
+    size_t entry_index;
+    if (!find_global_symbol(&ctx, "_start", &entry_index)) {
+        fprintf(stderr, "%s: missing entry symbol \"_start\"\n", argv[0]);
+        return 1;
+    }
+
+    GlobalSymbol entry = ctx.global_symbols.data[entry_index];
+
+    if (!write_executable(&ctx, options.output_path, entry.address)) {
+        fprintf(stderr, "%s: failed to write executable\n", argv[0]);
+        return 1;
     }
 
     return 0;

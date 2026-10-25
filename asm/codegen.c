@@ -454,7 +454,7 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
 void codegen(FILE *out, Source *source) {
     Codegen builder = {
         .header = {
-            .magic = 0x4F52004E,
+            .magic = OBJ_MAGIC,
             .version = 0x01000100,
         },
     };

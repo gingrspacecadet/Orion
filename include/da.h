@@ -19,7 +19,7 @@
         size_t cap;     \
     }
 
-#define da_resize(da, elems)                                                        \
+#define da_reserve(da, elems)                                                       \
     do {                                                                            \
         __auto_type _da = da;                                                       \
         size_t _n = elems;                                                          \
@@ -30,6 +30,13 @@
         _da->data = new_ptr;                                                        \
         _da->cap = _n;                                                              \
     } while (0)
+
+#define da_resize(da, elems)    \
+    do {                        \
+        __auto_type _da = da;   \
+        da_reserve(_da, elems); \
+        _da->len = elems;       \
+    } while (0)                 \
 
 #define da_free(da)                 \
     do {                            \

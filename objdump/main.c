@@ -45,25 +45,9 @@ static void print_instr(uint32_t word) {
     }
 }
 
-int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s file.bin\n", argv[0]);
-        return 1;
-    }
-
-    FILE *f = fopen(argv[1], "rb");
-    if (!f) {
-        perror(argv[1]);
-        return 1;
-    }
-
+void print_obj(FILE *f) {
     obj_header_t header;
     fread(&header, sizeof(obj_header_t), 1, f);
-
-    if (header.magic != 0x4F52004E) {
-        fprintf(stderr, "Unrecognised file format!\n");
-        return 1;
-    }
 
     printf("== OrionObj v%d.%d.%d ==\n", (uint8_t)(header.version >> 24), (uint8_t)(header.version >> 16), (uint8_t)(header.version >> 8));
     printf("Sections    - %d\n", header.sections);
@@ -84,6 +68,15 @@ int main(int argc, char **argv) {
 
     uint8_t string_pool[header.string_pool_size];
     fread(string_pool, sizeof(uint8_t), header.string_pool_size, f);
+
+    for (uint32_t i = 0; i < header.symbols; i++) {
+        obj_symbol_t symbol = symbols[i];
+        printf("Symbol %d \"%s\":\n", i + 1, &string_pool[symbol.name]);
+        printf("  - offset = 0x%08X\n", symbol.offset);
+        printf("  - section = %d (\"%s\")\n", symbol.section, &string_pool[sections[symbol.section - 1].name]);
+        printf("  - flags  = %c\n", symbol.flags & SYMFLAG_GLOBAL ? 'g' : '-');
+        putchar('\n');
+    }
 
     for (uint32_t i = 0; i < header.sections; i++) {
         obj_section_t section = sections[i];
@@ -109,6 +102,56 @@ int main(int argc, char **argv) {
             }
             putchar('\n');
         }
+    }
+}
+
+void print_exe(FILE *f) {
+    exe_header_t header;
+    fread(&header, sizeof(exe_header_t), 1, f);
+
+    printf("== OrionExe v%d.%d.%d ==\n", (uint8_t)(header.version >> 24), (uint8_t)(header.version >> 16), (uint8_t)(header.version >> 8));
+    printf("Entry    - 0x%08X\n", header.entry);
+    printf("Sections - %d\n", header.sections);
+    putchar('\n');
+
+    for (uint32_t i = 0; i < header.sections; i++) {
+        exe_section_t section;
+        fread(&section, sizeof(exe_section_t), 1, f);
+
+        printf("Section %d:\n", i + 1);
+        printf("  - address     = 0x%08X\n", section.address);
+        printf("  - offset      = 0x%08X\n", section.offset);
+        printf("  - memory size = %d\n", section.memory_size);
+        printf("  - file size   = %d\n", section.file_size);
+        printf("  - align       = %d\n", section.align);
+        printf("  - flags       = %c%c%c\n", section.flags & FLAG_R ? 'r' : '-', section.flags & FLAG_W ? 'w' : '-', section.flags & FLAG_X ? 'x' : '-');
+        putchar('\n');
+    }
+}
+
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s file.bin\n", argv[0]);
+        return 1;
+    }
+
+    FILE *f = fopen(argv[1], "rb");
+    if (!f) {
+        perror(argv[1]);
+        return 1;
+    }
+
+    uint32_t magic;
+    fread(&magic, sizeof(uint32_t), 1, f);
+    fseek(f, 0, SEEK_SET);
+
+    if (magic == OBJ_MAGIC) {
+        print_obj(f);
+    } else if (magic == EXE_MAGIC) {
+        print_exe(f);       
+    } else {
+        fprintf(stderr, "Unrecognised file format!\n");
+        return 1;
     }
 
     return 0;
