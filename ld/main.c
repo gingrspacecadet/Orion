@@ -436,7 +436,7 @@ bool build_global_symbol_table(LinkContext *ctx) {
             if (symbol.section == 0)
                 continue;
 
-            if (find_global_symbol(ctx, (char *)&object.string_pool[symbol.name], NULL)) {
+            if (find_global_symbol(ctx, (char *)&object.string_pool.data[symbol.name], NULL)) {
                 // report duplicate symbol
                 return false;
             }
@@ -448,7 +448,7 @@ bool build_global_symbol_table(LinkContext *ctx) {
 
             GlobalSymbol out = {
                 .address = resolved.address,
-                .name = (char *)&object.string_pool[symbol.name],
+                .name = (char *)&object.string_pool.data[symbol.name],
                 .object_index = i,
                 .symbol_index = j,
             };
@@ -456,6 +456,8 @@ bool build_global_symbol_table(LinkContext *ctx) {
             da_push(&ctx->global_symbols, out);
         }
     }
+
+    return true;
 }
 
 bool resolve_undefined_symbols(LinkContext *ctx) {
@@ -473,7 +475,7 @@ bool resolve_undefined_symbols(LinkContext *ctx) {
                 return false;
 
             size_t index;
-            if (!find_global_symbol(ctx, (char *)&object.string_pool[symbol.name], &index))
+            if (!find_global_symbol(ctx, (char *)&object.string_pool.data[symbol.name], &index))
                 return false;
 
             ResolvedSymbol *resolved = &ctx->resolved_symbols.data[i].data[j];
@@ -496,6 +498,181 @@ bool resolve_symbols(LinkContext *ctx) {
 
     if (!resolve_undefined_symbols(ctx))
         return false;
+
+    return true;
+}
+
+bool read_u32_le(const uint8_t *data, size_t len, size_t offset, uint32_t *out) {
+    assert(data != NULL); assert(out != NULL);
+
+    if (offset > len || len - offset < 4)
+        return false;
+
+    *out = (uint32_t)data[offset]
+         | ((uint32_t)data[offset + 1] << 8)
+         | ((uint32_t)data[offset + 2] << 16)
+         | ((uint32_t)data[offset + 3] << 24);
+
+    return true;
+}
+
+bool write_u32_le(uint8_t *data, size_t len, size_t offset, uint32_t value) {
+    assert(data != NULL);
+
+    if (offset > len || len - offset < 4)
+        return false;
+
+    data[offset]     = (uint8_t)value;
+    data[offset + 1] = (uint8_t)(value >> 8);
+    data[offset + 2] = (uint8_t)(value >> 16);
+    data[offset + 3] = (uint8_t)(value >> 24);
+
+    return true;
+}
+
+bool apply_relocation(LinkContext *ctx, size_t object_index, const obj_reloc_t *reloc) {
+    __auto_type resolved_symbols = ctx->resolved_symbols.data[object_index];
+    if (reloc->symbol >= resolved_symbols.len)
+        return false;
+
+    const ResolvedSymbol *symbol = &resolved_symbols.data[reloc->symbol];
+
+    if (!symbol->resolved)
+        return false;
+
+    SectionPlacement placement;
+    if (!get_section_placement(ctx, object_index, reloc->section, &placement))
+        return false;
+
+    OutputSection *output = &ctx->sections.data[placement.output_section];
+
+    if (output->flags & FLAG_U)
+        return false;
+
+    uint32_t Q;
+    if (!CHECK_ADD(placement.offset, reloc->offset, &Q))
+        return false;
+
+    uint32_t word;
+    if (!read_u32_le(output->data.data, output->data.len, Q, &word))
+        return false;
+
+    int64_t target = (int64_t)symbol->address + reloc->addend;
+
+    if (target < 0 || target > UINT32_MAX)
+        return false;
+
+    switch (reloc->type) {
+        case RELOC_ABS32:
+            word = (uint32_t)target;
+            break;
+
+        case RELOC_HI16:
+            word = (word & ~UINT32_C(0x0003FFFC))
+                 | (((uint32_t)target >> 16) << 2);
+            break;
+
+        case RELOC_LO16:
+            word = (word & ~UINT32_C(0x0003FFFC))
+                 | ((((uint32_t)target) & 0xFFFFu) << 2);
+            break;
+
+        // bit more complicated lol
+        case RELOC_PCREL26: {
+            uint64_t pc = (uint64_t)output->address + Q;
+            int64_t delta = target - (int64_t)(pc + 6);
+
+            if (delta % 4 != 0)
+                return false;
+
+            int64_t displacement = delta / 4;
+
+            if (displacement < -(INT64_C(1) << 25) || displacement > (INT64_C(1) << 25) - 1)
+                return false;
+
+            word = (word & ~UINT32_C(0x03FFFFFF))
+                 | ((uint32_t)displacement & UINT32_C(0x03FFFFFF));
+            break;
+        }
+
+        case RELOC_PCREL13: {
+            uint64_t pc = (uint64_t)output->address + Q;
+            int64_t delta = target - (int64_t)(pc + 4);
+
+            if (delta % 4 != 0)
+                return false;
+
+            int64_t displacement = delta / 4;
+
+            if (displacement < -(INT64_C(1) << 12) || displacement > (INT64_C(1) << 12) - 1)
+                return false;
+
+            word = (word & ~UINT32_C(0x00003FFE))
+                 | (((uint32_t)displacement << 1) & UINT32_C(0x00003FFE));
+            break;
+        }
+
+        default:
+            return false; // Todo!
+    }
+
+    return write_u32_le(output->data.data, output->data.len, Q, word);
+}
+
+bool apply_relocations(LinkContext *ctx) {
+    for (size_t i = 0; i < ctx->object_count; i++) {
+        InputObject *obj = &ctx->objects[i];
+
+        for (size_t j = 0; j < obj->relocs.len; j++) {
+            if (!apply_relocation(ctx, i, &obj->relocs.data[j]))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+bool write_executable(const LinkContext *ctx, const char *path, addr_t entry) {
+    assert(ctx != NULL); assert(path != NULL);
+
+    FILE *f __attribute__((cleanup(fclosep))) = fopen(path, "wb");
+    if (!f) return false;
+
+    exe_header_t header = {
+        .magic = EXE_MAGIC,
+        .version = 0x01000100,
+        .entry = entry,
+        .sections = ctx->sections.len,
+    };
+
+    if (fwrite(&header, sizeof(exe_header_t), 1, f) != 1)
+        return false;
+    
+    uint64_t total_offset = sizeof(exe_header_t) + (uint64_t)ctx->sections.len * sizeof(exe_section_t);
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        OutputSection section = ctx->sections.data[i];
+
+        exe_section_t exesection = {
+            .address = section.address,
+            .align = section.align,
+            .file_size = section.data.len,
+            .flags = section.flags & (FLAG_R | FLAG_W | FLAG_X),
+            .memory_size = section.memory_size,
+            .offset = total_offset,
+        };
+
+        total_offset += section.data.len;
+
+        if (fwrite(&exesection, sizeof(exe_section_t), 1, f) != 1)
+            return false;
+    }
+
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        size_t len = ctx->sections.data[i].data.len;
+
+        if (len != 0 && fwrite(ctx->sections.data[i].data.data, 1, len, f) != len)
+            return false;
+    }
 
     return true;
 }

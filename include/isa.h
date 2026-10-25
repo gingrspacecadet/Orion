@@ -73,7 +73,7 @@ typedef enum {
 } OpcodeTypes;
 
 #define OPCODE(word)            (((word) >> 26) & 0x7F) 
-#define J_DISPLACEMENT(word)    ((word)         & 0x7FFFFFF)
+#define J_DISPLACEMENT(word)    ((word)         & 0x3FFFFFF)
 #define I_RN(word)              (((word) >> 22) & 0xF)
 #define B_COND(word)            (((word) >> 23) & 0x7)
 #define B_RN(word)              (((word) >> 19) & 0xF)
