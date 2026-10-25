@@ -334,7 +334,7 @@ static uint32_t encode_a(Opcodes code, uint8_t rn, uint8_t rd, uint16_t operand,
     word |= (code & 0x7F) << 26;
     word |= (rn & 0xF) << 22;
     word |= (rd & 0xF) << 18;
-    if (reg) word |= (operand & 0xF) << 13;
+    if (reg) word |= (operand &    0xF) << 2;
     else     word |= (operand & 0xFFFF) << 2;
     word |= (reg & 0x1) << 1;
     return word;
@@ -360,6 +360,10 @@ typedef struct {
 const OpConfig opcodes[] = {
     {"nop", TYPE_X, OP_NOP},
     {"add", TYPE_A, OP_ADD},
+    {"sub", TYPE_A, OP_SUB},
+    {"mul", TYPE_A, OP_MUL},
+    {"div", TYPE_A, OP_DIV},
+    {"divu", TYPE_A, OP_DIVU},
     {"lui", TYPE_M, OP_LUI},
     {"ldr", TYPE_M, OP_LDR},
     {"jmp", TYPE_J, OP_JMP},

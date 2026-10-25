@@ -51,6 +51,8 @@ const char *const opcode_names[] = {
     X_OPCODES
 };
 #undef X
+#else
+extern const char *const opcode_names[];
 #endif
 
 typedef enum {
@@ -79,6 +81,7 @@ typedef enum {
 #define B_RN(word)              (((word) >> 19) & 0xF)
 #define B_OPERAND(word)         (((word) >> 14) & 0x1F)
 #define B_DISPLACEMENT(word)    (((word) >> 1)  & 0x1FFF)
+#define B_REGISTER(word)        ((word)         & 0x1)
 #define A_RN(word)              (((word) >> 22) & 0xF)
 #define A_RD(word)              (((word) >> 18) & 0xF)
 #define A_OPERAND(word)         (((word) >> 2)  & 0xFFFF)

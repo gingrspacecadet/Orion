@@ -14,6 +14,10 @@ const char *const opcode_names[] = {
 const struct {Opcodes code; OpcodeTypes type;}
 opcodes[] = {
     [OP_ADD] = {OP_ADD, TYPE_A},
+    [OP_SUB] = {OP_SUB, TYPE_A},
+    [OP_MUL] = {OP_MUL, TYPE_A},
+    [OP_DIV] = {OP_DIV, TYPE_A},
+    [OP_DIVU] = {OP_DIVU, TYPE_A},
     [OP_NOP] = {OP_NOP, TYPE_X},
     [OP_LDR] = {OP_LDR, TYPE_M},
     [OP_LUI] = {OP_LUI, TYPE_A},
