@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <getopt.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -675,4 +676,80 @@ bool write_executable(const LinkContext *ctx, const char *path, addr_t entry) {
     }
 
     return true;
+}
+
+typedef struct {
+    const char *script_path;
+    const char *output_path;
+    da_type(char *) input_paths;
+} LinkOptions;
+
+void print_usage(FILE *stream, const char *program) {
+    assert(stream != NULL); assert(program != NULL);
+
+    fprintf(stream, "Usage: %s [-T script.ld] [-o output.oxe] input.o [input.o ...]\n", program);
+}
+
+int parse_args(int argc, char **argv, LinkOptions *out) {
+    assert(argv != NULL); assert(out != NULL);
+
+    da_init(&out->input_paths);
+    out->output_path = "a.oxe";
+
+    int opt;
+
+    while ((opt = getopt(argc, argv, ":T:o:h")) != -1) {
+        switch (opt) {
+            case 'T':
+                out->script_path = optarg;
+                break;
+
+            case 'o':
+                out->output_path = optarg;
+                break;
+
+            case ':':
+                fprintf(stderr, "%s: option -%c requires an argument\n", argv[0], optopt);
+                print_usage(stderr, argv[0]);
+                return -1;
+            
+            case 'h':
+                fprintf(stderr, "%s: help: ", argv[0]);
+                print_usage(stderr, argv[0]);
+                return 0;
+            
+            case '?':
+                fprintf(stderr, "%s: unknown option '-%c'\n", argv[0], optopt);
+                print_usage(stderr, argv[0]);
+                return -1;
+        }
+    }
+
+    if (optind == argc) {
+        print_usage(stderr, argv[0]);
+        return -1;
+    }
+
+    for (; optind < argc; optind++) {
+        da_push(&out->input_paths, argv[optind]);
+    }
+
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    LinkOptions options = {0};
+
+    switch (parse_args(argc, argv, &options)) {
+        case -1: return 1;
+        case 0: return 0;
+
+        default: break;
+    }
+
+    for (size_t i = 0; i < options.input_paths.len; i++) {
+        printf("Input file %zu = %s\n", i + 1, options.input_paths.data[i]);
+    }
+
+    return 0;
 }
