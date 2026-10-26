@@ -22,6 +22,13 @@ static uint8_t *load_file(const char *path, size_t *out_len) {
     return buf;
 }
 
+static inline void write_u32le(uint8_t *p, size_t offset, uint32_t value) {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    value = __builtin_bswap32(value);
+#endif
+    memcpy(p + offset, &value, sizeof(value));
+}
+
 static inline uint32_t read_u32le(const uint8_t *p, size_t offset) {
     uint32_t x;
     memcpy(&x, p + offset, sizeof(x));
@@ -41,10 +48,10 @@ typedef struct {
     Register *r;
         #define RSP     15
     Register flags;
-        #define FLAG_IE  0
-        #define FLAG_PRV 1
-        #define FLAG_VM  2
-        #define FLAG_TM  3
+        #define FLAG_IE  1u << 0
+        #define FLAG_PRV 1u << 1
+        #define FLAG_VM  1u << 2
+        #define FLAG_TM  1u << 3
     Register pc;
 } Cpu;
 
@@ -69,16 +76,16 @@ static inline int32_t sign_extend_16(uint32_t value) {
 }
 
 static inline int32_t sign_extend_26(uint32_t value) {
-    value &= 0x3FFFFFF;
-    return (value & 0x100000)
-        ? (int32_t)value - 0x200000
+    value &= 0x03FFFFFF;
+    return (value & 0x02000000)
+        ? (int32_t)value - 0x04000000
         : (int32_t)value;
 }
 
 static inline int32_t sign_extend_13(uint32_t value) {
-    value &= 0x1FFFFFF;
-    return (value & 0x80000)
-        ? (int32_t)value - 0x100000
+    value &= 0x1FFF;
+    return (value & 0x1000)
+        ? (int32_t)value - 0x2000
         : (int32_t)value;
 }
 
@@ -95,7 +102,7 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
     return (uint32_t)sign_extend_16(A_OPERAND(word));
 }
 
-void step(Machine *machine) {
+bool step(Machine *machine) {
     uint32_t word = read_u32le(machine->mem, machine->cpu.pc);
 
     bool advance = true;
@@ -122,12 +129,12 @@ void step(Machine *machine) {
 
             if (rhs == 0) {
                 fprintf(stderr, "Arithmetic fault: signed division by zero\n");
-                exit(EXIT_FAILURE);
+                return false;
             }
 
             if (lhs == INT32_MIN && rhs == -1) {
                 fprintf(stderr, "Arithmetic fault: signed division overflow\n");
-                exit(EXIT_FAILURE);
+                return false;
             }
 
             R(A_RD(word)) = (uint32_t)(lhs / rhs);
@@ -140,19 +147,50 @@ void step(Machine *machine) {
 
             if (rhs == 0) {
                 fprintf(stderr, "Arithmetic fault: unsigned division by zero\n");
-                exit(EXIT_FAILURE);
+                return false;
             }
 
             R(A_RD(word)) = lhs / rhs;
             break;
         }
 
+        case OP_AND: {
+            R(A_RD(word)) = R(A_RN(word)) & (A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word));
+            break;
+        }
+
+        case OP_OR: {
+            R(A_RD(word)) = R(A_RN(word)) | (A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word));
+            break;
+        }
+
+        case OP_XOR: {
+            R(A_RD(word)) = R(A_RN(word)) ^ (A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word));
+            break;
+        }
+
+        case OP_SHL: {
+            R(A_RD(word)) = R(A_RN(word)) << ((A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word)) & 0x1F);
+            break;
+        }
+
+        case OP_SHR: {
+            R(A_RD(word)) = R(A_RN(word)) >> ((A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word)) & 0x1F);
+            break;
+        }
+
+        case OP_ASHR: {
+            R(A_RD(word)) = signed32(R(A_RN(word))) >> ((A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word)) & 0x1F);
+            break;
+        }
+
+        case OP_LUI: {
+            R(A_RD(word)) = (uint32_t)(A_REGISTER(word) ? (R(A_OPERAND(word) & 0xF)) : A_OPERAND(word)) << 16;
+            break;
+        }
+
         case OP_JMP: {
             int32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
-            if (target % 4 != 0) {
-                fprintf(stderr, "Misaligned PC fault\n");
-                exit(1);
-            }
 
             machine->cpu.pc = target;
             advance = false;
@@ -160,28 +198,107 @@ void step(Machine *machine) {
         }
 
         case OP_JXX: {
-            int32_t target = machine->cpu.pc + 4 + sign_extend_13(B_DISPLACEMENT(word)) * 4;
-            if (target % 4 != 0) {
-                fprintf(stderr, "Misaligned PC fault\n");
-                exit(1);
-            }
+            uint32_t target = machine->cpu.pc + 4 + sign_extend_13(B_DISPLACEMENT(word)) * 4;
 
-            uint32_t operand = B_REGISTER(word) ? (B_OPERAND(word) & 0xF) : B_OPERAND(word);
+            uint32_t operand = B_REGISTER(word) ? (R(B_OPERAND(word) & 0xF)) : B_OPERAND(word);
 
             bool jump = false;
             switch (B_COND(word)) {
-                case COND_JEQ:  if (B_RN(word) == operand) jump = true; break;
-                case COND_JGE:  if ((int32_t)B_RN(word) >= (int32_t)operand) jump = true; break;
-                case COND_JGEU: if (B_RN(word) >= operand) jump = true; break;
-                case COND_JLT:  if ((int32_t)B_RN(word)  < (int32_t)operand) jump = true; break;
-                case COND_JLTU: if (B_RN(word) < operand) jump = true; break;
-                case COND_JNE:  if (B_RN(word) != operand) jump = true; break;
+                case COND_JEQ:  if (R(B_RN(word)) == operand) jump = true; break;
+                case COND_JGE:  if (signed32(R(B_RN(word))) >= signed32(operand)) jump = true; break;
+                case COND_JGEU: if (R(B_RN(word)) >= operand) jump = true; break;
+                case COND_JLT:  if (signed32(R(B_RN(word)))  < signed32(operand)) jump = true; break;
+                case COND_JLTU: if (R(B_RN(word)) < operand) jump = true; break;
+                case COND_JNE:  if (R(B_RN(word)) != operand) jump = true; break;
                 default: {
                     fprintf(stderr, "Unknown jump condition\n");
-                    exit(1);
+                    return false;
                 }
             }
 
+            if (jump) {
+                machine->cpu.pc = target;
+                advance = false;
+            }
+
+            break;
+        }
+
+        case OP_JMPR: {
+            if (R(I_RN(word)) % 4 != 0) {
+                fprintf(stderr, "Misaligned PC fault\n");
+                return false;
+            }
+
+            machine->cpu.pc = R(I_RN(word));
+            advance = false;
+            break;
+        }
+
+        case OP_CALL: {
+            int32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
+            write_u32le(machine->mem, R(RSP), machine->cpu.pc + 4);
+            R(RSP) -= 4;
+            machine->cpu.pc = target;
+            advance = false;
+            break;
+        }
+
+        case OP_CALLR: {
+            if (R(I_RN(word)) % 4 != 0) {
+                fprintf(stderr, "Misaligned PC fault\n");
+                return false;
+            }
+
+            write_u32le(machine->mem, R(RSP), machine->cpu.pc + 4);
+            R(RSP) -= 4;
+
+            machine->cpu.pc = R(I_RN(word));
+            advance = false;
+            break;
+        }
+
+        case OP_RET: {
+            R(RSP) += 4;
+            uint32_t target = read_u32le(machine->mem, R(RSP));
+            machine->cpu.pc = target;
+            advance = false;
+            break;
+        }
+
+        case OP_LDR: {
+            uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
+            if (address % 4 != 0) {
+                fprintf(stderr, "Misaligned data access fault\n");
+                return false;
+            }
+        
+            R(M_RD(word)) = read_u32le(machine->mem, address);
+            break;
+        }
+
+        case OP_STR: {
+            uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
+            if (address % 4 != 0) {
+                fprintf(stderr, "Misaligned data access fault\n");
+                return false;
+            }
+        
+            write_u32le(machine->mem, address, R(M_RD(word)));
+            break;
+        }
+
+        case OP_LDRB: {
+            uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
+
+            R(M_RD(word)) = machine->mem[address];
+            break;
+        }
+
+        case OP_STRB: {
+            uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
+
+            machine->mem[address] = R(M_RD(word));
             break;
         }
 
@@ -189,13 +306,40 @@ void step(Machine *machine) {
             break;
         }
 
+        case OP_HALT: {
+            return false;
+        }
+
+        case OP_RPC: {
+            R(S_REG(word)) = machine->cpu.pc;
+            break;
+        }
+
+        case OP_FLAGS: {
+            if (S_WRITE(word)) {
+                uint32_t value = S_REGISTER(word) ? S_REG(word) : S_PAYLOAD(word);
+                if (machine->cpu.flags & FLAG_PRV == 0) {
+                    fprintf(stderr, "Privilege Violation fault\n");
+                    return false;
+                }
+                machine->cpu.flags = value;
+                machine->cpu.r = (value & FLAG_PRV) ? machine->cpu.ksr : machine->cpu.usr;
+            } else {
+                R(S_REG(word)) = machine->cpu.flags;
+            }
+
+            break;
+        }
+
         default: {
             fprintf(stderr, "Unknown opcode 0x%X!\n", OPCODE(word));
-            exit(1);
+            return false;
         }
     }
 
     if (advance) machine->cpu.pc += 4;
+
+    return true;
 }
 
 int main(int argc, char **argv) {
@@ -214,8 +358,8 @@ int main(int argc, char **argv) {
     memcpy(m.mem + 0x1000, img, imgsz);
     cpu_reset(&m.cpu);
 
-    for (size_t i = 0; i < 1000000; i++) {
-        step(&m);
+    while (true) {
+        if (!step(&m)) break;
     }
 
     printf("reg 0 = %d\n", m.cpu.r[0]);

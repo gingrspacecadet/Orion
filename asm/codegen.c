@@ -368,6 +368,7 @@ const OpConfig opcodes[] = {
     {"ldr", TYPE_M, OP_LDR},
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
+    {"halt", TYPE_X, OP_HALT},
 };
 
 static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, dataoff_t offset) {

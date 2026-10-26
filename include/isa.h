@@ -26,6 +26,7 @@
     X(CALLR) \
     X(RET) \
     X(FADD) \
+    X(FSUB) \
     X(FMUL) \
     X(FDIV) \
     X(FCMP) \
@@ -87,12 +88,12 @@ typedef enum {
 #define A_OPERAND(word)         (((word) >> 2)  & 0xFFFF)
 #define A_REGISTER(word)        (((word) >> 1)  & 0x1)
 #define M_RN(word)              A_RN(word)
-#define M_RD(word)              M_RD(word)
+#define M_RD(word)              A_RD(word)
 #define M_OPERAND(word)         A_OPERAND(word)
 #define M_REGISTER(word)        A_REGISTER(word)
 #define S_REG(word)             (((word) >> 22) & 0xF)
 #define S_PAYLOAD(word)         (((word) >> 6)  & 0xFFFF)
 #define S_REGISTER(word)        (((word) >> 1)  & 0x1)
-#define S_WRITE(worD)           ((word)         & 0x1)
+#define S_WRITE(word)           ((word)         & 0x1)
 
 #endif
