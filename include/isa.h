@@ -96,4 +96,26 @@ typedef enum {
 #define S_REGISTER(word)        (((word) >> 1)  & 0x1)
 #define S_WRITE(word)           ((word)         & 0x1)
 
+#define BOOT 0x00001000
+#define IVHT 0x00010000
+#define ICU  0x00010400
+#define PIT  0x00010500
+#define MTU  0x00010600
+#define PCU  0x00010800
+#define RAM  0x00020000
+
+#define INVALID_INSTR   0x00
+#define MISALIGNED_PC   0x01
+#define INVALID_MEM     0x02
+#define STACK_UNDERFLOW 0x03
+#define STACK_OVERFLOW  0x04
+#define ITLB_MISS       0x05
+#define DTLB_MISS       0x06
+#define PAGE_FAULT      0x07
+#define SYSCALL         0x08
+#define ARITHMETIC_FAULT  0x09
+#define MISALIGNED_DATA 0x0A
+#define PRIV_VIOLATION  0x0B
+#define NMI             0xFF
+
 #endif

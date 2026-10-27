@@ -53,6 +53,8 @@ typedef struct {
         #define FLAG_VM  1u << 2
         #define FLAG_TM  1u << 3
     Register pc;
+    bool int_pin;
+    bool running;
 } Cpu;
 
 typedef struct {
@@ -64,6 +66,7 @@ void cpu_reset(Cpu *cpu) {
     cpu->pc = 0x1000;
     cpu->flags = 0x2;
     cpu->r = cpu->ksr;
+    cpu->running = true;
 }
 
 #define R(N) machine->cpu.r[N]
@@ -102,6 +105,46 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
     return (uint32_t)sign_extend_16(A_OPERAND(word));
 }
 
+bool cpu_raise_exception(Machine *machine, uint8_t vector) {
+    fprintf(stderr, "EXCEPTION %d!!!!!!\n", vector);
+    uint32_t flags = machine->cpu.flags;
+    uint32_t return_pc = machine->cpu.pc + 4;
+    machine->cpu.flags &= ~FLAG_IE;
+    machine->cpu.flags |= FLAG_PRV;
+    machine->cpu.r = machine->cpu.ksr;
+
+    Register *sp = &machine->cpu.r[RSP];
+
+    if (*sp < 8) {
+        machine->cpu.running = false;
+        return false; // double fault!
+    }
+
+    *sp -= 4;
+    write_u32le(machine->mem, *sp, flags);
+    *sp -= 4;
+    write_u32le(machine->mem, *sp, return_pc);
+
+    machine->cpu.int_pin = true;
+
+    machine->cpu.pc = read_u32le(machine->mem, IVHT + (uint32_t)vector * 4);
+
+    return true;
+}
+
+// TODO: double faults
+
+static inline void push32(Machine *machine, uint32_t v) {
+    R(RSP) -= 4;
+    write_u32le(machine->mem, R(RSP), v);
+}
+
+static inline uint32_t pop32(Machine *machine) {
+    uint32_t v = read_u32le(machine->mem, R(RSP));
+    R(RSP) += 4;
+    return v;
+}
+
 bool step(Machine *machine) {
     uint32_t word = read_u32le(machine->mem, machine->cpu.pc);
 
@@ -128,12 +171,12 @@ bool step(Machine *machine) {
             int64_t rhs = A_REGISTER(word) ? signed32(R(A_OPERAND(word) & 0xF)) : sign_extend_16(A_OPERAND(word));
 
             if (rhs == 0) {
-                fprintf(stderr, "Arithmetic fault: signed division by zero\n");
+                cpu_raise_exception(machine, ARITHMETIC_FAULT);
                 return false;
             }
 
             if (lhs == INT32_MIN && rhs == -1) {
-                fprintf(stderr, "Arithmetic fault: signed division overflow\n");
+                cpu_raise_exception(machine, ARITHMETIC_FAULT);
                 return false;
             }
 
@@ -146,7 +189,7 @@ bool step(Machine *machine) {
             uint32_t rhs = A_REGISTER(word) ? R(A_OPERAND(word) & 0xF) : A_OPERAND(word);
 
             if (rhs == 0) {
-                fprintf(stderr, "Arithmetic fault: unsigned division by zero\n");
+                cpu_raise_exception(machine, ARITHMETIC_FAULT);
                 return false;
             }
 
@@ -191,7 +234,6 @@ bool step(Machine *machine) {
 
         case OP_JMP: {
             int32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
-
             machine->cpu.pc = target;
             advance = false;
             break;
@@ -212,6 +254,7 @@ bool step(Machine *machine) {
                 case COND_JNE:  if (R(B_RN(word)) != operand) jump = true; break;
                 default: {
                     fprintf(stderr, "Unknown jump condition\n");
+                    cpu_raise_exception(machine, INVALID_INSTR);
                     return false;
                 }
             }
@@ -226,7 +269,7 @@ bool step(Machine *machine) {
 
         case OP_JMPR: {
             if (R(I_RN(word)) % 4 != 0) {
-                fprintf(stderr, "Misaligned PC fault\n");
+                cpu_raise_exception(machine, MISALIGNED_PC);
                 return false;
             }
 
@@ -237,8 +280,7 @@ bool step(Machine *machine) {
 
         case OP_CALL: {
             int32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
-            write_u32le(machine->mem, R(RSP), machine->cpu.pc + 4);
-            R(RSP) -= 4;
+            push32(machine, machine->cpu.pc + 4);
             machine->cpu.pc = target;
             advance = false;
             break;
@@ -246,12 +288,11 @@ bool step(Machine *machine) {
 
         case OP_CALLR: {
             if (R(I_RN(word)) % 4 != 0) {
-                fprintf(stderr, "Misaligned PC fault\n");
+                cpu_raise_exception(machine, MISALIGNED_PC);
                 return false;
             }
 
-            write_u32le(machine->mem, R(RSP), machine->cpu.pc + 4);
-            R(RSP) -= 4;
+            push32(machine, machine->cpu.pc + 4);
 
             machine->cpu.pc = R(I_RN(word));
             advance = false;
@@ -259,9 +300,7 @@ bool step(Machine *machine) {
         }
 
         case OP_RET: {
-            R(RSP) += 4;
-            uint32_t target = read_u32le(machine->mem, R(RSP));
-            machine->cpu.pc = target;
+            machine->cpu.pc = pop32(machine);
             advance = false;
             break;
         }
@@ -269,7 +308,7 @@ bool step(Machine *machine) {
         case OP_LDR: {
             uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
             if (address % 4 != 0) {
-                fprintf(stderr, "Misaligned data access fault\n");
+                cpu_raise_exception(machine, MISALIGNED_DATA);
                 return false;
             }
         
@@ -280,7 +319,7 @@ bool step(Machine *machine) {
         case OP_STR: {
             uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
             if (address % 4 != 0) {
-                fprintf(stderr, "Misaligned data access fault\n");
+                cpu_raise_exception(machine, MISALIGNED_DATA);
                 return false;
             }
         
@@ -307,6 +346,7 @@ bool step(Machine *machine) {
         }
 
         case OP_HALT: {
+            machine->cpu.running = false;
             return false;
         }
 
@@ -318,9 +358,12 @@ bool step(Machine *machine) {
         case OP_FLAGS: {
             if (S_WRITE(word)) {
                 uint32_t value = S_REGISTER(word) ? S_REG(word) : S_PAYLOAD(word);
-                if (machine->cpu.flags & FLAG_PRV == 0) {
-                    fprintf(stderr, "Privilege Violation fault\n");
+                if ((machine->cpu.flags & FLAG_PRV) == 0) {
+                    cpu_raise_exception(machine, PRIV_VIOLATION);
                     return false;
+                }
+                if ((value & FLAG_TM) != 0) {
+                    cpu_raise_exception(machine, INVALID_INSTR);
                 }
                 machine->cpu.flags = value;
                 machine->cpu.r = (value & FLAG_PRV) ? machine->cpu.ksr : machine->cpu.usr;
@@ -331,8 +374,22 @@ bool step(Machine *machine) {
             break;
         }
 
+        case OP_IRET: {
+            if ((machine->cpu.flags & FLAG_PRV) == 0) {
+                cpu_raise_exception(machine, PRIV_VIOLATION);
+                return false;
+            }
+
+            machine->cpu.pc = pop32(machine);
+            machine->cpu.flags = pop32(machine);
+            advance = false;
+
+            break;
+        }
+
         default: {
             fprintf(stderr, "Unknown opcode 0x%X!\n", OPCODE(word));
+            cpu_raise_exception(machine, INVALID_INSTR);
             return false;
         }
     }
@@ -358,8 +415,14 @@ int main(int argc, char **argv) {
     memcpy(m.mem + 0x1000, img, imgsz);
     cpu_reset(&m.cpu);
 
-    while (true) {
-        if (!step(&m)) break;
+    while (m.cpu.running) {
+        step(&m);
+
+        if (m.cpu.int_pin && (m.cpu.flags & FLAG_IE)) {
+            // do some checking here or something idk
+            fprintf(stderr, "Exception occurred!\n");
+            return 1;
+        }
     }
 
     printf("reg 0 = %d\n", m.cpu.r[0]);

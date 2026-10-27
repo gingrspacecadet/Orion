@@ -24,7 +24,7 @@ typedef struct {
 #define CHECK_MUL(a, b, out) \
     (!__builtin_mul_overflow((a), (b), out))
 
-static inline void fclosep(FILE **f) {if (f) fclose(*f);}
+static inline void fclosep(FILE **f) {if (f && *f) fclose(*f);}
 
 bool read_object(char *filename, InputObject *out_obj) {
     assert(out_obj != NULL);
@@ -187,30 +187,41 @@ static bool find_output_section(const LinkContext *ctx, const char *name, uint32
     return false;
 }
 
-static bool create_output_section(LinkContext *ctx, const InputObject *obj, const obj_section_t *input, uint32_t *out_index) {
-    assert(ctx != NULL); assert(obj != NULL); assert(input != NULL); assert(out_index != NULL);
-
-    char *input_name = (char*)&obj->string_pool.data[input->name];
+static bool create_output_section(LinkContext *ctx, const char *name, const obj_section_t *input, uint32_t *out_index) {
+    assert(ctx != NULL); assert(name != NULL);
     
     OutputSection out = {
-        .align = input->align,
-        .flags = input->flags,
+        .align = input ? input->align : 2,
+        .flags = input ? input->flags : (FLAG_R | FLAG_X),
         .memory_size = 0,
     };
 
     da_init(&out.data);
 
-    out.name = malloc(strlen(input_name) + 1);
+    out.name = malloc(strlen(name) + 1);
     if (!out.name) return false;
-    strcpy(out.name, input_name);
+    strcpy(out.name, name);
 
     da_push(&ctx->sections, out);
-    *out_index = ctx->sections.len - 1;
+    if (out_index) *out_index = ctx->sections.len - 1;
 
     return true;
 }
 
+static void parse_script(LinkContext *ctx, const char *path) {
+    FILE *f __attribute__((cleanup(fclosep))) = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "Linker Error: failed to open linker script \"%s\"\n", path);
+        exit(1);
+    }
 
+    char name[32];
+    uint32_t address;
+
+    while (fscanf(f, "%31s %X", name, &address) == 2) {
+        create_output_section(ctx, name, NULL, NULL);
+    }
+}
 
 static bool align_up_u32(uint32_t value, uint32_t alignment, uint32_t *out) {
     uint64_t tmp;
@@ -234,7 +245,7 @@ static bool append_input_section(LinkContext *ctx, size_t object_index, size_t s
 
     uint32_t output_index;
     if (!find_output_section(ctx, name, &output_index))
-        if (!create_output_section(ctx, obj, input, &output_index)) return false;
+        if (!create_output_section(ctx, name, input, &output_index)) return false;
 
     OutputSection *output = &ctx->sections.data[output_index];
     if (output->flags != input->flags) return false;
@@ -776,10 +787,15 @@ int main(int argc, char **argv) {
 
     LinkContext ctx = {0};
 
+    
     if (!link_context_init(&ctx, objects.data, objects.len)) {
         fprintf(stderr, "%s: failed to initialise linker context\n", argv[0]);
         return 1;
     }
+
+    if (options.script_path)
+        parse_script(&ctx, options.script_path);
+
     if (!merge_sections(&ctx)) {
         fprintf(stderr, "%s: failed to merge sections\n", argv[0]);
         return 1;
