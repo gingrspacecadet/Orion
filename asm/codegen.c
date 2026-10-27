@@ -283,21 +283,30 @@ static bool handle_byte(Codegen *builder, const Instr *i) {
     return ok;
 }
 
+static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, dataoff_t offset);
+
 static bool handle_word(Codegen *builder, const Instr *i) {
     REQUIRE(i, i->op_count > 0, "missing argument to .word");
     for (uint8_t j = 0; j < i->op_count; j++) {
-        REQUIRE_OP_MODE(i, j, AM_IMM, "an immediate");
-        REQUIRE(i, i->ops[j].val >= -UINT32_MAX && i->ops[j].val <= UINT32_MAX, "argument must be within the word range");
+        if (i->ops[j].mode != AM_IMM && i->ops[j].mode != AM_REF) {
+            asm_error(i->line_num, ".word operand 1 must be an immediate or a reference");
+            return false;
+        }
+        if (i->ops[j].mode == AM_IMM) REQUIRE(i, i->ops[j].val >= -UINT32_MAX && i->ops[j].val <= UINT32_MAX, "argument must be within the word range");
     }
 
-    bool ok = true;
     for (uint8_t j = 0; j < i->op_count; j++) {
-        bool r = emit_word(builder, (uint32_t)i->ops[j].val);
-        REQUIRE(i, r, "Failed to emit word");
-        if (!r) ok = false;
+        if (i->ops[j].mode == AM_IMM) {
+            REQUIRE(i, emit_word(builder, (uint32_t)i->ops[j].val), "Failed to emit word");
+        } else {
+            REQUIRE(i, emit_word(builder, 0), "Failed to emit word");
+            symbol_id_t id;
+            REQUIRE(i, get_or_create_symbol(builder, i->ops[j].label, &id), "Failed to find symbol \"%s\"", i->ops[j].label);
+            REQUIRE(i, emit_reloc(builder, id, RELOC_ABS32, active_section(builder)->size - sizeof(uint32_t)), "Failed to emit relocation\n");
+        }
     }
 
-    return ok;
+    return true;
 }
 
 static bool handle_global(Codegen *builder, const Instr *i) {

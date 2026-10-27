@@ -1,8 +1,22 @@
+.section .text
 .global _start
 _start:
-    add r0, r0, #4
-    mul r0, r0, #2
-    sub r0, r0, #1
-    jmp #1
-    div r0, r0, #0
+    lui rsp, #1
+    div r0, r0, #0 ; triggers fault
     halt
+
+handler:
+    add r0, r0, #69 ; proof it happened
+    halt
+
+.section .ihvt
+.word $handler
+.word $handler
+.word $handler
+.word $handler
+.word $handler
+.word $handler
+.word $handler
+.word $handler
+.word $handler
+.word $handler

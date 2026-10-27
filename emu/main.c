@@ -106,7 +106,6 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
 }
 
 bool cpu_raise_exception(Machine *machine, uint8_t vector) {
-    fprintf(stderr, "EXCEPTION %d!!!!!!\n", vector);
     uint32_t flags = machine->cpu.flags;
     uint32_t return_pc = machine->cpu.pc + 4;
     machine->cpu.flags &= ~FLAG_IE;
@@ -117,6 +116,7 @@ bool cpu_raise_exception(Machine *machine, uint8_t vector) {
 
     if (*sp < 8) {
         machine->cpu.running = false;
+        fprintf(stderr, "Double Fault\n");
         return false; // double fault!
     }
 

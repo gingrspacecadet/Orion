@@ -19,24 +19,27 @@
         size_t cap;     \
     }
 
-#define da_reserve(da, elems)                                                       \
-    do {                                                                            \
-        __auto_type _da = da;                                                       \
-        size_t _n = elems;                                                          \
-        if (_n <= _da->cap) break;                                                  \
-        assert(_n <= SIZE_MAX / sizeof(*_da->data));                                \
-        typeof(_da->data) new_ptr = realloc(_da->data, _n * sizeof(*_da->data));    \
-        assert(new_ptr);                                                            \
-        _da->data = new_ptr;                                                        \
-        _da->cap = _n;                                                              \
+#define da_reserve(da, elems)                                                   \
+    do {                                                                        \
+        __auto_type _da_reserve = (da);                                         \
+        size_t _da_reserve_n = (elems);                                         \
+        if (_da_reserve_n <= _da_reserve->cap) break;                           \
+        assert(_da_reserve_n <= SIZE_MAX / sizeof(*_da_reserve->data));         \
+        typeof(_da_reserve->data) _da_reserve_ptr =                             \
+            realloc(_da_reserve->data,                                          \
+                    _da_reserve_n * sizeof(*_da_reserve->data));                \
+        assert(_da_reserve_ptr);                                                \
+        _da_reserve->data = _da_reserve_ptr;                                    \
+        _da_reserve->cap = _da_reserve_n;                                       \
     } while (0)
 
-#define da_resize(da, elems)    \
-    do {                        \
-        __auto_type _da = da;   \
-        da_reserve(_da, elems); \
-        _da->len = elems;       \
-    } while (0)                 \
+#define da_resize(da, elems)                                                    \
+    do {                                                                        \
+        __auto_type _da_resize = (da);                                          \
+        size_t _da_resize_n = (elems);                                          \
+        da_reserve(_da_resize, _da_resize_n);                                   \
+        _da_resize->len = _da_resize_n;                                         \
+    } while (0)
 
 #define da_free(da)                 \
     do {                            \
@@ -47,15 +50,16 @@
         _da->cap  = 0;              \
     } while (0)
 
-#define da_push(da, value)                              \
-    do {                                                \
-        __auto_type _da = da;                           \
-        __auto_type _value = value;                   \
-                                                        \
-        if (_da->len == _da->cap)                       \
-            da_resize(_da, _da->cap ? _da->cap * 2 : 16); \
-                                                        \
-        _da->data[_da->len++] = _value;                 \
+#define da_push(da, value)                                                      \
+    do {                                                                        \
+        __auto_type _da_push = (da);                                            \
+        __auto_type _da_push_value = (value);                                   \
+        if (_da_push->len == _da_push->cap) {                                   \
+            size_t _da_push_cap =                                               \
+                _da_push->cap ? _da_push->cap * 2 : 16;                         \
+            da_reserve(_da_push, _da_push_cap);                                 \
+        }                                                                       \
+        _da_push->data[_da_push->len++] = _da_push_value;                       \
     } while (0)
 
 #define da_init(da) \

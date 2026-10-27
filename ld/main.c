@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <errno.h>
 #include "obj.h"
 #include "da.h"
 
@@ -143,6 +144,7 @@ typedef struct {
     uint32_t align;
     uint8_t flags;
     addr_t address;
+    bool has_address;
 } OutputSection;
 
 typedef struct {
@@ -191,8 +193,8 @@ static bool create_output_section(LinkContext *ctx, const char *name, const obj_
     assert(ctx != NULL); assert(name != NULL);
     
     OutputSection out = {
-        .align = input ? input->align : 2,
-        .flags = input ? input->flags : (FLAG_R | FLAG_X),
+        .align = input ? input->align : 0,
+        .flags = input ? input->flags : 0,
         .memory_size = 0,
     };
 
@@ -208,19 +210,60 @@ static bool create_output_section(LinkContext *ctx, const char *name, const obj_
     return true;
 }
 
-static void parse_script(LinkContext *ctx, const char *path) {
+static bool parse_script(LinkContext *ctx, const char *path) {
     FILE *f __attribute__((cleanup(fclosep))) = fopen(path, "r");
     if (!f) {
         fprintf(stderr, "Linker Error: failed to open linker script \"%s\"\n", path);
-        exit(1);
+        return false;
     }
 
-    char name[32];
-    uint32_t address;
+    char line[256];
+    unsigned line_number = 0;
 
-    while (fscanf(f, "%31s %X", name, &address) == 2) {
-        create_output_section(ctx, name, NULL, NULL);
+    while (fgets(line, sizeof(line), f)) {
+        line_number++;
+
+        char *comment = strchr(line, '#');
+        if (comment) *comment = '\0';
+
+        char *name = strtok(line, " \t\r\n");
+        if (!name) continue;
+
+        char *address_text = strtok(NULL, " \t\r\n");
+        if (strtok(NULL, " \t\r\n")) {
+            fprintf(stderr, "%s:%u: unexpected extra token\n", path, line_number);
+            return false;
+        }
+
+        uint32_t address = 0;
+        if (address_text) {
+            char *end;
+            errno = 0;
+            unsigned long value = strtoul(address_text, &end, 0);
+            if (*address_text == '-' || *end != '\0' || errno == ERANGE || value > UINT32_MAX) {
+                fprintf(stderr, "%s:%u: invalid section address \"%s\"\n", path, line_number, address_text);
+                return false;
+            }
+            address = (uint32_t)value;
+        }
+
+        uint32_t index;
+        if (find_output_section(ctx, name, &index)) {
+            fprintf(stderr, "%s:%u: duplicate section \"%s\"\n", path, line_number, name);
+            return false;
+        }
+
+        if (!create_output_section(ctx, name, NULL, &index)) {
+            fprintf(stderr, "%s:%u: failed to create section \"%s\"\n", path, line_number, name);
+            return false;
+        }
+
+        OutputSection *section = &ctx->sections.data[index];
+        section->address = address;
+        section->has_address = address_text != NULL;
     }
+
+    return true;
 }
 
 static bool align_up_u32(uint32_t value, uint32_t alignment, uint32_t *out) {
@@ -248,7 +291,13 @@ static bool append_input_section(LinkContext *ctx, size_t object_index, size_t s
         if (!create_output_section(ctx, name, input, &output_index)) return false;
 
     OutputSection *output = &ctx->sections.data[output_index];
-    if (output->flags != input->flags) return false;
+    if (output->align == 0) {
+        output->align = input->align;
+        output->flags = input->flags;
+    } else if (output->flags != input->flags) {
+        fprintf(stderr, "incompatible flags merging section \"%s\"\n", name);
+        return false;
+    }
 
     uint32_t offset;
     if (!align_up_u32(output->memory_size, input->align, &offset)) return false;
@@ -288,6 +337,7 @@ bool link_context_init(LinkContext *ctx, InputObject *objects, size_t object_cou
 
     da_init(&ctx->sections);
     da_init(&ctx->global_symbols);
+    da_init(&ctx->placements);
 
     da_resize(&ctx->placements, object_count);
 
@@ -351,19 +401,48 @@ bool layout_sections(LinkContext *ctx, addr_t base_address) {
     for (size_t i = 0; i < ctx->sections.len; i++) {
         OutputSection *section = &ctx->sections.data[i];
 
-        if (section->align == 0 ||
-            (section->align & (section->align - 1)) != 0)
+        uint32_t alignment = section->align ? section->align : 1;
+        if ((alignment & (alignment - 1)) != 0) {
+            fprintf(stderr, "Invalid alignment for section \"%s\": %u\n", section->name, alignment);
             return false;
+        }
 
-        uint64_t alignment = section->align;
-        uint64_t start = (cursor + alignment - 1) & ~(alignment - 1);
+        uint64_t start;
+        if (section->has_address) {
+            start = section->address;
+            if (start % alignment != 0) {
+                fprintf(stderr, "section \"%s\": address 0x%08llX violates alignment %llu\n", section->name, (unsigned long long)start, (unsigned long long)alignment);
+                return false;
+            }
+        } else {
+            start = (cursor + alignment - 1) & ~(uint64_t)(alignment - 1);
+        }
 
-        if (start > UINT32_MAX)
+        if (start > UINT32_MAX) {
+            fprintf(stderr, "section \"%s\": start address exceeds 32-bit address space\n", section->name);
             return false;
+        }
 
         uint64_t end = start + section->memory_size;
-        if (end > address_space_end)
+        if (end > address_space_end) {
+            fprintf(stderr, "section \"%s\": address range exceeds 32-bit address space\n", section->name);
             return false;
+        }
+
+        if (section->memory_size != 0) {
+            for (size_t j = 0; j < i; j++) {
+                const OutputSection *previous = &ctx->sections.data[j];
+                if (previous->memory_size == 0)
+                    continue;
+
+                uint64_t previous_end = (uint64_t)previous->address + previous->memory_size;
+                if (start < previous_end && previous->address < end) {
+                    fprintf(stderr, "sections \"%s\" and \"%s\" overlap\n", previous->name, section->name);
+                    return false;
+                }
+            }
+        }
+
 
         section->address = (addr_t)start;
         cursor = end;
@@ -551,35 +630,50 @@ bool write_u32_le(uint8_t *data, size_t len, size_t offset, uint32_t value) {
 
 bool apply_relocation(LinkContext *ctx, size_t object_index, const obj_reloc_t *reloc) {
     __auto_type resolved_symbols = ctx->resolved_symbols.data[object_index];
-    if (reloc->symbol >= resolved_symbols.len)
+    if (reloc->symbol >= resolved_symbols.len) {
+        fprintf(stderr, "failed to apply relocation: symbol id %u out of range\n", reloc->symbol);
         return false;
+    }
 
     const ResolvedSymbol *symbol = &resolved_symbols.data[reloc->symbol];
 
-    if (!symbol->resolved)
+    if (!symbol->resolved) {
+        fprintf(stderr, "failed to apply relocation: unresolved symbol\n");
         return false;
+    }
 
     SectionPlacement placement;
-    if (!get_section_placement(ctx, object_index, reloc->section, &placement))
+    if (!get_section_placement(ctx, object_index, reloc->section, &placement)) {
+        fprintf(stderr, "failed to apply relocation: unknown placement\n");
         return false;
+    }
 
     OutputSection *output = &ctx->sections.data[placement.output_section];
 
-    if (output->flags & FLAG_U)
+    if (output->flags & FLAG_U) {
+        fprintf(stderr, "failed to apply relocation: cannot write in uninitialised section\n");
         return false;
+    }
 
     uint32_t Q;
-    if (!CHECK_ADD(placement.offset, reloc->offset, &Q))
+    if (!CHECK_ADD(placement.offset, reloc->offset, &Q)) {
+        fprintf(stderr, "failed to apply relocation: offset out of 32-bit bounds\n");
         return false;
+    }
 
     uint32_t word;
-    if (!read_u32_le(output->data.data, output->data.len, Q, &word))
+    if (!read_u32_le(output->data.data, output->data.len, Q, &word)) {
+        fprintf(stderr, "failed to apply relocation: failed to read word\n");
+        fprintf(stderr, "len %zu offset %u\n", output->data.len, Q);
         return false;
+    }
 
     int64_t target = (int64_t)symbol->address + reloc->addend;
 
-    if (target < 0 || target > UINT32_MAX)
+    if (target < 0 || target > UINT32_MAX) {
+        fprintf(stderr, "failed to apply relocation: target out-of-bounds\n");
         return false;
+    }
 
     switch (reloc->type) {
         case RELOC_ABS32:
@@ -793,8 +887,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (options.script_path)
-        parse_script(&ctx, options.script_path);
+    if (options.script_path && !parse_script(&ctx, options.script_path)) {
+        return 1;
+    }
 
     if (!merge_sections(&ctx)) {
         fprintf(stderr, "%s: failed to merge sections\n", argv[0]);
@@ -826,9 +921,20 @@ int main(int argc, char **argv) {
         if (!out) return 1;
 
         for (size_t i = 0; i < ctx.sections.len; i++) {
-            size_t len = ctx.sections.data[i].data.len;
+            OutputSection *section = &ctx.sections.data[i];
+            if (section->address < 0x1000) {
+                fprintf(stderr, "%s: flat output cannot represent section \"%s\" below 0x1000\n", argv[0], section->name);
+                return 1;
+            }
 
-            if (len != 0 && fwrite(ctx.sections.data[i].data.data, 1, len, out) != len)
+            long offset = (long)(section->address - 0x1000);
+            if (fseek(out, offset, SEEK_SET) != 0) {
+                fprintf(stderr, "%s: failed to seek while writing flat output\n", argv[0]);
+                return 1;
+            }
+
+            size_t len = section->data.len;
+            if (len != 0 && fwrite(section->data.data, 1, len, out) != len)
                 return 1;
         }
     } else {
