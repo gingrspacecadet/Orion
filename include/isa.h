@@ -97,7 +97,7 @@ typedef enum {
 #define S_WRITE(word)           ((word)         & 0x1)
 
 #define BOOT 0x00001000
-#define IVHT 0x00010000
+#define IHVT 0x00010000
 #define ICU  0x00010400
 #define PIT  0x00010500
 #define MTU  0x00010600
@@ -117,5 +117,24 @@ typedef enum {
 #define MISALIGNED_DATA 0x0A
 #define PRIV_VIOLATION  0x0B
 #define NMI             0xFF
+
+#define ICU_IRR     0x00
+#define ICU_ISR     0x04
+#define ICU_IMR     0x08
+#define ICU_PRIO    0x0C
+#define ICU_VEC     0x2C
+#define ICU_EOI     0x4C
+#define ICU_DEFAULT 0x50
+
+#define PIT_CTRL    0x00
+#define PIT_INT_LO  0x04
+#define PIT_INT_HI  0x08
+#define PIT_CUR_LO  0x0C
+#define PIT_CUR_HI  0x10
+#define PIT_ACK     0x14
+
+#define PIT_CTRL_ENABLE 1u << 0
+#define PIT_CTRL_AUTO   1u << 1
+#define PIT_CTRL_INT    1u << 2
 
 #endif

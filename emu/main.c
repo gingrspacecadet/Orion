@@ -5,7 +5,10 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include "isa.h"
+#include "icu.h"
+#include "pit.h"
 
 static uint8_t *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
@@ -59,12 +62,13 @@ typedef struct {
 
 typedef struct {
     Cpu cpu;
+    Icu icu;
     uint8_t *mem;
 } Machine;
 
 void cpu_reset(Cpu *cpu) {
     cpu->pc = 0x1000;
-    cpu->flags = 0x2;
+    cpu->flags = FLAG_PRV | FLAG_IE;
     cpu->r = cpu->ksr;
     cpu->running = true;
 }
@@ -105,12 +109,15 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
     return (uint32_t)sign_extend_16(A_OPERAND(word));
 }
 
+#define set_reg_bank(cpu) \
+    cpu.r = (cpu.flags & FLAG_PRV) ? cpu.ksr : cpu.usr;
+
 bool cpu_raise_exception(Machine *machine, uint8_t vector) {
     uint32_t flags = machine->cpu.flags;
     uint32_t return_pc = machine->cpu.pc + 4;
     machine->cpu.flags &= ~FLAG_IE;
     machine->cpu.flags |= FLAG_PRV;
-    machine->cpu.r = machine->cpu.ksr;
+    set_reg_bank(machine->cpu);
 
     Register *sp = &machine->cpu.r[RSP];
 
@@ -125,9 +132,7 @@ bool cpu_raise_exception(Machine *machine, uint8_t vector) {
     *sp -= 4;
     write_u32le(machine->mem, *sp, return_pc);
 
-    machine->cpu.int_pin = true;
-
-    machine->cpu.pc = read_u32le(machine->mem, IVHT + (uint32_t)vector * 4);
+    machine->cpu.pc = read_u32le(machine->mem, IHVT + (uint32_t)vector * 4);
 
     return true;
 }
@@ -366,7 +371,7 @@ bool step(Machine *machine) {
                     cpu_raise_exception(machine, INVALID_INSTR);
                 }
                 machine->cpu.flags = value;
-                machine->cpu.r = (value & FLAG_PRV) ? machine->cpu.ksr : machine->cpu.usr;
+                set_reg_bank(machine->cpu);
             } else {
                 R(S_REG(word)) = machine->cpu.flags;
             }
@@ -382,6 +387,8 @@ bool step(Machine *machine) {
 
             machine->cpu.pc = pop32(machine);
             machine->cpu.flags = pop32(machine);
+            set_reg_bank(machine->cpu);
+
             advance = false;
 
             break;
@@ -414,15 +421,35 @@ int main(int argc, char **argv) {
 
     memcpy(m.mem + 0x1000, img, imgsz);
     cpu_reset(&m.cpu);
+    m.icu = (Icu){0};
+    Pit pit;
+    TimerPool timer_pool = {0};
+    pit_init(&pit, &timer_pool, icu_get_irq(&m.icu, 0));
+    pit.ctrl |= 1 | 3 | 7;
+
+    uint64_t last_ns;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    last_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
     while (m.cpu.running) {
         step(&m);
 
-        if (m.cpu.int_pin && (m.cpu.flags & FLAG_IE)) {
-            // do some checking here or something idk
-            fprintf(stderr, "Exception occurred!\n");
-            return 1;
+        if (m.icu.has_int && (m.cpu.flags & FLAG_IE)) {
+            uint8_t vector;
+            
+            if (icu_accept_irq(&m.icu, &vector) != -1) {
+                cpu_raise_exception(&m, vector);
+                continue;
+            }
         }
+
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+        timer_pool.virtual_time += now_ns - last_ns;
+        last_ns = now_ns;
+
+        timer_run_expired(&timer_pool);
     }
 
     printf("reg 0 = %d\n", m.cpu.r[0]);

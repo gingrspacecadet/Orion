@@ -12,7 +12,7 @@
 #include "isa.h"
 
 #define MAX_ENTRIES UINT8_MAX
-#define MAX_SECTION_SIZE UINT8_MAX
+#define MAX_SECTION_SIZE 1024
 
 typedef struct {
     obj_header_t header;
@@ -375,8 +375,10 @@ const OpConfig opcodes[] = {
     {"divu", TYPE_A, OP_DIVU},
     {"lui", TYPE_M, OP_LUI},
     {"ldr", TYPE_M, OP_LDR},
+    {"str", TYPE_M, OP_STR},
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
+    {"iret", TYPE_X, OP_IRET},
     {"halt", TYPE_X, OP_HALT},
 };
 
