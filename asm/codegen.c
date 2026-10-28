@@ -373,6 +373,27 @@ static uint32_t encode_j(Opcodes code, uint32_t displacement) {
     return word;
 }
 
+static uint32_t encode_b(Opcodes code, uint8_t cond, uint8_t rn, uint8_t operand, int16_t displacement, bool reg) {
+    uint32_t word = 0;
+    word |= (code & 0x7F) << 26;
+    word |= (cond & 0x7) << 23;
+    word |= (rn & 0xF) << 19;
+    word |= (operand & 0x1F) << 14;
+    word |= (displacement & 0x1FFF) << 1;
+    word |= (reg & 0x1) << 0;
+    return word;
+}
+
+static uint8_t branch_condition(const char *name) {
+    if (strcasecmp(name, "jeq") == 0) return 1;
+    if (strcasecmp(name, "jne") == 0) return 2;
+    if (strcasecmp(name, "jlt") == 0) return 3;
+    if (strcasecmp(name, "jge") == 0) return 4;
+    if (strcasecmp(name, "jltu") == 0) return 5;
+    if (strcasecmp(name, "jgeu") == 0) return 6;
+    return 0;
+}
+
 static uint32_t encode_s(Opcodes code, uint8_t rn, uint16_t payload, bool reg, bool write) {
     uint32_t word = 0;
     word |= (code & 0x7F) << 26;
@@ -403,12 +424,18 @@ const OpConfig opcodes[] = {
     {"mul", TYPE_A, OP_MUL},
     {"div", TYPE_A, OP_DIV},
     {"divu", TYPE_A, OP_DIVU},
-    {"lui", TYPE_M, OP_LUI},
+    {"lui", TYPE_A, OP_LUI},
     {"ldr", TYPE_M, OP_LDR},
     {"str", TYPE_M, OP_STR},
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
     {"jmpr", TYPE_I, OP_JMPR},
+    {"jeq", TYPE_B, OP_JXX},
+    {"jne", TYPE_B, OP_JXX},
+    {"jlt", TYPE_B, OP_JXX},
+    {"jge", TYPE_B, OP_JXX},
+    {"jltu", TYPE_B, OP_JXX},
+    {"jgeu", TYPE_B, OP_JXX},
     {"iret", TYPE_X, OP_IRET},
     {"ret", TYPE_X, OP_RET},
     {"halt", TYPE_X, OP_HALT},
@@ -566,6 +593,50 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
                 REQUIRE_OP_MODE(i, 0, AM_REF);
             }
 
+            break;
+        }
+
+        case TYPE_B: {
+            REQUIRE_OP_COUNT(i, 3);
+            REQUIRE_OP_MODE(i, 0, AM_REG);
+            uint8_t cond = branch_condition(i->name);
+            if (cond == 0) {
+                asm_error(i->line_num, "Unknown branch condition %s\n", i->name);
+                builder->failed = true;
+                return false;
+            }
+
+            if (i->ops[1].mode == AM_REG) {
+                if (i->ops[1].reg < 0 || i->ops[1].reg > 15) {
+                    asm_error(i->line_num, "%s second operand must be a register or immediate\n", i->name);
+                    builder->failed = true;
+                    return false;
+                }
+            } else if (i->ops[1].mode != AM_IMM) {
+                REQUIRE_OP_MODE(i, 1, AM_REG);
+            }
+
+            uint8_t operand = 0;
+            bool reg_rhs = false;
+            if (i->ops[1].mode == AM_REG) {
+                operand = (uint8_t)(i->ops[1].reg & 0xF);
+                reg_rhs = true;
+            } else if (i->ops[1].mode == AM_IMM) {
+                operand = (uint8_t)(i->ops[1].val & 0x1F);
+                reg_rhs = false;
+            }
+
+            if (i->ops[2].mode == AM_REF) {
+                symbol_id_t id;
+                get_or_create_symbol(builder, i->ops[2].label, &id);
+                emit_word(builder, encode_b(OP_JXX, cond, i->ops[0].reg, operand, 0, reg_rhs));
+                emit_reloc(builder, id, RELOC_PCREL13, active_section(builder)->size - sizeof(uint32_t));
+            } else if (i->ops[2].mode == AM_IMM) {
+                REQUIRE(i, (uint32_t)i->ops[2].val < 0x2000, "%s displacement must fit in 13 bits\n", i->name);
+                emit_word(builder, encode_b(OP_JXX, cond, i->ops[0].reg, operand, (int16_t)i->ops[2].val, reg_rhs));
+            } else {
+                REQUIRE_OP_MODE(i, 2, AM_REF);
+            }
             break;
         }
 
