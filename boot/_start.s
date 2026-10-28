@@ -15,7 +15,8 @@ _start:
     
     ; launch the kernel!
     ; for now, the emulator loads it at address 0x00020000
-    jmp #0x00020000
+    mov r0, #0x00020000
+    jmpr r0
 
     ; just in case
     halt

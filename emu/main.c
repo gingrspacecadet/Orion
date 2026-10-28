@@ -70,7 +70,7 @@ typedef struct {
 
 void cpu_reset(Cpu *cpu) {
     cpu->pc = 0x1000;
-    cpu->flags = FLAG_PRV | FLAG_IE;
+    cpu->flags = FLAG_PRV;
     cpu->r = cpu->ksr;
     cpu->running = true;
 }
@@ -241,7 +241,8 @@ bool step(Machine *machine) {
         }
 
         case OP_JMP: {
-            int32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
+            uint32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
+            printf("jumping to 0x%08X\n", J_DISPLACEMENT(word));
             machine->cpu.pc = target;
             advance = false;
             break;
@@ -422,7 +423,13 @@ int main(int argc, char **argv) {
 
     mmio_init(&machine.mmio);
 
-    memcpy(machine.mmio.mem + 0x1000, img, imgsz); // temporary!!
+    memcpy(machine.mmio.mem + BOOT, img, imgsz); // temporary!!
+
+    if (argc == 3) {
+        img = load_file(argv[2], &imgsz);
+        memcpy(machine.mmio.mem + RAM, img, imgsz);
+    }
+
     cpu_reset(&machine.cpu);
     machine.icu = (Icu){0};
     Pit pit;

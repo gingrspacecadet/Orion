@@ -4,35 +4,27 @@ LDFLAGS :=
 
 BUILD := build
 
-TARGETS := emu asm disasm objdump ld
+EXE_TARGETS := emu asm disasm objdump ld
+IMG_TARGETS := boot kernel
 
 .PHONY: all clean
-all: $(TARGETS) boot
-run: emu boot
-	@$(BUILD)/emu $(BUILD)/boot.bin
+all: $(EXE_TARGETS) $(IMG_TARGETS)
+run: emu boot kernel
+	@$(BUILD)/emu $(BUILD)/boot.bin $(BUILD)/kernel.bin
 clean:
 	@rm -rf $(BUILD)
-
-BOOT_SRC := $(shell find boot/ -type f -name '*.s' 2>/dev/null | LC_ALL=C sort)
-BOOT_OBJ := $(addprefix $(BUILD)/frag/,$(BOOT_SRC:.s=.s.o))
-
-boot: $(BUILD)/boot.bin
-
-$(BUILD)/frag/%.s.o: %.s asm
-	@mkdir -p "$(dir $@)"
-	$(BUILD)/asm $< $@
-
-$(BUILD)/boot.bin: $(BOOT_OBJ) ld
-	@mkdir -p "$(dir $@)"
-	$(BUILD)/ld $(BOOT_OBJ) -o $@ -f -T boot/boot.ld
 
 $(BUILD)/frag/%.c.o: %.c
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -c $< -o $@
 
-define TARGET_TEMPLATE
+$(BUILD)/frag/%.s.o: %.s $(BUILD)/asm
+	@mkdir -p "$(dir $@)"
+	$(BUILD)/asm $< $@
+
+define EXE_TEMPLATE
 override $(1)_SRC := $$(shell find $(1)/ -type f -name '*.c' 2>/dev/null | LC_ALL=C sort)
-override $(1)_OBJ := $$(addprefix $$(BUILD)/frag/$(1)/, $$(notdir $$($(1)_SRC:.c=.c.o)))
+override $(1)_OBJ := $$(addprefix $$(BUILD)/frag/, $$($(1)_SRC:.c=.c.o))
 override $(1)_DEPS := $$(addprefix $$(BUILD)/frag/, $$($(1)_SRC:.c=.c.d))
 
 -include $$($(1)_DEPS)
@@ -45,7 +37,21 @@ $$(BUILD)/$(1): $$($(1)_OBJ)
 
 endef
 
-$(foreach t,$(TARGETS),$(eval $(call TARGET_TEMPLATE,$(t))))
+define IMG_TEMPLATE
+
+override $(1)_SRC := $$(shell find $(1)/ -type f -name '*.s' 2>/dev/null | LC_ALL=C sort)
+override $(1)_OBJ := $$(addprefix $$(BUILD)/frag/,$$($(1)_SRC:.s=.s.o))
+
+$(1): $$(BUILD)/$(1).bin
+
+$$(BUILD)/$(1).bin: $$($(1)_OBJ) $(BUILD)/ld $(1)/$(1).ld
+	@mkdir -p "$$(dir $$@)"
+	$(BUILD)/ld $$($(1)_OBJ) -o $$@ -f -T $(1)/$(1).ld
+
+endef
+
+$(foreach t,$(EXE_TARGETS),$(eval $(call EXE_TEMPLATE,$(t))))
+$(foreach t,$(IMG_TARGETS),$(eval $(call IMG_TEMPLATE,$(t))))
 
 TEST_SRC := $(shell find tests/ -type f -name '*.c' 2>/dev/null | LC_ALL=C sort)
 TEST_OBJ := $(addprefix $(BUILD)/frag/,$(TEST_SRC:.c=.c.o))

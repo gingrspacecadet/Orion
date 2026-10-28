@@ -302,6 +302,7 @@ static bool handle_word(Codegen *builder, const Instr *i) {
     for (uint8_t j = 0; j < i->op_count; j++) {
         if (i->ops[j].mode != AM_IMM && i->ops[j].mode != AM_REF) {
             asm_error(i->line_num, ".word operand 1 must be an immediate or a reference");
+            builder->failed = true;
             return false;
         }
         if (i->ops[j].mode == AM_IMM) REQUIRE(i, i->ops[j].val >= -UINT32_MAX && i->ops[j].val <= UINT32_MAX, "argument must be within the word range");
@@ -382,6 +383,13 @@ static uint32_t encode_s(Opcodes code, uint8_t rn, uint16_t payload, bool reg, b
     return word;
 }
 
+static uint32_t encode_i(Opcodes code, uint8_t rn) {
+    uint32_t word = 0;
+    word |= (code & 0x7F) << 26;
+    word |= (rn & 0xF) << 22;
+    return word;
+}
+
 typedef struct {
     const char *name;
     OpcodeTypes type;
@@ -400,6 +408,7 @@ const OpConfig opcodes[] = {
     {"str", TYPE_M, OP_STR},
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
+    {"jmpr", TYPE_I, OP_JMPR},
     {"iret", TYPE_X, OP_IRET},
     {"ret", TYPE_X, OP_RET},
     {"halt", TYPE_X, OP_HALT},
@@ -489,6 +498,7 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
 
     if (conf.type == 0) {
         asm_error(i->line_num, "Unknown instruction type %s", i->name);
+        builder->failed = true;
         return false;
     }
 
@@ -520,6 +530,7 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
                 emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].val, false));
             } else {
                 asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
+                builder->failed = true;
                 return false;
             }
 
@@ -552,14 +563,22 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
                 emit_word(builder, encode_j(conf.code, 0));
                 emit_reloc(builder, id, RELOC_PCREL26, active_section(builder)->size - sizeof(uint32_t));
             } else {
-
+                REQUIRE_OP_MODE(i, 0, AM_REF);
             }
 
             break;
         }
 
+        case TYPE_I: {
+            REQUIRE_OP_COUNT(i, 1);
+            REQUIRE_OP_MODE(i, 0, AM_REG);
+            emit_word(builder, encode_i(conf.code, i->ops[0].reg));
+            break;
+        }
+
         default: {
             asm_error(i->line_num, "unimplemented instruction %s", i->name);
+            builder->failed = true;
             return false;
         }
     }
@@ -591,6 +610,7 @@ bool codegen(FILE *out, Source *source) {
 
             if (!found) {
                 asm_error(i.line_num, "Unknown directive %s", i.name);
+                builder.failed = true;
                 ok = false;
             }
         } else if (i.is_label) {
