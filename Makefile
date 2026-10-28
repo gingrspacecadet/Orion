@@ -13,6 +13,10 @@ run: emu
 clean:
 	@rm -rf $(BUILD)
 
+$(BUILD)/frag/%.c.o: %.c
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -c $< -o $@
+
 define TARGET_TEMPLATE
 override $(1)_SRC := $$(shell find $(1)/ -type f -name '*.c' 2>/dev/null | LC_ALL=C sort)
 override $(1)_OBJ := $$(addprefix $$(BUILD)/frag/$(1)/, $$(notdir $$($(1)_SRC:.c=.c.o)))
@@ -26,10 +30,20 @@ $$(BUILD)/$(1): $$($(1)_OBJ)
 	@mkdir -p "$$(dir $$@)"
 	$(CC) $$($(1)_OBJ) $(LDFLAGS) -o $$@
 
-$$(BUILD)/frag/$(1)/%.c.o: $(1)/%.c
-	@mkdir -p "$$(dir $$@)"
-	$(CC) $(CFLAGS) -c $$< -o $$@
-
 endef
 
 $(foreach t,$(TARGETS),$(eval $(call TARGET_TEMPLATE,$(t))))
+
+TEST_SRC := $(shell find tests/ -type f -name '*.c' 2>/dev/null | LC_ALL=C sort)
+TEST_OBJ := $(addprefix $(BUILD)/frag/,$(TEST_SRC:.c=.c.o))
+TEST_EMU_OBJ := $(filter-out $(BUILD)/frag/emu/main.c.o,$(emu_OBJ))
+
+-include $(TEST_OBJ:.o=.d)
+
+$(BUILD)/test_runner: $(TEST_EMU_OBJ) $(TEST_OBJ) tests/tests.ld
+	@mkdir -p "$(dir $@)"
+	$(CC) $(TEST_EMU_OBJ) $(TEST_OBJ) $(LDFLAGS) -Wl,-T,tests/tests.ld -o $@
+
+.PHONY: test
+test: $(BUILD)/test_runner
+	./$(BUILD)/test_runner

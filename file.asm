@@ -10,7 +10,9 @@ handler:
     halt
 
 __handler_0:
-    add r0, r0, #1
+    lui r1, #1
+    str r0, r1, #0x44C
+    halt
     iret
 
 .section .ihvt

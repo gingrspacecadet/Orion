@@ -43,8 +43,7 @@ int icu_next_irq(const Icu *icu) {
     int active_priority = -1;
 
     for (int i = 0; i < 32; i++) {
-        if ((icu->isr & irq_bit(i)) &&
-            (int)icu->prio[i] > active_priority) {
+        if ((icu->isr & irq_bit(i)) && (int)icu->prio[i] > active_priority) {
             active_priority = icu->prio[i];
         }
     }
@@ -60,8 +59,7 @@ int icu_next_irq(const Icu *icu) {
         if ((int)icu->prio[i] <= active_priority)
             continue;
 
-        if (selected < 0 ||
-            icu->prio[i] > icu->prio[selected]) {
+        if (selected < 0 || icu->prio[i] > icu->prio[selected]) {
             selected = i;
         }
     }
@@ -110,10 +108,9 @@ void icu_eoi(Icu *icu, uint32_t irq) {
 }
 
 uint32_t icu_read(void *state, uint32_t offset, uint8_t size) {
-    Icu *icu = state;
+    assert(state);
 
-    if (!icu)
-        return 0;
+    Icu *icu = state;
 
     if (size == 4) {
         switch (offset) {
@@ -137,10 +134,9 @@ uint32_t icu_read(void *state, uint32_t offset, uint8_t size) {
 }
 
 void icu_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
+    assert(state);
+    
     Icu *icu = state;
-
-    if (!icu)
-        return;
 
     if (size == 4) {
         switch (offset) {

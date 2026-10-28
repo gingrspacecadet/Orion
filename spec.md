@@ -333,16 +333,16 @@ Timer control registers at `0x00010500`. The PIT is supervisor-only; a user-mode
 
 | Offset | Name | Access | Description |
 |---|---|---|---|
-| `0x00` | `TIMER_CTRL` | RW | Bit 0: enable. Bit 1: autoreload. Bit 2: interrupt enable. Other bits reserved. |
-| `0x04` | `TIMER_INTERVAL_LO` | RW | Low 32 bits of the interval in nanoseconds. |
-| `0x08` | `TIMER_INTERVAL_HI` | RW | High 32 bits of the interval. |
-| `0x0C` | `TIMER_CURRENT_LO` | RO | Low 32 bits of current elapsed count. |
-| `0x10` | `TIMER_CURRENT_HI` | RO | High 32 bits of current elapsed count. |
-| `0x14` | `TIMER_ACK` | WO | Writing any value acknowledges the pending timer interrupt condition. |
+| `0x00` | `PIT_CTRL` | RW | Bit 0: enable. Bit 1: autoreload. Bit 2: interrupt enable. Other bits reserved. |
+| `0x04` | `PIT_INT_LO` | RW | Low 32 bits of the interval in nanoseconds. |
+| `0x08` | `PIT_INT_HI` | RW | High 32 bits of the interval. |
+| `0x0C` | `PIT_CUR_LO` | RO | Low 32 bits of current elapsed count. |
+| `0x10` | `PIT_CUR_HI` | RO | High 32 bits of current elapsed count. |
+| `0x14` | `PIT_ACK` | WO | Writing any value acknowledges the pending timer interrupt condition. |
 
-A transition of `ENABLE` from zero to one starts a new interval with `CURRENT=0`. The count advances in nanoseconds. When a nonzero interval expires, the timer latches a pending interrupt. In one-shot mode it stops at the interval; in autoreload mode it restarts at zero and begins another interval. An interval of zero never expires. The timer continues measuring time when interrupt generation is disabled. The interrupt request remains asserted while the pending condition is set and interrupt enable is set; `TIMER_ACK` clears the pending condition.
+A transition of `ENABLE` from zero to one starts a new interval with `CURRENT=0`. The count advances in nanoseconds. When a nonzero interval expires, the timer latches a pending interrupt. In one-shot mode it stops at the interval; in autoreload mode it restarts at zero and begins another interval. An interval of zero never expires. The timer continues measuring time when interrupt generation is disabled. The interrupt request remains asserted while the pending condition is set and interrupt enable is set; `PIT_ACK` clears the pending condition.
 
-To read `CURRENT` consistently using 32-bit accesses, read `CURRENT_HI`, then `CURRENT_LO`, then `CURRENT_HI` again; retry if the high words differ. Firmware should disable the timer while programming an interval, write both halves, acknowledge any previous request, configure control, then enable it. The PIT is connected to ICU IRQ 0.
+To read `CUR` consistently using 32-bit accesses, read `CUR_HI`, then `CUR_LO`, then `CUR_HI` again; retry if the high words differ. Firmware should disable the timer while programming an interval, write both halves, acknowledge any previous request, configure control, then enable it. The PIT is connected to ICU IRQ 0.
 
 ---
 
