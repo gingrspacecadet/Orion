@@ -25,6 +25,8 @@ typedef struct {
     uint8_t data_pool[MAX_ENTRIES][MAX_SECTION_SIZE];
 
     section_id_t active_section;
+
+    bool failed;
 } Codegen;
 
 static inline obj_section_t *active_section(Codegen *builder) {
@@ -220,6 +222,7 @@ static void asm_error(int line, const char *fmt, ...) {
     do { \
         if (!(COND)) { \
             asm_error((I)->line_num, __VA_ARGS__); \
+            builder->failed = true; \
             return false; \
         } \
     } while (0)
@@ -229,14 +232,23 @@ static void asm_error(int line, const char *fmt, ...) {
         "%s expects %u operand%s, got %u", (I)->name, \
         (unsigned)(N), (N) == 1 ? "" : "s", (I)->op_count)
 
-#define REQUIRE_OP_MODE(I, INDEX, MODE, DESC) \
+static const char *const op_mode_desc[] = {
+    [AM_IMM] = "an immediate",
+    [AM_MEM] = "a memory address",
+    [AM_NONE] = "<none>",
+    [AM_REF] = "a reference",
+    [AM_REG] = "a register",
+    [AM_REGLIST] = "a register list"
+};
+
+#define REQUIRE_OP_MODE(I, INDEX, MODE) \
     REQUIRE((I), (I)->ops[(INDEX)].mode == (MODE), \
         "%s operand %zu must be %s", (I)->name, \
-        (size_t)(INDEX) + 1, (DESC))
+        (size_t)(INDEX) + 1, op_mode_desc[MODE])
 
 static bool handle_align(Codegen *builder, const Instr *i) {
     REQUIRE_OP_COUNT(i, 1);
-    REQUIRE_OP_MODE(i, 0, AM_IMM, "an immediate");
+    REQUIRE_OP_MODE(i, 0, AM_IMM);
 
     int64_t requested = i->ops[0].val;
     REQUIRE(i, requested > 0, ".align must be positive");
@@ -258,7 +270,7 @@ static bool handle_align(Codegen *builder, const Instr *i) {
 
 static bool handle_section(Codegen *builder, const Instr *i) {
     REQUIRE_OP_COUNT(i, 1);
-    REQUIRE_OP_MODE(i, 0, AM_REF, "a section");
+    REQUIRE_OP_MODE(i, 0, AM_REF);
 
     bool ok = switch_section(builder, i->ops[0].label);
     REQUIRE(i, ok, "failed to switch to section %s", i->ops[0].label);
@@ -269,7 +281,7 @@ static bool handle_section(Codegen *builder, const Instr *i) {
 static bool handle_byte(Codegen *builder, const Instr *i) {
     REQUIRE(i, i->op_count > 0, "missing argument to .byte");
     for (uint8_t j = 0; j < i->op_count; j++) {
-        REQUIRE_OP_MODE(i, j, AM_IMM, "an immediate");
+        REQUIRE_OP_MODE(i, j, AM_IMM);
         REQUIRE(i, i->ops[j].val >= -UINT8_MAX && i->ops[j].val <= UINT8_MAX, "argument must be within the byte range");
     }
 
@@ -311,7 +323,7 @@ static bool handle_word(Codegen *builder, const Instr *i) {
 
 static bool handle_global(Codegen *builder, const Instr *i) {
     REQUIRE_OP_COUNT(i, 1);
-    REQUIRE_OP_MODE(i, 0, AM_REF, "a symbol");
+    REQUIRE_OP_MODE(i, 0, AM_REF);
 
     symbol_id_t id;
     REQUIRE(i, get_or_create_symbol(builder, i->ops[0].label, &id), "Failed to create symbol %s", i->ops[0].label);
@@ -360,6 +372,16 @@ static uint32_t encode_j(Opcodes code, uint32_t displacement) {
     return word;
 }
 
+static uint32_t encode_s(Opcodes code, uint8_t rn, uint16_t payload, bool reg, bool write) {
+    uint32_t word = 0;
+    word |= (code & 0x7F) << 26;
+    word |= (rn & 0xF) << 22;
+    word |= (payload & 0xFFFF) << 6;
+    word |= (reg & 0x1) << 1;
+    word |= (write & 0x1) << 0;
+    return word;
+}
+
 typedef struct {
     const char *name;
     OpcodeTypes type;
@@ -379,6 +401,7 @@ const OpConfig opcodes[] = {
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
     {"iret", TYPE_X, OP_IRET},
+    {"ret", TYPE_X, OP_RET},
     {"halt", TYPE_X, OP_HALT},
 };
 
@@ -394,6 +417,69 @@ static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, 
 }
 
 static bool emit_instr(Codegen *builder, const Instr *i) {
+    // handle pseuoinstructions
+
+    if (strcasecmp(i->name, "mov") == 0) {
+        REQUIRE_OP_COUNT(i, 2);
+        REQUIRE_OP_MODE(i, 0, AM_REG);
+
+        if (i->ops[1].mode == AM_IMM) {
+            emit_word(builder, encode_a(OP_XOR, i->ops[0].reg, i->ops[0].reg, i->ops[0].reg, true));
+            if (i->ops[1].val > UINT16_MAX) {
+                emit_word(builder, encode_a(OP_LUI, 0, i->ops[0].reg, i->ops[1].val >> 16, false));
+            }
+
+            emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, i->ops[1].val, false));
+        }
+
+        return true;
+    } else if (strcasecmp(i->name, "flagsw") == 0) {
+        REQUIRE_OP_COUNT(i, 1);
+        if (i->ops[0].mode == AM_IMM) {
+            emit_word(builder, encode_s(OP_FLAGS, 0, i->ops[0].val, false, true));
+        } else if (i->ops[0].mode == AM_REG) {
+            emit_word(builder, encode_s(OP_FLAGS, i->ops[0].reg, 0, true, true));
+        } else {
+            REQUIRE_OP_MODE(i, 0, AM_REG);
+        }
+
+        return true;
+    } else if (strcasecmp(i->name, "push") == 0) {
+        REQUIRE_OP_COUNT(i, 1);
+        if (i->ops[0].mode == AM_REG) {
+            emit_word(builder, encode_a(OP_SUB, i->ops[0].reg, i->ops[0].reg, 4, false));
+            emit_word(builder, encode_m(OP_STR, 0, i->ops[0].reg, 0, false));
+        } else if (i->ops[0].mode == AM_REGLIST) {
+            for (int j = 0; j < 16; j++) {
+                if (i->ops[0].val & (1u << j)) {
+                    emit_word(builder, encode_a(OP_SUB, j, j, 4, false));
+                    emit_word(builder, encode_m(OP_STR, 0, j, 0, false));
+                }
+            }
+        } else {
+            REQUIRE_OP_MODE(i, 0, AM_REG);
+        }
+
+        return true;
+    } else if (strcasecmp(i->name, "pop") == 0) {
+        REQUIRE_OP_COUNT(i, 1);
+        if (i->ops[0].mode == AM_REG) {
+            emit_word(builder, encode_m(OP_LDR, 0, i->ops[0].reg, 0, false));
+            emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, 4, false));
+        } else if (i->ops[0].mode == AM_REGLIST) {
+            for (int j = 0; j < 16; j++) {
+                if (i->ops[0].val & (1u << j)) {
+                    emit_word(builder, encode_m(OP_LDR, 0, j, 0, false));
+                    emit_word(builder, encode_a(OP_ADD, j, j, 4, false));
+                }
+            }
+        } else {
+            REQUIRE_OP_MODE(i, 0, AM_REG);
+        }
+
+        return true;
+    }
+
     OpConfig conf = {0};
     for (size_t j = 0; j < sizeof(opcodes) / sizeof(opcodes[0]); j++) {
         if (strcasecmp(i->name, opcodes[j].name) == 0) {
@@ -410,8 +496,8 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
 
     if (conf.code == OP_LUI) {
         REQUIRE_OP_COUNT(i, 2);
-        REQUIRE_OP_MODE(i, 0, AM_REG, "a register");
-        REQUIRE_OP_MODE(i, 1, AM_IMM, "an immediate");
+        REQUIRE_OP_MODE(i, 0, AM_REG);
+        REQUIRE_OP_MODE(i, 1, AM_IMM);
 
         emit_word(builder, encode_a(OP_LUI, 0, i->ops[0].reg, i->ops[1].val, false));
 
@@ -425,10 +511,9 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
             break;
         }
 
-        case TYPE_A:
-        case TYPE_M: {
+        case TYPE_A: {
             REQUIRE_OP_COUNT(i, 3);
-            REQUIRE_OP_MODE(i, 0, AM_REG, "a register"); REQUIRE_OP_MODE(i, 1, AM_REG, "a register");
+            REQUIRE_OP_MODE(i, 0, AM_REG); REQUIRE_OP_MODE(i, 1, AM_REG);
             if (i->ops[2].mode == AM_REG) {
                 emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].reg, true));
             } else if (i->ops[2].mode == AM_IMM) {
@@ -436,6 +521,21 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
             } else {
                 asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
                 return false;
+            }
+
+            break;
+        }
+
+        case TYPE_M: {
+            REQUIRE_OP_COUNT(i, 2);
+            REQUIRE_OP_MODE(i, 0, AM_REG);
+
+            if (i->ops[1].mode == AM_MEM) {
+                emit_word(builder, encode_m(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[1].val, false));
+            } else if (i->ops[1].mode == AM_REG) {
+                emit_word(builder, encode_m(conf.code, i->ops[1].reg, i->ops[0].reg, 0, false));
+            } else {
+                REQUIRE_OP_MODE(i, 1, AM_MEM);
             }
 
             break;
@@ -467,7 +567,7 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
     return true;
 }
 
-void codegen(FILE *out, Source *source) {
+bool codegen(FILE *out, Source *source) {
     Codegen builder = {
         .header = {
             .magic = OBJ_MAGIC,
@@ -520,4 +620,7 @@ void codegen(FILE *out, Source *source) {
     }
 
     fwrite(builder.string_pool, sizeof(uint8_t), builder.header.string_pool_size, out);
+
+    if (builder.failed) return false;
+    else return true;
 }

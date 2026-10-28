@@ -1,5 +1,6 @@
-.global init_icu
-init_icu:
+.section .text
+.global icu_init
+icu_init:
     push {r4, r5}           ; prologue
 
     mov r4, #0x00010400     ; ICU address

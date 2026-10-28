@@ -7,7 +7,7 @@
 
 typedef struct {
     Icu *icu;
-    int pin;
+    uint32_t pin;
 } IrqLine;
 
 static inline void irq_set(IrqLine line, bool level) {

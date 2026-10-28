@@ -10,6 +10,7 @@
 #include "isa.h"
 #include "icu.h"
 #include "pit.h"
+#include "pcu.h"
 
 static uint8_t *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
@@ -428,9 +429,11 @@ int main(int argc, char **argv) {
     TimerPool timer_pool = {0};
     pit_init(&pit, &timer_pool, icu_get_irq(&machine.icu, 0));
     pit.ctrl |= 1 | 3 | 7;
+    Pcu pcu = {0};
 
     mmio_add_device(&machine.mmio, (Device){.base_addr = ICU, .size = 80, .state = &machine.icu, .read = icu_read, .write = icu_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = PIT, .size = 24, .state = &pit, .read = pit_read, .write = pit_write});
+    mmio_add_device(&machine.mmio, (Device){.base_addr = PCU, .size = 256, .state = &pcu, .read = pcu_read, .write = pcu_write});
 
     uint64_t last_ns;
     struct timespec ts;

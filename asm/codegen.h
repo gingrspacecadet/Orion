@@ -2,8 +2,9 @@
 #define CODEGEN_H
 
 #include <stdio.h>
+#include <stdbool.h>
 #include "source.h"
 
-void codegen(FILE *out, Source *source);
+bool codegen(FILE *out, Source *source);
 
 #endif

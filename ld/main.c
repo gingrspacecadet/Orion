@@ -573,8 +573,10 @@ bool resolve_undefined_symbols(LinkContext *ctx) {
                 continue;
 
             size_t index;
-            if (!find_global_symbol(ctx, (char *)&object.string_pool.data[symbol.name], &index))
+            if (!find_global_symbol(ctx, (char *)&object.string_pool.data[symbol.name], &index)) {
+                fprintf(stderr, "Failed to find global symbol \"%s\"\n", (char *)&object.string_pool.data[symbol.name]);
                 return false;
+            }
 
             ResolvedSymbol *resolved = &ctx->resolved_symbols.data[i].data[j];
             resolved->address = ctx->global_symbols.data[index].address;
@@ -588,14 +590,20 @@ bool resolve_undefined_symbols(LinkContext *ctx) {
 bool resolve_symbols(LinkContext *ctx) {
     assert(ctx != NULL);
 
-    if (!resolve_defined_symbols(ctx))
+    if (!resolve_defined_symbols(ctx)) {
+        fprintf(stderr, "Failed to resolve defined symbols\n");
         return false;
+    }
 
-    if (!build_global_symbol_table(ctx))
+    if (!build_global_symbol_table(ctx)) {
+        fprintf(stderr, "Failed to build global symbol table\n");
         return false;
+    }
 
-    if (!resolve_undefined_symbols(ctx))
+    if (!resolve_undefined_symbols(ctx)) {
+        fprintf(stderr, "Failed to resolve undefined symbols\n");
         return false;
+    }
 
     return true;
 }

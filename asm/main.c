@@ -33,6 +33,23 @@ int main(int argc, char **argv) {
         .offset = 0,
     };
 
-    FILE *out = fopen(argc == 3 ? argv[2] : "a.out", "wb");
-    codegen(out, &source);
+    char tmppath[] = "a.out.XXXXXX";
+    int fd = mkstemp(tmppath);
+
+    if (fd < 0) {
+        perror("mkstemp");
+        return 1;
+    }
+
+    FILE *out = fdopen(fd, "wb");
+    if (!codegen(out, &source)) {
+        fclose(out);
+        remove(tmppath);
+        return 1;
+    }
+
+    fclose(out);
+    rename(tmppath, argc == 3 ? argv[2] : "a.out");
+
+    return 0;
 }

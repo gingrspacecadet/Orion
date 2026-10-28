@@ -137,4 +137,9 @@ typedef enum {
 #define PIT_CTRL_AUTO   1u << 1
 #define PIT_CTRL_INT    1u << 2
 
+#define PCU_DEV_ID      0x00
+#define PCU_DEV_BAR     0x04
+#define PCU_DEV_SIZE    0x08
+#define PCU_DEV_IRQ     0x0C
+
 #endif

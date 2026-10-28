@@ -24,7 +24,7 @@ $(BUILD)/frag/%.s.o: %.s asm
 
 $(BUILD)/boot.bin: $(BOOT_OBJ) ld
 	@mkdir -p "$(dir $@)"
-	$(BUILD)/ld $< -o $@ -f -T boot/boot.ld 
+	$(BUILD)/ld $(BOOT_OBJ) -o $@ -f -T boot/boot.ld
 
 $(BUILD)/frag/%.c.o: %.c
 	@mkdir -p "$(dir $@)"
