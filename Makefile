@@ -6,12 +6,25 @@ BUILD := build
 
 TARGETS := emu asm disasm objdump ld
 
-.PHONY: all, clean
-all: $(TARGETS)
-run: emu
-	@$(BUILD)/emu image.bin
+.PHONY: all clean
+all: $(TARGETS) boot
+run: emu boot
+	@$(BUILD)/emu $(BUILD)/boot.bin
 clean:
 	@rm -rf $(BUILD)
+
+BOOT_SRC := $(shell find boot/ -type f -name '*.s' 2>/dev/null | LC_ALL=C sort)
+BOOT_OBJ := $(addprefix $(BUILD)/frag/,$(BOOT_SRC:.s=.s.o))
+
+boot: $(BUILD)/boot.bin
+
+$(BUILD)/frag/%.s.o: %.s asm
+	@mkdir -p "$(dir $@)"
+	$(BUILD)/asm $< $@
+
+$(BUILD)/boot.bin: $(BOOT_OBJ) ld
+	@mkdir -p "$(dir $@)"
+	$(BUILD)/ld $< -o $@ -f -T boot/boot.ld 
 
 $(BUILD)/frag/%.c.o: %.c
 	@mkdir -p "$(dir $@)"

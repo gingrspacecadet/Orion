@@ -33,6 +33,6 @@ int main(int argc, char **argv) {
         .offset = 0,
     };
 
-    FILE *out = fopen("a.out", "wb");
+    FILE *out = fopen(argc == 3 ? argv[2] : "a.out", "wb");
     codegen(out, &source);
 }
