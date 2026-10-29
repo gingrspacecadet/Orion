@@ -1,0 +1,4 @@
+@export
+fn uint32 main() {
+    return 42;
+}

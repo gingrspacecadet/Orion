@@ -538,7 +538,7 @@ bool build_global_symbol_table(LinkContext *ctx) {
                 continue;
 
             if (find_global_symbol(ctx, (char *)&object.string_pool.data[symbol.name], NULL)) {
-                // report duplicate symbol
+                fprintf(stderr, "Duplicate symbol \"%s\"\n", (char *)&object.string_pool.data[symbol.name]);
                 return false;
             }
 
