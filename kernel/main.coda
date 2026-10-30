@@ -3,13 +3,70 @@ include mem;
 mut uint32 bss_dummy;
 @extern none *__bss_start;
 @extern none *__bss_end;
+@extern fn none halt();
 
 fn none clear_bss() {
-    mem::set(__bss_start, 0x69, __bss_end - __bss_start);
+    mem::set(__bss_start, 0, __bss_end - __bss_start);
 }
+
+mut uint32 timer_ticks;
+
+@export
+fn none int_handler(uint8 num) {
+    if (num == 0x20) {
+        timer_ticks += 1;
+        write_word(0x00010500, 0x14, 1); // acknowledge interrupt
+        write_word(0x00010400, 0x4C, 0); // EOI
+    }
+
+}
+
+@extern none *__ihvt_start;
+@extern none *__ihvt_end;
+
+fn none install_handlers() {
+    mut uint32 *ihvt = (uint32 *)0x00010000;
+
+    for (mut uint32 i = 0; i < 256; i += 1) {
+        ihvt[i] = ((uint32 *)__ihvt_start)[i];
+    }
+}
+
+fn none write_byte(mut uint32 address, uint32 offset, uint8 byte) {
+    mut uint8 *ptr = (uint8 *)address;
+    ptr[offset] = byte;
+}
+
+fn none write_word(mut uint32 address, uint32 offset, uint32 word) {
+    mut uint32 *ptr = (uint32 *)address;
+    ptr[offset / 4] = word;
+}
+
+fn none pit_init() {
+    // pit has irq 0, vector 0x20
+    uint32 icu = 0x00010400;
+    write_byte(icu, 0x2C, 0x20);
+    write_word(icu, 0x08, (uint32)~1);
+
+    uint32 pit = 0x00010500;
+    write_word(pit, 0x00, 0); // Disable timer
+    write_word(pit, 0x04, 10_000_000); // 10ms
+    write_word(pit, 0x08, 0);
+    write_word(pit, 0x14, 1); // acknowledge any previous interrupts
+
+    write_word(pit, 0x00, 0b111); // ENABLE | AUTORELOAD | INT_ENABLE
+}
+
+@extern fn none enable_ints();
 
 @export
 fn uint32 main() {
     clear_bss();
-    return bss_dummy;
+    install_handlers();
+    pit_init();
+    enable_ints();
+
+    while (timer_ticks < 1000) {}
+    halt();
+    return 0;
 }

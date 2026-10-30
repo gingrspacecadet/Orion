@@ -1,0 +1,3 @@
+.global halt
+halt:
+    halt

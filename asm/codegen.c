@@ -10,19 +10,18 @@
 #include "parser.h"
 #include "obj.h"
 #include "isa.h"
+#include "da.h"
 
-#define MAX_ENTRIES 1024
-#define MAX_SECTION_SIZE 1024
+#define MAX_ENTRIES UINT8_MAX
 
 typedef struct {
     obj_header_t header;
-    obj_section_t sections[MAX_ENTRIES];
-    obj_symbol_t symbols[MAX_ENTRIES];
-    obj_reloc_t relocs[MAX_ENTRIES];
+    da_type(obj_section_t) sections;
+    da_type(obj_symbol_t) symbols;
+    da_type(obj_reloc_t) relocs;
 
-    char string_pool[MAX_ENTRIES];
-    size_t string_pool_offset;
-    uint8_t data_pool[MAX_ENTRIES][MAX_SECTION_SIZE];
+    da_type(char) string_pool;
+    da_type(uint8_t) data_pool[MAX_ENTRIES];
 
     section_id_t active_section;
 
@@ -30,78 +29,76 @@ typedef struct {
 } Codegen;
 
 static inline obj_section_t *active_section(Codegen *builder) {
-    if (builder->active_section == 0 ||
-        builder->active_section > builder->header.sections)
+    if (builder->active_section == 0 || builder->active_section > builder->sections.len)
         return NULL;
 
-    return &builder->sections[builder->active_section - 1];
+    return &builder->sections.data[builder->active_section - 1];
 }
 
 static bool append_string(Codegen *builder, const char *name, stroff_t *offset) {
     size_t len = strlen(name) + 1;
 
-    if (builder->string_pool_offset > sizeof(builder->string_pool) || len > sizeof(builder->string_pool) - builder->string_pool_offset)
-        return false;
-
-    *offset = (stroff_t)builder->string_pool_offset;
-    memcpy(&builder->string_pool[builder->string_pool_offset], name, len);
-    builder->string_pool_offset += len;
+    *offset = (stroff_t)builder->string_pool.len;
+    da_reserve(&builder->string_pool, builder->string_pool.len + len);
+    memcpy(&builder->string_pool.data[builder->string_pool.len], name, len);
+    builder->string_pool.len += len;
 
     return true;
 }
 
 static bool switch_section(Codegen *builder, const char *name) {
-    for (size_t i = 0; i < builder->header.sections; i++) {
-        obj_section_t *section = &builder->sections[i];
+    for (size_t i = 0; i < builder->sections.len; i++) {
+        obj_section_t *section = &builder->sections.data[i];
 
-        if (section->name >= builder->string_pool_offset)
+        if (section->name >= builder->string_pool.len)
             return false;
 
-        if (strcmp(&builder->string_pool[section->name], name) == 0) {
+        if (strcmp(&builder->string_pool.data[section->name], name) == 0) {
             builder->active_section = section->id;
             return true;
         }
     }
 
-    if (builder->header.sections >= MAX_ENTRIES)
+    if (builder->sections.len >= MAX_ENTRIES)
         return false;
 
     stroff_t name_offset;
     if (!append_string(builder, name, &name_offset))
         return false;
 
-    size_t index = builder->header.sections;
-    obj_section_t *section = &builder->sections[index];
-    memset(section, 0, sizeof(*section));
+    size_t index = builder->sections.len;
+    obj_section_t section = {
+        .name = name_offset,
+        .data = 0,
+        .align = strcmp(name, ".text") == 0 ? 4 : 1,
+        .id = (section_id_t)(index + 1),
+    };
 
-    section->name = name_offset;
-    section->data = 0;
-    section->align = strcmp(name, ".text") == 0 ? 4 : 1;
-    section->id = (section_id_t)(index + 1);
     // provide some defaults
     if (strcmp(name, ".text") == 0)
-        section->flags = FLAG_R | FLAG_X;
+        section.flags = FLAG_R | FLAG_X;
     else if (strcmp(name, ".rodata") == 0)
-        section->flags = FLAG_R;
+        section.flags = FLAG_R;
     else if (strcmp(name, ".data") == 0)
-        section->flags = FLAG_R | FLAG_W;
+        section.flags = FLAG_R | FLAG_W;
     else if (strcmp(name, ".bss") == 0)
-        section->flags = FLAG_R | FLAG_W | FLAG_U;
+        section.flags = FLAG_R | FLAG_W | FLAG_U;
     else
-        section->flags = FLAG_R | FLAG_X;
+        section.flags = FLAG_R | FLAG_X;
 
-    builder->header.sections++;
-    builder->active_section = section->id;
+    da_push(&builder->sections, section);
+
+    builder->active_section = section.id;
 
     return true;
 }
 
 static bool emit_byte(Codegen *builder, uint8_t byte) {
     obj_section_t *section = active_section(builder);
-    if (section == NULL || section->size >= MAX_SECTION_SIZE)
+    if (section == NULL)
         return false;
 
-    builder->data_pool[section->id - 1][section->size] = byte;
+    da_push(&builder->data_pool[section->id - 1], byte);
     section->size++;
 
     return true;
@@ -109,29 +106,29 @@ static bool emit_byte(Codegen *builder, uint8_t byte) {
 
 static bool emit_word(Codegen *builder, uint32_t word) {
     obj_section_t *section = active_section(builder);
-    if (section == NULL || section->size > MAX_SECTION_SIZE || MAX_SECTION_SIZE - section->size < sizeof(word))
+    if (section == NULL)
         return false;
 
     size_t index = section->id - 1;
     size_t offset = section->size;
 
-    builder->data_pool[index][offset]     = (uint8_t)word;
-    builder->data_pool[index][offset + 1] = (uint8_t)(word >> 8);
-    builder->data_pool[index][offset + 2] = (uint8_t)(word >> 16);
-    builder->data_pool[index][offset + 3] = (uint8_t)(word >> 24);
+    da_push(&builder->data_pool[index], (uint8_t)(word >>  0));
+    da_push(&builder->data_pool[index], (uint8_t)(word >>  8));
+    da_push(&builder->data_pool[index], (uint8_t)(word >> 16));
+    da_push(&builder->data_pool[index], (uint8_t)(word >> 24));
 
     section->size += sizeof(word);
     return true;
 }
 
 static bool find_symbol(Codegen *builder, const char *name, symbol_id_t *id) {
-    for (size_t i = 0; i < builder->header.symbols; i++) {
-        obj_symbol_t *sym = &builder->symbols[i];
+    for (size_t i = 0; i < builder->symbols.len; i++) {
+        obj_symbol_t *sym = &builder->symbols.data[i];
 
-        if (sym->name >= builder->string_pool_offset)
+        if (sym->name >= builder->string_pool.len)
             return false;
 
-        if (strcmp(&builder->string_pool[sym->name], name) == 0) {
+        if (strcmp(&builder->string_pool.data[sym->name], name) == 0) {
             *id = (symbol_id_t)i;
             return true;
         }
@@ -144,22 +141,18 @@ static bool get_or_create_symbol(Codegen *builder, const char *name, symbol_id_t
     if (find_symbol(builder, name, id))
         return true;
 
-    if (builder->header.symbols >= MAX_ENTRIES)
-        return false;
-
     stroff_t name_offset;
     if (!append_string(builder, name, &name_offset))
         return false;
 
-    size_t index = builder->header.symbols;
-    obj_symbol_t *sym = &builder->symbols[index];
-    memset(sym, 0, sizeof(*sym));
+    size_t index = builder->symbols.len;
+    obj_symbol_t sym = {0};
 
-    sym->name = name_offset;
-    sym->section = 0; // undefined until defined by a label.
+    sym.name = name_offset;
+    sym.section = 0; // undefined until defined by a label.
 
     *id = (symbol_id_t)index;
-    builder->header.symbols++;
+    da_push(&builder->symbols, sym);
 
     return true;
 }
@@ -173,7 +166,7 @@ static bool define_symbol(Codegen *builder, const char *name) {
     if (!get_or_create_symbol(builder, name, &id))
         return false;
 
-    obj_symbol_t *sym = &builder->symbols[id];
+    obj_symbol_t *sym = &builder->symbols.data[id];
 
     if (sym->section != 0)
         return false; // Duplicate definition.
@@ -186,23 +179,23 @@ static bool define_symbol(Codegen *builder, const char *name) {
 
 static bool add_relocation(Codegen *builder, uint32_t offset, reloc_type_t type, symbol_id_t symbol, int32_t addend) {
     obj_section_t *section = active_section(builder);
-    if (section == NULL || symbol >= builder->header.symbols ||
-        builder->header.relocs >= MAX_ENTRIES)
+    if (section == NULL || symbol >= builder->symbols.len ||
+        builder->relocs.len >= MAX_ENTRIES)
         return false;
 
     // all current relocation types patch a four-byte word.
     if (offset > section->size || section->size - offset < sizeof(uint32_t))
         return false;
 
-    obj_reloc_t *reloc = &builder->relocs[builder->header.relocs++];
-
-    *reloc = (obj_reloc_t){
+    obj_reloc_t reloc = (obj_reloc_t){
         .section = section->id,
         .offset = offset,
         .symbol = symbol,
         .addend = addend,
         .type = type,
     };
+
+    da_push(&builder->relocs, reloc);
 
     return true;
 }
@@ -255,12 +248,9 @@ static bool handle_align(Codegen *builder, const Instr *i) {
 
     obj_section_t *section = active_section(builder);
     REQUIRE(i, section != NULL, "no active section");
-    REQUIRE(i, section->size <= MAX_SECTION_SIZE, "section size exceeds capacity");
 
     size_t alignment = (size_t)requested;
     size_t padding = (alignment - section->size % alignment) % alignment;
-
-    REQUIRE(i, padding <= MAX_SECTION_SIZE - section->size, ".align exceeds section capacity");
 
     for (size_t n = 0; n < padding; n++)
         REQUIRE(i, emit_byte(builder, 0), "failed to emit alignment padding");
@@ -329,7 +319,7 @@ static bool handle_global(Codegen *builder, const Instr *i) {
     symbol_id_t id;
     REQUIRE(i, get_or_create_symbol(builder, i->ops[0].label, &id), "Failed to create symbol %s", i->ops[0].label);
 
-    builder->symbols[id].flags |= SYMFLAG_GLOBAL;
+    builder->symbols.data[id].flags |= SYMFLAG_GLOBAL;
 
     return true;
 }
@@ -464,13 +454,14 @@ const OpConfig opcodes[] = {
 };
 
 static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, dataoff_t offset) {
-    assert(builder->header.relocs < MAX_ENTRIES);
-    obj_reloc_t *reloc = &builder->relocs[builder->header.relocs++];
+    obj_reloc_t reloc = {
+        .type = type,
+        .section = active_section(builder)->id,
+        .offset = offset,
+        .symbol = symbol,
+    };
 
-    reloc->type = type;
-    reloc->section = active_section(builder)->id;
-    reloc->offset = offset;
-    reloc->symbol = symbol;
+    da_push(&builder->relocs, reloc);
 
     return true;
 }
@@ -483,12 +474,13 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
         REQUIRE_OP_MODE(i, 0, AM_REG);
 
         if (i->ops[1].mode == AM_IMM) {
-            emit_word(builder, encode_a(OP_XOR, i->ops[0].reg, i->ops[0].reg, i->ops[0].reg, true));
-            if (i->ops[1].val > UINT16_MAX) {
-                emit_word(builder, encode_a(OP_LUI, 0, i->ops[0].reg, i->ops[1].val >> 16, false));
-            }
+            uint32_t value = (uint32_t)i->ops[1].val;
+            uint16_t high = (uint16_t)(value >> 16);
+            uint16_t low = (uint16_t)value;
 
-            emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, i->ops[1].val, false));
+            emit_word(builder, encode_a(OP_XOR, i->ops[0].reg, i->ops[0].reg, i->ops[0].reg, true));
+            if (high != 0) emit_word(builder, encode_a(OP_LUI, 0, i->ops[0].reg, high, false));
+            if (low != 0) emit_word(builder, encode_a(OP_OR, i->ops[0].reg, i->ops[0].reg, low, false));
         } else if (i->ops[1].mode == AM_REF) {
             symbol_id_t id;
             emit_word(builder, encode_a(OP_XOR, i->ops[0].reg, i->ops[0].reg, i->ops[0].reg, true));
@@ -496,7 +488,7 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
             REQUIRE(i, get_or_create_symbol(builder, i->ops[1].label, &id), "failed to get id of symbol %s", i->ops[1].label);
             REQUIRE(i, emit_reloc(builder, id, RELOC_HI16, active_section(builder)->size - sizeof(uint32_t)), "failed to emit relocation");
 
-            emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, 0, false));
+            emit_word(builder, encode_a(OP_OR, i->ops[0].reg, i->ops[0].reg, 0, false));
             REQUIRE(i, get_or_create_symbol(builder, i->ops[1].label, &id), "failed to get id of symbol %s", i->ops[1].label);
             REQUIRE(i, emit_reloc(builder, id, RELOC_LO16, active_section(builder)->size - sizeof(uint32_t)), "failed to emit relocation");
         } else {
@@ -519,13 +511,15 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
     } else if (strcasecmp(i->name, "push") == 0) {
         REQUIRE_OP_COUNT(i, 1);
         if (i->ops[0].mode == AM_REG) {
-            emit_word(builder, encode_a(OP_SUB, i->ops[0].reg, i->ops[0].reg, 4, false));
-            emit_word(builder, encode_m(OP_STR, 0, i->ops[0].reg, 0, false));
+            REQUIRE(i, i->ops[0].reg != 15, "Cannot push RSP");
+            emit_word(builder, encode_a(OP_SUB, 15, 15, 4, false));
+            emit_word(builder, encode_m(OP_STR, 15, i->ops[0].reg, 0, false));
         } else if (i->ops[0].mode == AM_REGLIST) {
-            for (int j = 0; j < 16; j++) {
+            for (int j = 15; j >= 0; j--) {
                 if (i->ops[0].val & (1u << j)) {
-                    emit_word(builder, encode_a(OP_SUB, j, j, 4, false));
-                    emit_word(builder, encode_m(OP_STR, 0, j, 0, false));
+                    REQUIRE(i, j != 15, "Cannot push RSP");
+                    emit_word(builder, encode_a(OP_SUB, 15, 15, 4, false));
+                    emit_word(builder, encode_m(OP_STR, 15, j, 0, false));
                 }
             }
         } else {
@@ -536,13 +530,15 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
     } else if (strcasecmp(i->name, "pop") == 0) {
         REQUIRE_OP_COUNT(i, 1);
         if (i->ops[0].mode == AM_REG) {
-            emit_word(builder, encode_m(OP_LDR, 0, i->ops[0].reg, 0, false));
-            emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, 4, false));
+            REQUIRE(i, i->ops[0].reg != 15, "Cannot pop RSP");
+            emit_word(builder, encode_m(OP_LDR, 15, i->ops[0].reg, 0, false));
+            emit_word(builder, encode_a(OP_ADD, 15, 15, 4, false));
         } else if (i->ops[0].mode == AM_REGLIST) {
             for (int j = 0; j < 16; j++) {
                 if (i->ops[0].val & (1u << j)) {
-                    emit_word(builder, encode_m(OP_LDR, 0, j, 0, false));
-                    emit_word(builder, encode_a(OP_ADD, j, j, 4, false));
+                    REQUIRE(i, j != 15, "Cannot pop RSP");
+                    emit_word(builder, encode_m(OP_LDR, 15, j, 0, false));
+                    emit_word(builder, encode_a(OP_ADD, 15, 15, 4, false));
                 }
             }
         } else {
@@ -585,16 +581,31 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
         }
 
         case TYPE_A: {
-            REQUIRE_OP_COUNT(i, 3);
-            REQUIRE_OP_MODE(i, 0, AM_REG); REQUIRE_OP_MODE(i, 1, AM_REG);
-            if (i->ops[2].mode == AM_REG) {
-                emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].reg, true));
-            } else if (i->ops[2].mode == AM_IMM) {
-                emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].val, false));
-            } else {
-                asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
-                builder->failed = true;
-                return false;
+            if (i->op_count == 3) {
+                REQUIRE_OP_MODE(i, 0, AM_REG); REQUIRE_OP_MODE(i, 1, AM_REG);
+                if (i->ops[2].mode == AM_REG) {
+                    emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].reg, true));
+                } else if (i->ops[2].mode == AM_IMM) {
+                    emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[2].val, false));
+                } else {
+                    asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
+                    builder->failed = true;
+                    return false;
+                }
+            } else if (i->op_count == 2) {
+                REQUIRE_OP_MODE(i, 0, AM_REG); 
+                if (i->ops[1].mode == AM_REG) {
+                    emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[1].reg, true));
+                } else if (i->ops[1].mode == AM_IMM) {
+                    emit_word(builder, encode_a(conf.code, i->ops[1].reg, i->ops[0].reg, i->ops[1].val, false));
+                } else {
+                    asm_error(i->line_num, "%s operand 3 must be either a register or an immediate\n", i->name);
+                    builder->failed = true;
+                    return false;
+                }
+            } else if (i->op_count == 1) {
+                REQUIRE_OP_MODE(i, 0, AM_REG); 
+                emit_word(builder, encode_a(conf.code, i->ops[0].reg, i->ops[0].reg, i->ops[0].reg, true));
             }
 
             break;
@@ -729,24 +740,27 @@ bool codegen(FILE *out, Source *source) {
     }
 
     uint32_t data_offset = 0;
-    for (uint32_t i = 0; i < builder.header.sections; i++) {
-        builder.sections[i].data = data_offset;
-        data_offset += builder.sections[i].size;
-        builder.header.data_pool_size += builder.sections[i].size;
+    for (uint32_t i = 0; i < builder.sections.len; i++) {
+        builder.sections.data[i].data = data_offset;
+        data_offset += builder.sections.data[i].size;
+        builder.header.data_pool_size += builder.sections.data[i].size;
     }
 
-    builder.header.string_pool_size = builder.string_pool_offset;
+    builder.header.string_pool_size = builder.string_pool.len;
+    builder.header.sections = builder.sections.len;
+    builder.header.symbols = builder.symbols.len;
+    builder.header.relocs = builder.relocs.len;
 
     fwrite(&builder.header, sizeof(obj_header_t), 1, out);
-    fwrite(&builder.sections[0], sizeof(obj_section_t), builder.header.sections, out);
-    fwrite(&builder.symbols[0], sizeof(obj_symbol_t), builder.header.symbols, out);
-    fwrite(&builder.relocs[0], sizeof(obj_reloc_t), builder.header.relocs, out);
+    fwrite(&builder.sections.data[0], sizeof(obj_section_t), builder.sections.len, out);
+    fwrite(&builder.symbols.data[0], sizeof(obj_symbol_t), builder.symbols.len, out);
+    fwrite(&builder.relocs.data[0], sizeof(obj_reloc_t), builder.relocs.len, out);
 
     for (uint32_t i = 0; i < builder.header.sections; i++) {
-        fwrite(builder.data_pool[i], sizeof(uint8_t), builder.sections[i].size, out);
+        fwrite(builder.data_pool[i].data, sizeof(uint8_t), builder.data_pool[i].len, out);
     }
 
-    fwrite(builder.string_pool, sizeof(uint8_t), builder.header.string_pool_size, out);
+    fwrite(builder.string_pool.data, sizeof(uint8_t), builder.string_pool.len, out);
 
     if (builder.failed) return false;
     else return true;

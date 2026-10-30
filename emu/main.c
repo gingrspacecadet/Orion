@@ -115,8 +115,11 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
     cpu.r = (cpu.flags & FLAG_PRV) ? cpu.ksr : cpu.usr;
 
 bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
-    fprintf(stderr, "Fault %d raised\n", vector);
-    fprintf(stderr, "Offending instruction: 0x%08X at 0x%08X\n", mmio_read32(&machine->mmio, machine->cpu.pc), machine->cpu.pc);
+    if (vector < 0x20 || vector == 0xFF) {
+        fprintf(stderr, "Fault %d raised\n", vector);
+        fprintf(stderr, "Offending instruction: 0x%08X at 0x%08X\n", mmio_read32(&machine->mmio, machine->cpu.pc), machine->cpu.pc);
+        exit(1);
+    }
     uint32_t flags = machine->cpu.flags;
     machine->cpu.flags &= ~FLAG_IE;
     machine->cpu.flags |= FLAG_PRV;
@@ -435,7 +438,7 @@ int main(int argc, char **argv) {
 
     cpu_reset(&machine.cpu);
     machine.icu = (Icu){0};
-    Pit pit;
+    Pit pit = {0};
     TimerPool timer_pool = {0};
     pit_init(&pit, &timer_pool, icu_get_irq(&machine.icu, 0));
     pit.ctrl |= 1 | 3 | 7;
