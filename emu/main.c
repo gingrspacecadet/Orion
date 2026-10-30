@@ -118,7 +118,6 @@ bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
     if (vector < 0x20 || vector == 0xFF) {
         fprintf(stderr, "Fault %d raised\n", vector);
         fprintf(stderr, "Offending instruction: 0x%08X at 0x%08X\n", mmio_read32(&machine->mmio, machine->cpu.pc), machine->cpu.pc);
-        exit(1);
     }
     uint32_t flags = machine->cpu.flags;
     machine->cpu.flags &= ~FLAG_IE;

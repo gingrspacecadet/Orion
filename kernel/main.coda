@@ -13,12 +13,15 @@ mut uint32 timer_ticks;
 
 @export
 fn none int_handler(uint8 num) {
+    if (num < 0x20) {
+        halt();
+    }
+
     if (num == 0x20) {
         timer_ticks += 1;
         write_word(0x00010500, 0x14, 1); // acknowledge interrupt
         write_word(0x00010400, 0x4C, 0); // EOI
     }
-
 }
 
 @extern none *__ihvt_start;
@@ -66,7 +69,7 @@ fn uint32 main() {
     pit_init();
     enable_ints();
 
-    while (timer_ticks < 1000) {}
+    while (timer_ticks < 100) {}
     halt();
     return 0;
 }

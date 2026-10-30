@@ -604,6 +604,28 @@ static bool add_linker_symbol(LinkContext *ctx, const char *name, addr_t address
     return true;
 }
 
+static uint32_t calculate_image_base(LinkContext *ctx) {
+    uint32_t lowest = UINT32_MAX;
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        OutputSection section = ctx->sections.data[i];
+        if (section.memory_size == 0) continue;
+        if (section.address < lowest)
+            lowest = section.address;
+    }
+
+    return lowest;
+}
+
+static uint32_t calculate_image_size(LinkContext *ctx) {
+    uint32_t total = 0;
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        OutputSection section = ctx->sections.data[i];
+        total += section.memory_size;
+    }
+
+    return total;
+}
+
 static bool create_section_boundary_symbols(LinkContext *ctx) {
     char start_name[256];
     char end_name[256];
@@ -629,6 +651,12 @@ static bool create_section_boundary_symbols(LinkContext *ctx) {
         if (!add_linker_symbol(ctx, end_name, (addr_t)end))
             return false;
     }
+
+    if (!add_linker_symbol(ctx, "__exe_start", calculate_image_base(ctx)))
+        return false;
+
+    if (!add_linker_symbol(ctx, "__exe_end", calculate_image_base(ctx) + calculate_image_size(ctx)))
+        return false;
 
     return true;
 }
@@ -911,18 +939,6 @@ int parse_args(int argc, char **argv, LinkOptions *out) {
     }
 
     return 1;
-}
-
-static uint32_t calculate_image_base(LinkContext *ctx) {
-    uint32_t lowest = UINT32_MAX;
-    for (size_t i = 0; i < ctx->sections.len; i++) {
-        OutputSection section = ctx->sections.data[i];
-        if (section.memory_size == 0) continue;
-        if (section.address < lowest)
-            lowest = section.address;
-    }
-
-    return lowest;
 }
 
 int main(int argc, char **argv) {

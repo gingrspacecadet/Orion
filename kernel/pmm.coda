@@ -1,0 +1,54 @@
+module pmm;
+
+mut uint8[131068] bitmap;
+
+uint32 ram_base = 0x20000;
+uint32 page_size = 4096;
+
+fn uint8 get_page_index(uint32 address) {
+    return (uint8)((address - ram_base) / page_size);
+}
+
+type PageStatus = enum: uint8 {
+    Free = 0b00,
+    Allocated = 0b01,
+    Reserved = 0b10,
+    Unavailable = 0b11,
+};
+
+fn none set_page_status(uint32 address, mut PageStatus status) {
+    uint8 index = get_page_index(address) / (uint8)#sizeof(uint32);
+
+    mut uint8 mappart = bitmap[index];
+    uint8 mask = 0b11 << (2 * index);
+
+    mappart &= ~mask;
+    status = (uint8)status << 2 * index;
+    mappart |= (uint8)status;
+}
+
+fn PageStatus get_page_status(uint32 address) {
+    uint8 index = get_page_index(address);
+
+    uint8 mappart = bitmap[index / 4];
+    uint8 mask = 0b11 << (2 * (index / 4));
+
+    return (PageStatus)(mappart & mask);
+}
+
+@extern uint32 __exe_start;
+@extern uint32 __exe_end;
+
+@export
+fn none init() {
+    // Reserve the kernel itself
+    // and the data below it (ROM, devices, etc)
+    for (mut uint32 i = 0; i < __exe_end; i += 1) {
+        set_page_status(i, PageStatus::Reserved);
+    }
+
+    // Reserve some stack space (2^16 for now, should be fine)
+    for (mut uint i = 0xFFFF0000; i < 0xFFFFFFFF; i += 1) {
+        set_page_status(i, PageStatus::Reserved);
+    }
+}
