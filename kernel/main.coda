@@ -1,4 +1,15 @@
+include mem;
+
+mut uint32 bss_dummy;
+@extern none *__bss_start;
+@extern none *__bss_end;
+
+fn none clear_bss() {
+    mem::set(__bss_start, 0x69, __bss_end - __bss_start);
+}
+
 @export
 fn uint32 main() {
-    return 42;
+    clear_bss();
+    return bss_dummy;
 }

@@ -13,6 +13,7 @@ typedef enum {
     AM_REF,
     AM_MEM,
     AM_REGLIST,
+    AM_IDENT,
 } AddrMode;
 
 typedef struct {

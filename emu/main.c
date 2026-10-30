@@ -115,6 +115,8 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
     cpu.r = (cpu.flags & FLAG_PRV) ? cpu.ksr : cpu.usr;
 
 bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
+    fprintf(stderr, "Fault %d raised\n", vector);
+    fprintf(stderr, "Offending instruction: 0x%08X at 0x%08X\n", mmio_read32(&machine->mmio, machine->cpu.pc), machine->cpu.pc);
     uint32_t flags = machine->cpu.flags;
     machine->cpu.flags &= ~FLAG_IE;
     machine->cpu.flags |= FLAG_PRV;
@@ -242,7 +244,6 @@ bool step(Machine *machine) {
 
         case OP_JMP: {
             uint32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
-            printf("jumping to 0x%08X\n", J_DISPLACEMENT(word));
             machine->cpu.pc = target;
             advance = false;
             break;
@@ -351,6 +352,7 @@ bool step(Machine *machine) {
         }
 
         case OP_NOP: {
+            // printf("NOP!\n");
             break;
         }
 
@@ -400,6 +402,7 @@ bool step(Machine *machine) {
 
         default: {
             fprintf(stderr, "Unknown opcode 0x%X!\n", OPCODE(word));
+            exit(1);
             cpu_raise_exception(machine, INVALID_INSTR, NEXT_INSTR);
             return false;
         }
@@ -467,7 +470,17 @@ int main(int argc, char **argv) {
         timer_run_expired(&timer_pool);
     }
 
-    printf("reg 0 = %d\n", machine.cpu.r[0]);
+    for (int i = 0; i < 8; i++) {
+        printf("R%02d = 0x%08X  ", i, machine.cpu.r[i]);
+    }
+
+    putchar('\n');
+
+    for (int i = 8; i < 16; i++) {
+        printf("R%02d = 0x%08X  ", i, machine.cpu.r[i]);
+    }
+
+    putchar('\n');
 
     return 0;
 }

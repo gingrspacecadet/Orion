@@ -392,6 +392,7 @@ bool merge_sections(LinkContext *ctx) {
 
     return true;
 }
+
 bool layout_sections(LinkContext *ctx, addr_t base_address) {
     assert(ctx != NULL);
 
@@ -485,7 +486,6 @@ bool resolve_defined_symbols(LinkContext *ctx) {
         for (size_t j = 0; j < object.symbols.len; j++) {
             obj_symbol_t symbol = object.symbols.data[j];
             SectionPlacement placement;
-
 
             if (symbol.section == 0)
                 continue;
@@ -587,6 +587,52 @@ bool resolve_undefined_symbols(LinkContext *ctx) {
     return true;
 }
 
+static bool add_linker_symbol(LinkContext *ctx, const char *name, addr_t address) {
+    if (find_global_symbol(ctx, name, NULL)) {
+        fprintf(stderr, "internal linker symbol collision: %s\n", name);
+        return false;
+    }
+
+    GlobalSymbol sym = {
+        .name = strdup(name),
+        .address = address,
+        .object_index = SIZE_MAX,
+        .symbol_index = SIZE_MAX,
+    };
+
+    da_push(&ctx->global_symbols, sym);
+    return true;
+}
+
+static bool create_section_boundary_symbols(LinkContext *ctx) {
+    char start_name[256];
+    char end_name[256];
+
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        OutputSection *section = &ctx->sections.data[i];
+
+        const char *base = section->name;
+
+        while (*base == '.')
+            base++;
+
+        snprintf(start_name, sizeof(start_name), "__%s_start", base);
+        snprintf(end_name, sizeof(end_name), "__%s_end", base);
+
+        uint64_t end;
+        if (!CHECK_ADD(section->address, section->memory_size, &end))
+            return false;
+
+        if (!add_linker_symbol(ctx, start_name, section->address))
+            return false;
+
+        if (!add_linker_symbol(ctx, end_name, (addr_t)end))
+            return false;
+    }
+
+    return true;
+}
+
 bool resolve_symbols(LinkContext *ctx) {
     assert(ctx != NULL);
 
@@ -597,6 +643,11 @@ bool resolve_symbols(LinkContext *ctx) {
 
     if (!build_global_symbol_table(ctx)) {
         fprintf(stderr, "Failed to build global symbol table\n");
+        return false;
+    }
+
+    if (!create_section_boundary_symbols(ctx)) {
+        fprintf(stderr, "Failed to create section boundary symbols\n");
         return false;
     }
 
@@ -862,6 +913,18 @@ int parse_args(int argc, char **argv, LinkOptions *out) {
     return 1;
 }
 
+static uint32_t calculate_image_base(LinkContext *ctx) {
+    uint32_t lowest = UINT32_MAX;
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        OutputSection section = ctx->sections.data[i];
+        if (section.memory_size == 0) continue;
+        if (section.address < lowest)
+            lowest = section.address;
+    }
+
+    return lowest;
+}
+
 int main(int argc, char **argv) {
     LinkOptions options = {0};
 
@@ -903,14 +966,17 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s: failed to merge sections\n", argv[0]);
         return 1;
     }
+
     if (!layout_sections(&ctx, 0x1000)) {
         fprintf(stderr, "%s: failed to lay out sections\n", argv[0]);
         return 1;
     }
+
     if (!resolve_symbols(&ctx)) {
         fprintf(stderr, "%s: failed to resolve symbols\n", argv[0]);
         return 1;
     }
+    
     if (!apply_relocations(&ctx)) {
         fprintf(stderr, "%s: failed to apply relocations\n", argv[0]);
         return 1;
@@ -929,13 +995,10 @@ int main(int argc, char **argv) {
         if (!out) return 1;
 
         for (size_t i = 0; i < ctx.sections.len; i++) {
-            OutputSection *section = &ctx.sections.data[i];
-            if (section->address < 0x1000) {
-                fprintf(stderr, "%s: flat output cannot represent section \"%s\" below 0x1000\n", argv[0], section->name);
-                return 1;
-            }
+            uint32_t image_base = calculate_image_base(&ctx);
 
-            long offset = (long)(section->address - 0x1000);
+            OutputSection *section = &ctx.sections.data[i];
+            long offset = (long)(section->address - image_base);
             if (fseek(out, offset, SEEK_SET) != 0) {
                 fprintf(stderr, "%s: failed to seek while writing flat output\n", argv[0]);
                 return 1;

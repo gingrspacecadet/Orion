@@ -11,7 +11,7 @@
 #include "obj.h"
 #include "isa.h"
 
-#define MAX_ENTRIES UINT8_MAX
+#define MAX_ENTRIES 1024
 #define MAX_SECTION_SIZE 1024
 
 typedef struct {
@@ -270,7 +270,7 @@ static bool handle_align(Codegen *builder, const Instr *i) {
 
 static bool handle_section(Codegen *builder, const Instr *i) {
     REQUIRE_OP_COUNT(i, 1);
-    REQUIRE_OP_MODE(i, 0, AM_REF);
+    REQUIRE_OP_MODE(i, 0, AM_IDENT);
 
     bool ok = switch_section(builder, i->ops[0].label);
     REQUIRE(i, ok, "failed to switch to section %s", i->ops[0].label);
@@ -305,7 +305,7 @@ static bool handle_word(Codegen *builder, const Instr *i) {
             builder->failed = true;
             return false;
         }
-        if (i->ops[j].mode == AM_IMM) REQUIRE(i, i->ops[j].val >= -UINT32_MAX && i->ops[j].val <= UINT32_MAX, "argument must be within the word range");
+        if (i->ops[j].mode == AM_IMM) REQUIRE(i, (i->ops[j].val & UINT32_MAX) == i->ops[j].val, ".word argument must be within the word range");
     }
 
     for (uint8_t j = 0; j < i->op_count; j++) {
@@ -324,12 +324,25 @@ static bool handle_word(Codegen *builder, const Instr *i) {
 
 static bool handle_global(Codegen *builder, const Instr *i) {
     REQUIRE_OP_COUNT(i, 1);
-    REQUIRE_OP_MODE(i, 0, AM_REF);
+    REQUIRE_OP_MODE(i, 0, AM_IDENT);
 
     symbol_id_t id;
     REQUIRE(i, get_or_create_symbol(builder, i->ops[0].label, &id), "Failed to create symbol %s", i->ops[0].label);
 
     builder->symbols[id].flags |= SYMFLAG_GLOBAL;
+
+    return true;
+}
+
+static bool handle_zero(Codegen *builder, const Instr *i) {
+    REQUIRE_OP_COUNT(i, 1);
+    REQUIRE_OP_MODE(i, 0, AM_IMM);
+
+    REQUIRE(i, i->ops[0].val > 0, ".zero operand must be greater than 0");
+
+    for (size_t j = 0; j < (size_t)i->ops[0].val; j++) {
+        emit_byte(builder, 0);
+    }
 
     return true;
 }
@@ -343,6 +356,7 @@ struct {
     {".byte", handle_byte},
     {".word", handle_word},
     {".global", handle_global},
+    {".zero", handle_zero},
 };
 
 static uint32_t encode_x(Opcodes code) {
@@ -424,9 +438,17 @@ const OpConfig opcodes[] = {
     {"mul", TYPE_A, OP_MUL},
     {"div", TYPE_A, OP_DIV},
     {"divu", TYPE_A, OP_DIVU},
+    {"shl", TYPE_A, OP_SHL},
+    {"shr", TYPE_A, OP_SHR},
+    {"ashr", TYPE_A, OP_ASHR},
+    {"and", TYPE_A, OP_AND},
+    {"or", TYPE_A, OP_OR},
+    {"xor", TYPE_A, OP_XOR},
     {"lui", TYPE_A, OP_LUI},
     {"ldr", TYPE_M, OP_LDR},
+    {"ldrb", TYPE_M, OP_LDRB},
     {"str", TYPE_M, OP_STR},
+    {"strb", TYPE_M, OP_STRB},
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
     {"jmpr", TYPE_I, OP_JMPR},
@@ -442,6 +464,7 @@ const OpConfig opcodes[] = {
 };
 
 static bool emit_reloc(Codegen *builder, symbol_id_t symbol, reloc_type_t type, dataoff_t offset) {
+    assert(builder->header.relocs < MAX_ENTRIES);
     obj_reloc_t *reloc = &builder->relocs[builder->header.relocs++];
 
     reloc->type = type;
@@ -466,6 +489,19 @@ static bool emit_instr(Codegen *builder, const Instr *i) {
             }
 
             emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, i->ops[1].val, false));
+        } else if (i->ops[1].mode == AM_REF) {
+            symbol_id_t id;
+            emit_word(builder, encode_a(OP_XOR, i->ops[0].reg, i->ops[0].reg, i->ops[0].reg, true));
+            emit_word(builder, encode_a(OP_LUI, 0, i->ops[0].reg, 0, false));
+            REQUIRE(i, get_or_create_symbol(builder, i->ops[1].label, &id), "failed to get id of symbol %s", i->ops[1].label);
+            REQUIRE(i, emit_reloc(builder, id, RELOC_HI16, active_section(builder)->size - sizeof(uint32_t)), "failed to emit relocation");
+
+            emit_word(builder, encode_a(OP_ADD, i->ops[0].reg, i->ops[0].reg, 0, false));
+            REQUIRE(i, get_or_create_symbol(builder, i->ops[1].label, &id), "failed to get id of symbol %s", i->ops[1].label);
+            REQUIRE(i, emit_reloc(builder, id, RELOC_LO16, active_section(builder)->size - sizeof(uint32_t)), "failed to emit relocation");
+        } else {
+            asm_error(i->line_num, "Unknown MOV format");
+            return false;
         }
 
         return true;

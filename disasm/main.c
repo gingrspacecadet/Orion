@@ -29,8 +29,11 @@ const char *const opcode_names[] = {
 const struct {Opcodes code; OpcodeTypes type;}
 opcodes[] = {
     [OP_ADD] = {OP_ADD, TYPE_A},
+    [OP_SUB] = {OP_SUB, TYPE_A},
+    [OP_XOR] = {OP_XOR, TYPE_A},
     [OP_NOP] = {OP_NOP, TYPE_X},
     [OP_LDR] = {OP_LDR, TYPE_M},
+    [OP_STR] = {OP_STR, TYPE_M},
     [OP_LUI] = {OP_LUI, TYPE_A},
 };
 
@@ -41,7 +44,7 @@ static void print_instr(uint32_t word) {
         case TYPE_M: {
             printf("r%u, r%u, ", A_RD(word), A_RN(word));
             if (A_REGISTER(word))
-                printf("r%u", A_OPERAND(word) >> 11);
+                printf("r%u", A_OPERAND(word) % 0xF);
             else if ((int16_t)A_OPERAND(word) < 0)
                 printf("#%u (%d)", A_OPERAND(word), (int16_t)A_OPERAND(word));
             else

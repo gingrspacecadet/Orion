@@ -7,12 +7,16 @@
 #include "lexer.h"
 
 static inline Token peek(Source *source) {
-    ptrdiff_t old = source->offset;
+    ptrdiff_t old_offset = source->offset;
+    size_t old_line = source->line;
+
     Token t = lex(source);
-    source->offset = old;
+
+    source->offset = old_offset;
+    source->line = old_line;
+
     return t;
 }
-
 static inline void advance(Source *source) {
     lex(source);
 }
@@ -40,9 +44,7 @@ Operand parse_operand(Source *source) {
             break;
         }
 
-        case TK_REF:
-        case TK_MNEM:
-        case TK_DIRECTIVE: {
+        case TK_REF: {
             advance(source);
             out.mode = AM_REF;
             strncpy(out.label, t.string, 31);
@@ -96,6 +98,14 @@ Operand parse_operand(Source *source) {
                 fprintf(stderr, "Assembler Error (line %d): Expected ']' to close memory operand\n", t.line_num);
             }
 
+            break;
+        }
+
+        case TK_DIRECTIVE:
+        case TK_MNEM: {
+            advance(source);
+            out.mode = AM_IDENT;
+            strncpy(out.label, t.string, 31);
             break;
         }
 

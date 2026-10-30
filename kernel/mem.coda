@@ -1,0 +1,8 @@
+module mem;
+
+@export
+fn none set(mut none *dest, uint8 value, uint32 length) {
+    for (mut uint32 i = 0; i < length; i += 1) {
+        ((mut uint8 *)dest)[i] = value;
+    }
+}
