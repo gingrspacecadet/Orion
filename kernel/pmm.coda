@@ -1,14 +1,17 @@
 module pmm;
 
-mut uint8[131068] bitmap;
+uint32 RAM_BASE = 0x20000;
+uint32 PAGE_SIZE = 4096;
+uint32 PAGE_COUNT = 1048544;
+uint32 BITMAP_BYTES = 262136;
 
-uint32 ram_base = 0x20000;
-uint32 page_size = 4096;
+mut uint8[BITMAP_BYTES] bitmap;
 
-fn uint8 get_page_index(uint32 address) {
-    return (uint8)((address - ram_base) / page_size);
+fn uint32 get_page_index(uint32 address) {
+    return ((address - RAM_BASE) / PAGE_SIZE);
 }
 
+@export
 type PageStatus = enum: uint8 {
     Free = 0b00,
     Allocated = 0b01,
@@ -16,24 +19,24 @@ type PageStatus = enum: uint8 {
     Unavailable = 0b11,
 };
 
-fn none set_page_status(uint32 address, mut PageStatus status) {
-    uint8 index = get_page_index(address) / (uint8)#sizeof(uint32);
+fn none set_page_status(uint32 page_index, PageStatus status) {
+    uint32 byte_index = page_index / 4;
+    uint32 shift = (page_index % 4) * 2;
 
-    mut uint8 mappart = bitmap[index];
-    uint8 mask = 0b11 << (2 * index);
+    uint32 mask = 0b11 << shift;
+    mut uint32 value = bitmap[byte_index];
 
-    mappart &= ~mask;
-    status = (uint8)status << 2 * index;
-    mappart |= (uint8)status;
+    value &= ~mask;
+    value |= (uint32)status << shift;
+
+    bitmap[byte_index] = (uint8)value;
 }
 
-fn PageStatus get_page_status(uint32 address) {
-    uint8 index = get_page_index(address);
+fn PageStatus get_page_status(uint32 page_index) {
+    uint32 byte_index = page_index / 4;
+    uint32 shift = (page_index % 4) * 2;
 
-    uint8 mappart = bitmap[index / 4];
-    uint8 mask = 0b11 << (2 * (index / 4));
-
-    return (PageStatus)(mappart & mask);
+    return (PageStatus)((bitmap[byte_index] >> shift) & 0b11);
 }
 
 @extern uint32 __exe_start;
@@ -41,14 +44,156 @@ fn PageStatus get_page_status(uint32 address) {
 
 @export
 fn none init() {
-    // Reserve the kernel itself
-    // and the data below it (ROM, devices, etc)
-    for (mut uint32 i = 0; i < __exe_end; i += 1) {
-        set_page_status(i, PageStatus::Reserved);
+    // reserve the kernel image.
+    reserve_range(__exe_start, __exe_end, PageStatus::Reserved);
+
+    // reserve the upper 64 KiB for the kernel stack.
+    reserve_range(0xFFFF0000, 0xFFFFFFFF, PageStatus::Reserved);
+}
+
+@export
+fn none reserve_range(mut uint32 start, uint32 end, PageStatus status) {
+    if (end <= start) return;
+
+    if (start < RAM_BASE) start = RAM_BASE;
+    if (end <= RAM_BASE) return;
+
+    uint32 first = (start - RAM_BASE) / PAGE_SIZE;
+
+    uint32 end_offset = end - RAM_BASE;
+    mut uint32 last = end_offset / PAGE_SIZE;
+
+    // round the exclusive end up to the next page.
+    if ((end_offset & (PAGE_SIZE - 1)) != 0) {
+        last += 1;
     }
 
-    // Reserve some stack space (2^16 for now, should be fine)
-    for (mut uint i = 0xFFFF0000; i < 0xFFFFFFFF; i += 1) {
-        set_page_status(i, PageStatus::Reserved);
+    if (last > PAGE_COUNT) last = PAGE_COUNT;
+
+    for (mut uint32 i = first; i < last; i += 1) {
+        set_page_status(i, status);
     }
+}
+
+mut uint32 search_hint = 0;
+
+@export
+fn (uint32 | none) alloc() {
+    for (mut uint32 n = 0; n < PAGE_COUNT; n += 1) {
+        mut uint32 i = search_hint + n;
+        if (i >= PAGE_COUNT) i -= PAGE_COUNT;
+
+        if (get_page_status(i) != PageStatus::Free) continue;
+
+        set_page_status(i, PageStatus::Allocated);
+
+        search_hint = i + 1;
+        if (search_hint == PAGE_COUNT) search_hint = 0;
+
+        return RAM_BASE + i * PAGE_SIZE;
+    }
+
+    return;
+}
+
+type FreeError = enum {
+    MisalignedAddr,
+    DoubleFree,
+    BadPage,
+    InvalidCount,
+};
+
+@export
+fn (none | FreeError) free(uint32 address) {
+    if ((address & (PAGE_SIZE - 1)) != 0)
+        return FreeError::MisalignedAddr;
+
+    if (address < RAM_BASE)
+        return FreeError::BadPage;
+
+    uint32 index = get_page_index(address);
+
+    if (index >= PAGE_COUNT)
+        return FreeError::BadPage;
+
+    PageStatus status = get_page_status(index);
+
+    if (status == PageStatus::Free)
+        return FreeError::DoubleFree;
+
+    if (status != PageStatus::Allocated)
+        return FreeError::BadPage;
+
+    set_page_status(index, PageStatus::Free);
+
+    // make newly freed pages available to the next search.
+    if (index < search_hint)
+        search_hint = index;
+}
+
+@export
+fn (uint32 | none) alloc_pages(uint32 count) {
+    if (count == 0) return;
+    if (count >= PAGE_COUNT) return;
+
+    for (mut uint32 n = 0; n < PAGE_COUNT; n += 1) {
+        mut uint32 i = search_hint + n;
+        if (i >= PAGE_COUNT) i -= PAGE_COUNT;
+        if (count > PAGE_COUNT - i) continue;
+
+        if (get_page_status(i) != PageStatus::Free) continue;
+
+        mut bool okay = true;
+        for (mut uint32 m = 0; m < count; m += 1) {
+            if (get_page_status(i + m) != PageStatus::Free) {
+                okay = false;
+                break;
+            }
+        }
+
+        if (!okay) continue;
+
+        for (mut uint32 m = 0; m < count; m += 1) {
+            set_page_status(i + m, PageStatus::Allocated);
+        }
+
+        search_hint = i + count;
+        if (search_hint >= PAGE_COUNT) search_hint = 0;
+
+        return RAM_BASE + i * PAGE_SIZE;
+    }
+
+    return;
+}
+
+@export
+fn (none | FreeError) free_pages(uint32 address, uint32 count) {
+    if ((address & (PAGE_SIZE - 1)) != 0)
+        return FreeError::MisalignedAddr;
+
+    if (address < RAM_BASE)
+        return FreeError::BadPage;
+
+    if (count == 0) return FreeError::InvalidCount;
+
+    uint32 index = get_page_index(address);
+
+    if (index >= PAGE_COUNT || count > PAGE_COUNT - index)
+        return FreeError::BadPage;
+
+    // validate all pages first
+    for (mut uint32 i = 0; i < count; i += 1) {
+        PageStatus status = get_page_status(index + i);
+        if (status == PageStatus::Free) return FreeError::DoubleFree;
+        if (status != PageStatus::Allocated) return FreeError::BadPage;
+    }
+
+    for (mut uint32 i = 0; i < count; i += 1) {
+        set_page_status(index + i, PageStatus::Free);
+    }
+
+    if (index < search_hint)
+        search_hint = index;
+
+    return;
 }
