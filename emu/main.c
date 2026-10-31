@@ -11,6 +11,7 @@
 #include "icu.h"
 #include "pit.h"
 #include "pcu.h"
+#include "mtu.h"
 
 static uint8_t *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
@@ -66,6 +67,7 @@ typedef struct {
     Cpu cpu;
     Icu icu;
     Mmio mmio;
+    Mtu mtu;
 } Machine;
 
 void cpu_reset(Cpu *cpu) {
@@ -114,15 +116,143 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
 #define set_reg_bank(cpu) \
     cpu.r = (cpu.flags & FLAG_PRV) ? cpu.ksr : cpu.usr;
 
+bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc);
+
+MtuResult cpu_translate_noexcept(Machine *machine, uint32_t virtual_address, MtuAccess access, uint32_t *physical) {
+    assert(machine); assert(physical);
+
+    if ((machine->cpu.flags & FLAG_TM) || !(machine->cpu.flags & FLAG_VM)) {
+        *physical = virtual_address;
+        return MTU_SUCCESS;
+    }
+
+    uint32_t phys;
+    MtuResult res = mtu_translate(&machine->mtu, virtual_address, access, !(machine->cpu.flags & FLAG_PRV), &phys);
+    if (res == MTU_MISS) return MTU_MISS;
+    if (res == MTU_PERM) return MTU_PERM;
+
+    *physical = phys;
+    return MTU_SUCCESS;
+}
+
+MtuResult cpu_read32_noexcept(Machine *machine, uint32_t addr, uint32_t *value) {
+    assert(machine);
+    uint32_t phys;
+    MtuResult res = cpu_translate_noexcept(machine, addr, DATA_READ, &phys);
+    if (res != MTU_SUCCESS) return res;
+
+    *value = mmio_read32(&machine->mmio, phys);
+    return MTU_SUCCESS;
+}
+
+bool cpu_read32(Machine *machine, uint32_t addr, uint32_t *value) {
+    assert(machine);
+    MtuResult res = cpu_read32_noexcept(machine, addr, value);
+    if (res == MTU_MISS) {
+        cpu_raise_exception(machine, DTLB_MISS, machine->cpu.pc + 4);
+        return false;
+    }
+    if (res == MTU_PERM) {
+        cpu_raise_exception(machine, PAGE_FAULT, machine->cpu.pc + 4);
+        return false;
+    }
+
+    return true;
+}
+
+MtuResult cpu_write32_noexcept(Machine *machine, uint32_t addr, uint32_t value) {
+    assert(machine);
+    uint32_t phys;
+    MtuResult res = cpu_translate_noexcept(machine, addr, DATA_WRITE, &phys);
+    if (res != MTU_SUCCESS) return res;
+
+    mmio_write32(&machine->mmio, phys, value);
+    return MTU_SUCCESS;
+}
+
+bool cpu_write32(Machine *machine, uint32_t addr, uint32_t value) {
+    assert(machine);
+    MtuResult res = cpu_write32_noexcept(machine, addr, value);
+    if (res == MTU_MISS) {
+        cpu_raise_exception(machine, DTLB_MISS, machine->cpu.pc + 4);
+        return false;
+    }
+    if (res == MTU_PERM) {
+        cpu_raise_exception(machine, PAGE_FAULT, machine->cpu.pc + 4);
+        return false;
+    }
+
+    return true;
+}
+
+bool cpu_read8(Machine *machine, uint32_t addr, uint8_t *out) {
+    assert(machine); assert(out);
+    uint32_t phys;
+    MtuResult res = cpu_translate_noexcept(machine, addr, DATA_READ, &phys);
+    if (res == MTU_MISS) {
+        cpu_raise_exception(machine, DTLB_MISS, machine->cpu.pc + 4);
+        return false;
+    }
+    if (res == MTU_PERM) {
+        cpu_raise_exception(machine, PAGE_FAULT, machine->cpu.pc + 4);
+        return false;
+    }
+
+    *out = mmio_read8(&machine->mmio, phys);
+    return true;
+}
+
+bool cpu_write8(Machine *machine, uint32_t addr, uint8_t value) {
+    assert(machine);
+
+    uint32_t phys;
+    MtuResult res = cpu_translate_noexcept(machine, addr, DATA_WRITE, &phys);
+    if (res == MTU_MISS) {
+        cpu_raise_exception(machine, DTLB_MISS, machine->cpu.pc + 4);
+        return false;
+    }
+    if (res == MTU_PERM) {
+        cpu_raise_exception(machine, PAGE_FAULT, machine->cpu.pc + 4);
+        return false;
+    }
+
+    mmio_write8(&machine->mmio, phys, value);
+    return true;
+}
+
+bool cpu_fetch32(Machine *machine, uint32_t address, uint32_t *value) {
+    if ((address % 4) != 0) {
+        cpu_raise_exception(machine, MISALIGNED_PC, machine->cpu.pc + 4);
+        return false;
+    }
+
+    uint32_t translated;
+    MtuResult res = cpu_translate_noexcept(machine, address, INSTR_FETCH, &translated);
+    if (res == MTU_MISS) {
+        cpu_raise_exception(machine, ITLB_MISS, machine->cpu.pc + 4);
+        return false;
+    }
+    if (res == MTU_PERM) {
+        cpu_raise_exception(machine, PAGE_FAULT, machine->cpu.pc + 4);
+        return false;
+    }
+
+    *value = mmio_read32(&machine->mmio, translated);
+    return true;
+}
+
 bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
     if (vector < 0x20 || vector == 0xFF) {
         fprintf(stderr, "Fault %d raised\n", vector);
-        fprintf(stderr, "Offending instruction: 0x%08X at 0x%08X\n", mmio_read32(&machine->mmio, machine->cpu.pc), machine->cpu.pc);
+        fprintf(stderr, "Offending instruction at 0x%08X\n", machine->cpu.pc);
     }
     uint32_t flags = machine->cpu.flags;
     machine->cpu.flags &= ~FLAG_IE;
     machine->cpu.flags |= FLAG_PRV;
     set_reg_bank(machine->cpu);
+
+    if (vector == ITLB_MISS || vector == DTLB_MISS)
+        machine->cpu.flags |= FLAG_TM;
 
     Register *sp = &machine->cpu.r[RSP];
 
@@ -132,33 +262,48 @@ bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
         return false; // double fault!
     }
 
+    if ((*sp % 4) != 0) {
+        machine->cpu.running = false;
+        fprintf(stderr, "Double Fault\n");
+        return false; // double fault!
+    }
+
     *sp -= 4;
-    mmio_write32(&machine->mmio, *sp, flags);
+    if (cpu_write32_noexcept(machine, *sp, flags) != MTU_SUCCESS) {
+        machine->cpu.running = false;
+        fprintf(stderr, "Double Fault\n");
+        return false; // double fault!
+    }
     *sp -= 4;
-    mmio_write32(&machine->mmio, *sp, return_pc);
+    if (cpu_write32_noexcept(machine, *sp, return_pc) != MTU_SUCCESS) {
+        machine->cpu.running = false;
+        fprintf(stderr, "Double Fault\n");
+        return false; // double fault!
+    }
 
     machine->cpu.pc = mmio_read32(&machine->mmio, IHVT + (uint32_t)vector * 4);
 
     return true;
 }
 
-// TODO: double faults
-
-static inline void push32(Machine *machine, uint32_t v) {
+static inline bool push32(Machine *machine, uint32_t v) {
     R(RSP) -= 4;
-    mmio_write32(&machine->mmio, R(RSP), v);
+    return cpu_write32(machine, R(RSP), v);
 }
 
-static inline uint32_t pop32(Machine *machine) {
-    uint32_t v = mmio_read32(&machine->mmio, R(RSP));
+static inline bool pop32(Machine *machine, uint32_t *v) {
+    uint32_t val;
+    if (!cpu_read32(machine, R(RSP), &val)) return false;
     R(RSP) += 4;
-    return v;
+    *v = val;
+    return true;
 }
 
 #define NEXT_INSTR machine->cpu.pc + 4
 
 bool step(Machine *machine) {
-    uint32_t word = mmio_read32(&machine->mmio, machine->cpu.pc);
+    uint32_t word;
+    if (!cpu_fetch32(machine, machine->cpu.pc, &word)) return false;
 
     bool advance = true;
 
@@ -312,7 +457,7 @@ bool step(Machine *machine) {
         }
 
         case OP_RET: {
-            machine->cpu.pc = pop32(machine);
+            if (!pop32(machine, &machine->cpu.pc)) return false;
             advance = false;
             break;
         }
@@ -324,7 +469,7 @@ bool step(Machine *machine) {
                 return false;
             }
         
-            R(M_RD(word)) = mmio_read32(&machine->mmio, address);
+            if (!cpu_read32(machine, address, &R(M_RD(word)))) return false;
             break;
         }
 
@@ -335,21 +480,23 @@ bool step(Machine *machine) {
                 return false;
             }
         
-            mmio_write32(&machine->mmio, address, R(M_RD(word)));
+            if (!cpu_write32(machine, address, R(M_RD(word)))) return false;
             break;
         }
 
         case OP_LDRB: {
             uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
 
-            R(M_RD(word)) = mmio_read8(&machine->mmio, address);
+            uint8_t value;
+            if (!cpu_read8(machine, address, &value)) return false;
+            R(M_RD(word)) = value;
             break;
         }
 
         case OP_STRB: {
             uint32_t address = R(M_RN(word)) + (M_REGISTER(word) ? (int32_t)R(M_OPERAND(word) & 0xF) : sign_extend_16(M_OPERAND(word)));
 
-            mmio_write8(&machine->mmio, address, R(M_RD(word)));
+            if (!cpu_write8(machine, address, R(M_RD(word)))) return false;
             break;
         }
 
@@ -377,6 +524,7 @@ bool step(Machine *machine) {
                 }
                 if ((value & FLAG_TM) != 0) {
                     cpu_raise_exception(machine, INVALID_INSTR, NEXT_INSTR);
+                    return false;
                 }
                 machine->cpu.flags = value;
                 set_reg_bank(machine->cpu);
@@ -393,8 +541,8 @@ bool step(Machine *machine) {
                 return false;
             }
 
-            machine->cpu.pc = pop32(machine);
-            machine->cpu.flags = pop32(machine);
+            if (!pop32(machine, &machine->cpu.pc)) return false;
+            if (!pop32(machine, &machine->cpu.flags)) return false;
             set_reg_bank(machine->cpu);
 
             advance = false;
@@ -446,6 +594,7 @@ int main(int argc, char **argv) {
     mmio_add_device(&machine.mmio, (Device){.base_addr = ICU, .size = 80, .state = &machine.icu, .read = icu_read, .write = icu_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = PIT, .size = 24, .state = &pit, .read = pit_read, .write = pit_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = PCU, .size = 256, .state = &pcu, .read = pcu_read, .write = pcu_write});
+    mmio_add_device(&machine.mmio, (Device){.base_addr = MTU, .size = 128, .state = &machine.mtu, .read = mtu_read, .write = mtu_write});
 
     uint64_t last_ns;
     struct timespec ts;

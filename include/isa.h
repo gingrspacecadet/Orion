@@ -142,4 +142,11 @@ typedef enum {
 #define PCU_DEV_SIZE    0x08
 #define PCU_DEV_IRQ     0x0C
 
+#define MTU_FAULT_ADDR      0x00
+#define MTU_CONFIG          0x04
+#define TLB_HI_WIN          0x08
+#define TLB_LO_WIN          0x0C
+#define MTU_CURR_ASID       0x10
+#define MTU_FAULT_STATUS    0x14
+
 #endif
