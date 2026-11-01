@@ -83,7 +83,10 @@ fn (AddressSpace | none) AddressSpace.create() {
                     return space;
                 }
 
-                AsidError: return;
+                AsidError: {
+                    pmm::free(address);
+                    return;
+                }
             }
         }
 
@@ -99,6 +102,7 @@ type VmmError = enum {
     AlreadyMapped,
     NotMapped,
     InvalidAddressSpace,
+    ActiveAddressSpace,
     PmmFailure,
     InvalidAsid,
     InvalidFault,
@@ -108,6 +112,12 @@ type VmmError = enum {
 fn (none | VmmError) AddressSpace.destroy(mut AddressSpace *space) {
     if (space.directory_phys == 0)
         return VmmError::InvalidAddressSpace;
+
+    if (space.asid == 0 || space.asid >= ASID_COUNT || !asid_is_allocated(space.asid))
+        return VmmError::InvalidAsid;
+
+    if (active_space.directory_phys != 0 && (active_space.directory_phys == space.directory_phys || active_space.asid == space.asid))
+        return VmmError::ActiveAddressSpace;
 
     tlb_invalidate_asid(space.asid);
 
@@ -130,12 +140,14 @@ fn (none | VmmError) AddressSpace.destroy(mut AddressSpace *space) {
 
     match (pmm::free(space.directory_phys)) {
         none: {
-            space.directory_phys = 0;
             match (release_asid(space.asid)) {
                 AsidError: return VmmError::InvalidAsid;
-                none: space.asid = 0;
+                none: {
+                    space.directory_phys = 0;
+                    space.asid = 0;
+                    return;
+                }
             }
-            return;
         }
 
         pmm::FreeError: return VmmError::PmmFailure;
@@ -306,11 +318,18 @@ mut AddressSpace active_space;
 
 @export
 fn none activate(AddressSpace space) {
-    if (space.directory_phys == 0 || space.asid > 0x3FF)
+    if (space.directory_phys == 0 ||
+        space.asid == 0 ||
+        space.asid >= ASID_COUNT ||
+        !asid_is_allocated(space.asid))
         cpu::halt();
 
-    if (active_space.directory_phys != 0 && active_space.directory_phys != space.directory_phys && active_space.asid == space.asid) {
-        tlb_invalidate_asid(space.asid);
+    if (active_space.directory_phys != 0) {
+        if (active_space.asid == space.asid && active_space.directory_phys != space.directory_phys)
+            cpu::halt();
+
+        if (active_space.directory_phys == space.directory_phys && active_space.asid != space.asid)
+            cpu::halt();
     }
 
     active_space = space;
@@ -352,6 +371,16 @@ type AsidError = enum {
     Active,
 };
 
+fn bool asid_is_allocated(uint32 id) {
+    if (id == 0 || id >= ASID_COUNT)
+        return false;
+
+    uint32 byte_index = id >> 3;
+    uint8 bit = (uint8)(1 << (id & 7));
+
+    return (asid_bitmap[byte_index] & bit) != 0;
+}
+
 fn (uint32 | AsidError) alloc_asid() {
     mut uint32 id = asid_search_hint;
 
@@ -381,10 +410,7 @@ fn (none | AsidError) release_asid(uint32 id) {
     if (id == 0 || id >= ASID_COUNT)
         return AsidError::Invalid;
 
-    uint32 byte_index = id >> 3;
-    uint8 bit = (uint8)(1 << (id & 7));
-
-    if ((asid_bitmap[byte_index] & bit) == 0)
+    if (!asid_is_allocated(id))
         return AsidError::NotAllocated;
 
     if (active_space.directory_phys != 0 && active_space.asid == id)
@@ -392,6 +418,8 @@ fn (none | AsidError) release_asid(uint32 id) {
 
     tlb_invalidate_asid(id);
 
+    uint32 byte_index = id >> 3;
+    uint8 bit = (uint8)(1 << (id & 7));
     asid_bitmap[byte_index] &= (uint8)~bit;
 
     if (id < asid_search_hint)

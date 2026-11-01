@@ -1,4 +1,4 @@
 module cpu;
 
-@extern
+@extern,export
 fn none enable_ints();

@@ -20,6 +20,8 @@ fn uint32 main() {
     ihvt::init();
     timer::init();
 
+    cpu::enable_ints();
+
     // while (timer_ticks < 500) {}
     cpu::halt();
     return 0;

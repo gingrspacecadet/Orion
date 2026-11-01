@@ -15,7 +15,7 @@ __int_common:
     jeq r1, #0, $__int_call_aligned
 
     sub rsp, rsp, #4
-    add r1, rsp, #60
+    add r1, rsp, #64
     call $_C3int4ihvt11int_handler
     add rsp, rsp, #4
     jmp $__int_call_done
