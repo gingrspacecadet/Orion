@@ -32,6 +32,11 @@ type AddressSpace = struct {
     uint32 asid;
 };
 
+uint32 KERNEL_BASE = 0xC0000000;
+uint32 KERNEL_PDE_INDEX = 768;
+
+mut AddressSpace kernel_space;
+
 fn uint32 directory_index(uint32 address) {
     return (address >> 22) & PAGE_INDEX_MASK;
 }
@@ -73,7 +78,7 @@ fn (PageEntry | none) AddressSpace.lookup(AddressSpace space, uint32 address) {
 fn (AddressSpace | none) AddressSpace.create() {
     match (pmm::alloc()) {
         uint32 address: {
-            mem::set((mut none *)address, 0, PAGE_SIZE);
+            mem::set((none *)address, 0, PAGE_SIZE);
 
             mut AddressSpace space = {.directory_phys = address};
 
@@ -106,6 +111,7 @@ type VmmError = enum {
     PmmFailure,
     InvalidAsid,
     InvalidFault,
+    InvalidVirtualAddress,
 };
 
 @export
@@ -123,7 +129,7 @@ fn (none | VmmError) AddressSpace.destroy(mut AddressSpace *space) {
 
     mut uint32 *directory = (mut uint32 *)space.directory_phys;
 
-    for (mut uint32 i = 0; i < PAGE_ENTRY_COUNT; i += 1) {
+    for (mut uint32 i = 0; i < KERNEL_PDE_INDEX; i += 1) {
         uint32 pde = directory[i];
 
         if ((pde & PDE_PRESENT) == 0)
@@ -176,38 +182,79 @@ fn (uint32 | none) AddressSpace.get_or_create_table(mut AddressSpace *space, uin
 
 uint32 PTE_PERMISSION_MASK = 0x0F;
 
-@export
-fn (none | VmmError) AddressSpace.map(mut AddressSpace *space, uint32 virtual_address, uint32 physical_address, uint32 flags) {
-    if ((virtual_address & PAGE_MASK) != 0 || (physical_address & PAGE_MASK) != 0) {
+uint32 PTE_PERMISSION_MASK = 0x0F;
+
+fn (none | VmmError) map_page(mut AddressSpace *space, uint32 virtual_address, uint32 physical_address, uint32 flags) {
+    if (space.directory_phys == 0)
+        return VmmError::InvalidAddressSpace;
+
+    if ((virtual_address & PAGE_MASK) != 0 ||
+        (physical_address & PAGE_MASK) != 0)
         return VmmError::MisalignedAddress;
-    }
 
-    // physical page zero is permanently unmapped
-    if (physical_address == 0) {
+    if (physical_address == 0)
         return VmmError::InvalidPhysicalAddress;
-    }
 
-    if ((flags & ~PTE_PERMISSION_MASK) != 0) {
+    if ((flags & ~PTE_PERMISSION_MASK) != 0)
         return VmmError::InvalidFlags;
-    }
 
     mut uint32 table_phys = 0;
+
     match (space.get_or_create_table(virtual_address)) {
         uint32 address: table_phys = address;
         none: return VmmError::OutOfMemory;
     }
+
     mut uint32 *table = (mut uint32 *)table_phys;
-
     uint32 index = table_index(virtual_address);
-    uint32 pte = table[index];
 
-    if ((pte & PTE_PRESENT) != 0) {
+    if ((table[index] & PTE_PRESENT) != 0)
         return VmmError::AlreadyMapped;
-    }
 
     table[index] = physical_address | flags | PTE_PRESENT;
 
     return;
+}
+
+@export
+fn (none | VmmError) AddressSpace.map(mut AddressSpace *space, uint32 virtual_address, uint32 physical_address, uint32 flags) {
+    if (virtual_address >= KERNEL_BASE)
+        return VmmError::InvalidVirtualAddress;
+
+    return map_page(space, virtual_address, physical_address, flags);
+}
+
+@export
+fn (none | VmmError) kernel_map(uint32 virtual_address, uint32 physical_address, uint32 flags) {
+    if (virtual_address < KERNEL_BASE)
+        return VmmError::InvalidVirtualAddress;
+
+    if (kernel_space.directory_phys == 0 || kernel_space.asid != 0)
+        return VmmError::InvalidAddressSpace;
+
+    if ((flags & PTE_USER) != 0)
+        return VmmError::InvalidFlags;
+
+    return map_page(&kernel_space, virtual_address, physical_address, flags);
+}
+
+fn none tlb_invalidate_page(uint32 virtual_address) {
+    mut uint32 *mtu = (mut uint32 *)0x00010600;
+    uint32 vpn = virtual_address & PAGE_FRAME_MASK;
+
+    for (mut uint32 i = 0; i < 32; i += 1) {
+        mtu[1] = i;
+
+        uint32 hi = mtu[2];
+
+        if ((hi & 1) == 0)
+            continue;
+
+        if ((hi & PAGE_FRAME_MASK) != vpn)
+            continue;
+
+        mtu[2] = hi & ~1;
+    }
 }
 
 fn none tlb_invalidate(uint32 asid, uint32 virtual_address) {
@@ -234,17 +281,13 @@ fn none tlb_invalidate(uint32 asid, uint32 virtual_address) {
     }
 }
 
-@export
-fn (PageEntry | VmmError) AddressSpace.unmap(mut AddressSpace *space, uint32 virtual_address) {
-    if ((virtual_address & PAGE_MASK) != 0)
-        return VmmError::MisalignedAddress;
-
+fn (PageEntry | none) unmap_page(mut AddressSpace *space, uint32 virtual_address) {
     mut uint32 *directory = (mut uint32 *)space.directory_phys;
 
     uint32 pde = directory[directory_index(virtual_address)];
 
     if ((pde & PDE_PRESENT) == 0)
-        return VmmError::NotMapped;
+        return;
 
     mut uint32 *table = (mut uint32 *)PageEntry.frame(pde);
 
@@ -252,13 +295,53 @@ fn (PageEntry | VmmError) AddressSpace.unmap(mut AddressSpace *space, uint32 vir
     uint32 pte = table[index];
 
     if ((pte & PTE_PRESENT) == 0)
-        return VmmError::NotMapped;
+        return;
 
     table[index] = 0;
 
-    tlb_invalidate(space.asid, virtual_address);
-
     return (PageEntry)pte;
+}
+
+@export
+fn (PageEntry | VmmError) AddressSpace.unmap(mut AddressSpace *space, uint32 virtual_address) {
+    if (virtual_address >= KERNEL_BASE)
+        return VmmError::InvalidVirtualAddress;
+
+    if (space.directory_phys == 0)
+        return VmmError::InvalidAddressSpace;
+
+    if ((virtual_address & PAGE_MASK) != 0)
+        return VmmError::MisalignedAddress;
+
+    match (unmap_page(space, virtual_address)) {
+        PageEntry entry: {
+            tlb_invalidate(space.asid, virtual_address);
+            return entry;
+        }
+
+        none: return VmmError::NotMapped;
+    }
+}
+
+@export
+fn (PageEntry | VmmError) kernel_unmap(uint32 virtual_address) {
+    if (virtual_address < KERNEL_BASE)
+        return VmmError::InvalidVirtualAddress;
+
+    if (kernel_space.directory_phys == 0 || kernel_space.asid != 0)
+        return VmmError::InvalidAddressSpace;
+
+    if ((virtual_address & PAGE_MASK) != 0)
+        return VmmError::MisalignedAddress;
+
+    match (unmap_page(&kernel_space, virtual_address)) {
+        PageEntry entry: {
+            tlb_invalidate_page(virtual_address);
+            return entry;
+        }
+
+        none: return VmmError::NotMapped;
+    }
 }
 
 fn none tlb_invalidate_asid(uint32 asid) {
@@ -318,10 +401,7 @@ mut AddressSpace active_space;
 
 @export
 fn none activate(AddressSpace space) {
-    if (space.directory_phys == 0 ||
-        space.asid == 0 ||
-        space.asid >= ASID_COUNT ||
-        !asid_is_allocated(space.asid))
+    if (space.directory_phys == 0 || space.asid == 0 || space.asid >= ASID_COUNT || !asid_is_allocated(space.asid))
         cpu::halt();
 
     if (active_space.directory_phys != 0) {
@@ -344,6 +424,23 @@ fn (uint32 | VmmError) refill() {
 
     if ((status & 0x1C) != 0)
         return VmmError::InvalidFault;
+
+    if (address >= KERNEL_BASE) {
+        if (kernel_space.directory_phys == 0)
+            return VmmError::InvalidAddressSpace;
+
+        if (active_space.directory_phys == 0) {
+            if (asid != 0)
+                return VmmError::InvalidAsid;
+        } else if (asid != active_space.asid) {
+            return VmmError::InvalidAsid;
+        }
+
+        match (kernel_space.lookup(address)) {
+            PageEntry entry: return tlb_install(asid, address, entry);
+            none: return VmmError::NotMapped;
+        }
+    }
 
     if (active_space.directory_phys == 0)
         return VmmError::InvalidAddressSpace;
@@ -424,4 +521,32 @@ fn (none | AsidError) release_asid(uint32 id) {
 
     if (id < asid_search_hint)
         asid_search_hint = id;
+}
+
+fn none tlb_invalidate_all() {
+    for (mut uint32 i = 0; i < 32; i += 1) {
+        io::write32(0x00010600, 0x04, i);
+        io::write32(0x00010600, 0x08, 0);
+    }
+}
+
+@export
+fn none init() {
+    match (pmm::alloc()) {
+        none: cpu::halt();
+
+        uint32 address: {
+            mem::set((none *)address, 0, PAGE_SIZE);
+
+            kernel_space = {
+                .directory_phys = address,
+                .asid = 0,
+            };
+        }
+    }
+
+    tlb_invalidate_all();
+
+    // set MTU_CURR_ASID to 0
+    io::write32(0x00010600, 0x10, 0);    
 }
