@@ -1,0 +1,42 @@
+module int::ihvt;
+
+include int::timer : timer;
+include vmm;
+include cpu;
+include io;
+
+@export
+fn none int_handler(uint8 num, mut uint32 *frame) {
+    if (num == 0x20) {
+        timer::tick();
+        io::write32(0x00010500, 0x14, 1); // acknowledge interrupt
+        io::write32(0x00010400, 0x4C, 0); // EOI
+
+        return;
+    } else if (num == 0x05 || num == 0x06) {
+        match (vmm::refill()) {
+            uint32: frame[0] -= 4;
+            _: cpu::halt();
+        }
+
+        return;
+    }
+
+    cpu::halt();
+}
+
+@extern none *__ihvt_start;
+@extern none *__ihvt_end;
+
+fn none install_handlers() {
+    mut uint32 *ihvt = (uint32 *)0x00010000;
+
+    for (mut uint32 i = 0; i < 256; i += 1) {
+        ihvt[i] = ((uint32 *)__ihvt_start)[i];
+    }
+}
+
+@export
+fn none init() {
+    install_handlers();
+}

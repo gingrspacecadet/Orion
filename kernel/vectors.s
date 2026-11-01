@@ -15,12 +15,14 @@ __int_common:
     jeq r1, #0, $__int_call_aligned
 
     sub rsp, rsp, #4
-    call $int_handler
+    add r1, rsp, #60
+    call $_C3int4ihvt11int_handler
     add rsp, rsp, #4
     jmp $__int_call_done
 
 __int_call_aligned:
-    call $int_handler
+    add r1, rsp, #60
+    call $_C3int4ihvt11int_handler
 
 __int_call_done:
     ; restore the interrupted kernel register bank.

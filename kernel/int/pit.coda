@@ -1,0 +1,26 @@
+module int::timer;
+
+include io;
+
+mut uint32 ticks;
+
+@export
+fn none init() {
+    // pit has irq 0, vector 0x20
+    uint32 icu = 0x00010400;
+    io::write8(icu, 0x2C, 0x20);
+    io::write32(icu, 0x08, (uint32)~1);
+
+    uint32 pit = 0x00010500;
+    io::write32(pit, 0x00, 0); // Disable timer
+    io::write32(pit, 0x04, 10_000_000); // 10ms
+    io::write32(pit, 0x08, 0);
+    io::write32(pit, 0x14, 1); // acknowledge any previous interrupts
+
+    io::write32(pit, 0x00, 0b111); // ENABLE | AUTORELOAD | INT_ENABLE
+}
+
+@export
+fn none tick() {
+    ticks += 1;
+}

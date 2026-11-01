@@ -73,11 +73,11 @@ Token lex(Source *source) {
             case '-': t.type = TK_MINUS; advance(source); break;
 
             case '.': {
-                int i = 0;
+                size_t i = 0;
                 t.string[i++] = consume(source);
 
                 while (peek(source) != '\0' && (isalnum(peek(source)) || peek(source) == '_')) {
-                    if (i < 31) t.string[i++] = consume(source);
+                    if (i < sizeof(t.string) - 1) t.string[i++] = consume(source);
                     else fprintf(stderr, "Assembler Error (line %zu): Label string too long\n", source->line);
                 }
                 t.string[i] = '\0';
@@ -114,12 +114,12 @@ Token lex(Source *source) {
             default: {
                 if (isalpha(peek(source)) || peek(source) == '_' || peek(source) == '$') {
                     bool is_ref = (peek(source) == '$');
-                    int i = 0;
+                    size_t i = 0;
 
                     if (is_ref) advance(source);
 
                     while (peek(source) != '\0' && peek(source) != '\n' && (isalnum(peek(source)) || peek(source) == '_')) {
-                        if (i < 31) t.string[i++] = peek(source);
+                        if (i < sizeof(t.string) - 1) t.string[i++] = peek(source);
                         else fprintf(stderr, "Assembler Error (line %zu): String too long\n", source->line);
                         advance(source);
                     }

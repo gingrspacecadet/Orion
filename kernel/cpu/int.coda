@@ -1,0 +1,4 @@
+module cpu;
+
+@extern
+fn none enable_ints();

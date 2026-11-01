@@ -31,7 +31,7 @@ extern const char *token_names[];
 typedef struct {
     TokenType type;
     int64_t val;
-    char string[32];
+    char string[64];
     int line_num;
 } Token;
 

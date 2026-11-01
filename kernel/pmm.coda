@@ -96,6 +96,7 @@ fn (uint32 | none) alloc() {
     return;
 }
 
+@export
 type FreeError = enum {
     MisalignedAddr,
     DoubleFree,

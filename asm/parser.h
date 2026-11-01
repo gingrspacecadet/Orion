@@ -22,14 +22,14 @@ typedef struct {
     int offset_reg;
     bool is_reg_offset;
     int64_t val;
-    char label[32];
+    char label[64];
 } Operand;
 
 typedef struct {
     bool is_label;
     bool is_directive;
     bool is_eof;
-    char name[32];
+    char name[64];
     Operand *ops;
     uint8_t op_count;
     int line_num;

@@ -1,0 +1,4 @@
+module cpu;
+
+@export,extern,noreturn
+fn none halt();

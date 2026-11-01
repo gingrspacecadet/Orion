@@ -1,0 +1,25 @@
+module io;
+
+@export
+fn none write8(mut uint32 address, uint32 offset, uint8 byte) {
+    mut uint8 *ptr = (uint8 *)address;
+    ptr[offset] = byte;
+}
+
+@export
+fn none write32(mut uint32 address, uint32 offset, uint32 word) {
+    mut uint32 *ptr = (uint32 *)address;
+    ptr[offset / 4] = word;
+}
+
+@export
+fn uint8 read8(mut uint32 address, uint32 offset) {
+    mut uint8 *ptr = (uint8 *)address;
+    return ptr[offset];
+}
+
+@export
+fn uint32 read32(mut uint32 address, uint32 offset) {
+    mut uint32 *ptr = (uint32 *)address;
+    return ptr[offset / 4];
+}

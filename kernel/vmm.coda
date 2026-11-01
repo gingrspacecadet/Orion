@@ -1,0 +1,399 @@
+module vmm;
+
+include pmm;
+include mem;
+include cpu;
+include io;
+
+uint32 PAGE_SIZE = 4096;
+uint32 PAGE_SHIFT = 12;
+uint32 PAGE_MASK = 0xFFF;
+
+uint32 PAGE_ENTRY_COUNT = 1024;
+uint32 PAGE_INDEX_MASK = 0x3FF;
+
+uint32 PAGE_FRAME_MASK = 0xFFFFF000;
+
+uint32 PDE_PRESENT = 0x01;
+
+uint32 PTE_EXECUTABLE = 0x01;
+uint32 PTE_CACHEABLE = 0x02;
+uint32 PTE_USER = 0x04;
+uint32 PTE_WRITABLE = 0x08;
+uint32 PTE_PRESENT = 0x10;
+
+uint32 PTE_TLB_MASK = 0xFFFFF00F;
+
+type PageEntry = uint32;
+
+@export
+type AddressSpace = struct {
+    uint32 directory_phys;
+    uint32 asid;
+};
+
+fn uint32 directory_index(uint32 address) {
+    return (address >> 22) & PAGE_INDEX_MASK;
+}
+
+fn uint32 table_index(uint32 address) {
+    return (address >> PAGE_SHIFT) & PAGE_INDEX_MASK;
+}
+
+fn uint32 page_offset(uint32 address) {
+    return address & PAGE_MASK;
+}
+
+fn uint32 PageEntry.frame(PageEntry entry) {
+    return entry & PAGE_FRAME_MASK;
+}
+
+fn uint32 PageEntry.tlb_value(PageEntry entry) {
+    return entry & PTE_TLB_MASK;
+}
+
+fn (PageEntry | none) AddressSpace.lookup(AddressSpace space, uint32 address) {
+    uint32 *directory = (uint32 *)space.directory_phys;
+
+    uint32 pde = directory[directory_index(address)];
+
+    if ((pde & PDE_PRESENT) == 0)
+        return;
+
+    uint32 *table = (uint32 *)PageEntry.frame(pde);
+
+    uint32 pte = table[table_index(address)];
+
+    if ((pte & PTE_PRESENT) == 0)
+        return;
+
+    return (PageEntry)pte;
+}
+
+fn (AddressSpace | none) AddressSpace.create() {
+    match (pmm::alloc()) {
+        uint32 address: {
+            mem::set((mut none *)address, 0, PAGE_SIZE);
+
+            mut AddressSpace space = {.directory_phys = address};
+
+            match (alloc_asid()) {
+                uint32 asid: {
+                    space.asid = asid;
+                    return space;
+                }
+
+                AsidError: return;
+            }
+        }
+
+        none: return;
+    }
+}
+
+type VmmError = enum {
+    OutOfMemory,
+    MisalignedAddress,
+    InvalidPhysicalAddress,
+    InvalidFlags,
+    AlreadyMapped,
+    NotMapped,
+    InvalidAddressSpace,
+    PmmFailure,
+    InvalidAsid,
+    InvalidFault,
+};
+
+@export
+fn (none | VmmError) AddressSpace.destroy(mut AddressSpace *space) {
+    if (space.directory_phys == 0)
+        return VmmError::InvalidAddressSpace;
+
+    tlb_invalidate_asid(space.asid);
+
+    mut uint32 *directory = (mut uint32 *)space.directory_phys;
+
+    for (mut uint32 i = 0; i < PAGE_ENTRY_COUNT; i += 1) {
+        uint32 pde = directory[i];
+
+        if ((pde & PDE_PRESENT) == 0)
+            continue;
+
+        uint32 table_phys = pde & PAGE_FRAME_MASK;
+
+        match (pmm::free(table_phys)) {
+            none: directory[i] = 0;
+
+            pmm::FreeError: return VmmError::PmmFailure;
+        }
+    }
+
+    match (pmm::free(space.directory_phys)) {
+        none: {
+            space.directory_phys = 0;
+            match (release_asid(space.asid)) {
+                AsidError: return VmmError::InvalidAsid;
+                none: space.asid = 0;
+            }
+            return;
+        }
+
+        pmm::FreeError: return VmmError::PmmFailure;
+    }
+}
+
+fn (uint32 | none) AddressSpace.get_or_create_table(mut AddressSpace *space, uint32 address) {
+    mut uint32 *directory = (mut uint32 *)space.directory_phys;
+
+    uint32 index = directory_index(address);
+    uint32 pde = directory[index];
+
+    if ((pde & PDE_PRESENT) != 0)
+        return pde & PAGE_FRAME_MASK;
+
+    match (pmm::alloc()) {
+        uint32 table_phys: {
+            mem::set((mut none *)table_phys, 0, PAGE_SIZE);
+            directory[index] = table_phys | PDE_PRESENT;
+            return table_phys;
+        }
+
+        none: return;
+    }
+}
+
+uint32 PTE_PERMISSION_MASK = 0x0F;
+
+@export
+fn (none | VmmError) AddressSpace.map(mut AddressSpace *space, uint32 virtual_address, uint32 physical_address, uint32 flags) {
+    if ((virtual_address & PAGE_MASK) != 0 || (physical_address & PAGE_MASK) != 0) {
+        return VmmError::MisalignedAddress;
+    }
+
+    // physical page zero is permanently unmapped
+    if (physical_address == 0) {
+        return VmmError::InvalidPhysicalAddress;
+    }
+
+    if ((flags & ~PTE_PERMISSION_MASK) != 0) {
+        return VmmError::InvalidFlags;
+    }
+
+    mut uint32 table_phys = 0;
+    match (space.get_or_create_table(virtual_address)) {
+        uint32 address: table_phys = address;
+        none: return VmmError::OutOfMemory;
+    }
+    mut uint32 *table = (mut uint32 *)table_phys;
+
+    uint32 index = table_index(virtual_address);
+    uint32 pte = table[index];
+
+    if ((pte & PTE_PRESENT) != 0) {
+        return VmmError::AlreadyMapped;
+    }
+
+    table[index] = physical_address | flags | PTE_PRESENT;
+
+    return;
+}
+
+fn none tlb_invalidate(uint32 asid, uint32 virtual_address) {
+    mut uint32 *mtu = (mut uint32 *)0x00010600;
+
+    uint32 vpn = virtual_address & PAGE_FRAME_MASK;
+
+    for (mut uint32 i = 0; i < 32; i += 1) {
+        mtu[1] = i;
+
+        uint32 hi = mtu[2];
+
+        if ((hi & 1) == 0)
+            continue;
+
+        if ((hi & PAGE_FRAME_MASK) != vpn)
+            continue;
+
+        if (((hi >> 2) & 0x3FF) != asid)
+            continue;
+
+        // clear the valid bit.
+        mtu[2] = hi & ~1;
+    }
+}
+
+@export
+fn (PageEntry | VmmError) AddressSpace.unmap(mut AddressSpace *space, uint32 virtual_address) {
+    if ((virtual_address & PAGE_MASK) != 0)
+        return VmmError::MisalignedAddress;
+
+    mut uint32 *directory = (mut uint32 *)space.directory_phys;
+
+    uint32 pde = directory[directory_index(virtual_address)];
+
+    if ((pde & PDE_PRESENT) == 0)
+        return VmmError::NotMapped;
+
+    mut uint32 *table = (mut uint32 *)PageEntry.frame(pde);
+
+    uint32 index = table_index(virtual_address);
+    uint32 pte = table[index];
+
+    if ((pte & PTE_PRESENT) == 0)
+        return VmmError::NotMapped;
+
+    table[index] = 0;
+
+    tlb_invalidate(space.asid, virtual_address);
+
+    return (PageEntry)pte;
+}
+
+fn none tlb_invalidate_asid(uint32 asid) {
+    mut uint32 *mtu = (mut uint32 *)0x00010600;
+
+    for (mut uint32 i = 0; i < 32; i += 1) {
+        mtu[1] = i;
+
+        uint32 hi = mtu[2];
+
+        if ((hi & 1) == 0)
+            continue;
+
+        uint32 entry_asid = (hi >> 2) & 0x3FF;
+
+        if (entry_asid != asid)
+            continue;
+
+        mtu[2] = hi & ~1;
+    }
+}
+
+mut uint32 tlb_next_slot = 0;
+
+fn (uint32 | VmmError) tlb_install(uint32 asid, uint32 virtual_address, PageEntry entry) {
+    if (asid > 0x3FF)
+        return VmmError::InvalidAsid;
+
+    if ((entry & PTE_PRESENT) == 0)
+        return VmmError::NotMapped;
+
+    mut uint32 *mtu = (mut uint32 *)0x00010600;
+
+    uint32 slot = tlb_next_slot;
+
+    uint32 hi = (virtual_address & PAGE_FRAME_MASK)
+              | (asid << 2)
+              | 1;
+
+    uint32 lo = entry & PTE_TLB_MASK;
+
+    // select the replacement slot,
+    // invalidate the old entry,
+    // write the physical frame and permissions, and
+    // commit the new entry by setting V last.
+    mtu[1] = slot;
+    mtu[2] = 0;
+    mtu[3] = lo;
+    mtu[2] = hi;
+
+    tlb_next_slot = (slot + 1) & 31;
+
+    return slot;
+}
+
+mut AddressSpace active_space;
+
+@export
+fn none activate(AddressSpace space) {
+    if (space.directory_phys == 0 || space.asid > 0x3FF)
+        cpu::halt();
+
+    if (active_space.directory_phys != 0 && active_space.directory_phys != space.directory_phys && active_space.asid == space.asid) {
+        tlb_invalidate_asid(space.asid);
+    }
+
+    active_space = space;
+    io::write32(0x00010600, 0x10, space.asid);
+}
+
+@export
+fn (uint32 | VmmError) refill() {
+    uint32 address = io::read32(0x00010600, 0x00);
+    uint32 status  = io::read32(0x00010600, 0x14);
+    uint32 asid    = io::read32(0x00010600, 0x10);
+
+    if ((status & 0x1C) != 0)
+        return VmmError::InvalidFault;
+
+    if (active_space.directory_phys == 0)
+        return VmmError::InvalidAddressSpace;
+
+    if (asid != active_space.asid)
+        return VmmError::InvalidAsid;
+
+    match (active_space.lookup(address)) {
+        PageEntry entry: return tlb_install(asid, address, entry);
+        none: return VmmError::NotMapped;
+    }
+}
+
+uint32 ASID_COUNT = 1024;
+uint32 ASID_BITMAP_SIZE = 128;
+uint32 ASID_USABLE_COUNT = 1023;
+
+mut uint8[ASID_BITMAP_SIZE] asid_bitmap;
+mut uint32 asid_search_hint = 1;
+
+type AsidError = enum {
+    Exhausted,
+    Invalid,
+    NotAllocated,
+    Active,
+};
+
+fn (uint32 | AsidError) alloc_asid() {
+    mut uint32 id = asid_search_hint;
+
+    for (mut uint32 n = 0; n < ASID_USABLE_COUNT; n += 1) {
+        uint32 byte_index = id >> 3;
+        uint8 bit = (uint8)(1 << (id & 7));
+
+        if ((asid_bitmap[byte_index] & bit) == 0) {
+            asid_bitmap[byte_index] |= bit;
+
+            asid_search_hint = id + 1;
+            if (asid_search_hint == ASID_COUNT)
+                asid_search_hint = 1;
+
+            return id;
+        }
+
+        id += 1;
+        if (id == ASID_COUNT)
+            id = 1;
+    }
+
+    return AsidError::Exhausted;
+}
+
+fn (none | AsidError) release_asid(uint32 id) {
+    if (id == 0 || id >= ASID_COUNT)
+        return AsidError::Invalid;
+
+    uint32 byte_index = id >> 3;
+    uint8 bit = (uint8)(1 << (id & 7));
+
+    if ((asid_bitmap[byte_index] & bit) == 0)
+        return AsidError::NotAllocated;
+
+    if (active_space.directory_phys != 0 && active_space.asid == id)
+        return AsidError::Active;
+
+    tlb_invalidate_asid(id);
+
+    asid_bitmap[byte_index] &= (uint8)~bit;
+
+    if (id < asid_search_hint)
+        asid_search_hint = id;
+}
