@@ -1,5 +1,30 @@
 #include <string.h>
+#include <stdlib.h>
 #include "mmio.h"
+
+void mmio_rebuild_page_map(Mmio *mmio) {
+    memset(mmio->page_map, 0, MMIO_PAGE_COUNT * sizeof(*mmio->page_map));
+
+    for (uint32_t i = 0; i < (uint32_t)mmio->device_count; i++) {
+        Device *dev = &mmio->devices[i];
+
+        if (dev->base_addr == 0 || dev->size == 0)
+            continue;
+
+        uint64_t end = (uint64_t)dev->base_addr + dev->size;
+
+        if (end > (UINT64_C(1) << 32))
+            abort();
+
+        uint32_t first_page = dev->base_addr >> MMIO_PAGE_SHIFT;
+        uint32_t last_page = (uint32_t)((end + 4095) >> MMIO_PAGE_SHIFT);
+
+        uint32_t bit = UINT32_C(1) << i;
+
+        for (uint32_t page = first_page; page < last_page; page++)
+            mmio->page_map[page] |= bit;
+    }
+}
 
 static inline void write_u32le(uint8_t *p, size_t offset, uint32_t value) {
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -20,14 +45,17 @@ static inline uint32_t read_u32le(const uint8_t *p, size_t offset) {
 }
 
 static Device *find_device(Mmio *mmio, uint32_t addr) {
-    assert(mmio);
+    uint32_t candidates = mmio->page_map[addr >> MMIO_PAGE_SHIFT];
 
-    for (int i = 0; i < mmio->device_count; i++) {
+    for (uint32_t i = 0; candidates != 0; i++, candidates >>= 1) {
+        if ((candidates & 1) == 0)
+            continue;
+
         Device *dev = &mmio->devices[i];
 
-        if (dev->base_addr != 0 && addr >= dev->base_addr && addr < dev->base_addr + dev->size) {
+        if (addr >= dev->base_addr &&
+            addr - dev->base_addr < dev->size)
             return dev;
-        }
     }
 
     return NULL;

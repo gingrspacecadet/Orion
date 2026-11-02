@@ -198,3 +198,42 @@ fn (none | FreeError) free_pages(uint32 address, uint32 count) {
 
     return;
 }
+
+mut uint32 low_search_hint = 0;
+
+@export
+fn (uint32 | none) alloc_below(uint32 limit) {
+    if (limit <= RAM_BASE)
+        return;
+
+    mut uint32 page_limit = (limit - RAM_BASE) / PAGE_SIZE;
+
+    if (page_limit > PAGE_COUNT)
+        page_limit = PAGE_COUNT;
+
+    if (page_limit == 0)
+        return;
+
+    if (low_search_hint >= page_limit)
+        low_search_hint = 0;
+
+    for (mut uint32 n = 0; n < page_limit; n += 1) {
+        mut uint32 i = low_search_hint + n;
+
+        if (i >= page_limit)
+            i -= page_limit;
+
+        if (get_page_status(i) != PageStatus::Free)
+            continue;
+
+        set_page_status(i, PageStatus::Allocated);
+
+        low_search_hint = i + 1;
+        if (low_search_hint == page_limit)
+            low_search_hint = 0;
+
+        return RAM_BASE + i * PAGE_SIZE;
+    }
+
+    return;
+}

@@ -17,6 +17,7 @@ fn uint32 main() {
     clear_bss();
 
     pmm::init();
+    vmm::init();
     ihvt::init();
     timer::init();
 

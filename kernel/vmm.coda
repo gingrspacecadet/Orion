@@ -33,9 +33,25 @@ type AddressSpace = struct {
 };
 
 uint32 KERNEL_BASE = 0xC0000000;
+uint32 KERNEL_DIRECT_MAP_LIMIT = 0x01000000;
 uint32 KERNEL_PDE_INDEX = 768;
+uint32 KERNEL_DIRECT_MAP_PHYS_BASE = 0x00020000;
 
 mut AddressSpace kernel_space;
+
+mut bool vm_active = false;
+
+fn mut uint32 *page_table_ptr(uint32 physical, bool force_physical = false) {
+    if (physical < KERNEL_DIRECT_MAP_PHYS_BASE ||
+        (physical & PAGE_MASK) != 0 ||
+        physical >= KERNEL_DIRECT_MAP_LIMIT)
+        cpu::halt();
+
+    if (vm_active && !force_physical)
+        return (uint32 *)(KERNEL_BASE + physical);
+
+    return (uint32 *)physical;
+}
 
 fn uint32 directory_index(uint32 address) {
     return (address >> 22) & PAGE_INDEX_MASK;
@@ -57,15 +73,15 @@ fn uint32 PageEntry.tlb_value(PageEntry entry) {
     return entry & PTE_TLB_MASK;
 }
 
-fn (PageEntry | none) AddressSpace.lookup(AddressSpace space, uint32 address) {
-    uint32 *directory = (uint32 *)space.directory_phys;
+fn (PageEntry | none) AddressSpace.lookup_impl(AddressSpace space, uint32 address, bool force_physical) {
+    uint32 *directory = (uint32 *)page_table_ptr(space.directory_phys, force_physical);
 
     uint32 pde = directory[directory_index(address)];
 
     if ((pde & PDE_PRESENT) == 0)
         return;
 
-    uint32 *table = (uint32 *)PageEntry.frame(pde);
+    uint32 *table = (uint32 *)page_table_ptr(PageEntry.frame(pde), force_physical);
 
     uint32 pte = table[table_index(address)];
 
@@ -75,10 +91,18 @@ fn (PageEntry | none) AddressSpace.lookup(AddressSpace space, uint32 address) {
     return (PageEntry)pte;
 }
 
+fn (PageEntry | none) AddressSpace.lookup(AddressSpace space, uint32 address) {
+    return space.lookup_impl(address, false);
+}
+
+fn (PageEntry | none) AddressSpace.lookup_phys(AddressSpace space, uint32 address) {
+    return space.lookup_impl(address, true);
+}
+
 fn (AddressSpace | none) AddressSpace.create() {
-    match (pmm::alloc()) {
+    match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
         uint32 address: {
-            mem::set((none *)address, 0, PAGE_SIZE);
+            mem::set((none *)page_table_ptr(address), 0, PAGE_SIZE);
 
             mut AddressSpace space = {.directory_phys = address};
 
@@ -127,7 +151,7 @@ fn (none | VmmError) AddressSpace.destroy(mut AddressSpace *space) {
 
     tlb_invalidate_asid(space.asid);
 
-    mut uint32 *directory = (mut uint32 *)space.directory_phys;
+    mut uint32 *directory = (uint32 *)page_table_ptr(space.directory_phys);
 
     for (mut uint32 i = 0; i < KERNEL_PDE_INDEX; i += 1) {
         uint32 pde = directory[i];
@@ -161,7 +185,7 @@ fn (none | VmmError) AddressSpace.destroy(mut AddressSpace *space) {
 }
 
 fn (uint32 | none) AddressSpace.get_or_create_table(mut AddressSpace *space, uint32 address) {
-    mut uint32 *directory = (mut uint32 *)space.directory_phys;
+    mut uint32 *directory = (uint32 *)page_table_ptr(space.directory_phys);
 
     uint32 index = directory_index(address);
     uint32 pde = directory[index];
@@ -169,9 +193,9 @@ fn (uint32 | none) AddressSpace.get_or_create_table(mut AddressSpace *space, uin
     if ((pde & PDE_PRESENT) != 0)
         return pde & PAGE_FRAME_MASK;
 
-    match (pmm::alloc()) {
+    match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
         uint32 table_phys: {
-            mem::set((mut none *)table_phys, 0, PAGE_SIZE);
+            mem::set((mut none *)page_table_ptr(table_phys), 0, PAGE_SIZE);
             directory[index] = table_phys | PDE_PRESENT;
             return table_phys;
         }
@@ -179,8 +203,6 @@ fn (uint32 | none) AddressSpace.get_or_create_table(mut AddressSpace *space, uin
         none: return;
     }
 }
-
-uint32 PTE_PERMISSION_MASK = 0x0F;
 
 uint32 PTE_PERMISSION_MASK = 0x0F;
 
@@ -205,7 +227,7 @@ fn (none | VmmError) map_page(mut AddressSpace *space, uint32 virtual_address, u
         none: return VmmError::OutOfMemory;
     }
 
-    mut uint32 *table = (mut uint32 *)table_phys;
+    mut uint32 *table = (uint32 *)page_table_ptr(table_phys);
     uint32 index = table_index(virtual_address);
 
     if ((table[index] & PTE_PRESENT) != 0)
@@ -282,14 +304,14 @@ fn none tlb_invalidate(uint32 asid, uint32 virtual_address) {
 }
 
 fn (PageEntry | none) unmap_page(mut AddressSpace *space, uint32 virtual_address) {
-    mut uint32 *directory = (mut uint32 *)space.directory_phys;
+    mut uint32 *directory = (uint32 *)page_table_ptr(space.directory_phys);
 
     uint32 pde = directory[directory_index(virtual_address)];
 
     if ((pde & PDE_PRESENT) == 0)
         return;
 
-    mut uint32 *table = (mut uint32 *)PageEntry.frame(pde);
+    mut uint32 *table = (uint32 *)page_table_ptr(PageEntry.frame(pde));
 
     uint32 index = table_index(virtual_address);
     uint32 pte = table[index];
@@ -436,7 +458,7 @@ fn (uint32 | VmmError) refill() {
             return VmmError::InvalidAsid;
         }
 
-        match (kernel_space.lookup(address)) {
+        match (kernel_space.lookup_phys(address)) {
             PageEntry entry: return tlb_install(asid, address, entry);
             none: return VmmError::NotMapped;
         }
@@ -448,7 +470,7 @@ fn (uint32 | VmmError) refill() {
     if (asid != active_space.asid)
         return VmmError::InvalidAsid;
 
-    match (active_space.lookup(address)) {
+    match (active_space.lookup_phys(address)) {
         PageEntry entry: return tlb_install(asid, address, entry);
         none: return VmmError::NotMapped;
     }
@@ -530,13 +552,87 @@ fn none tlb_invalidate_all() {
     }
 }
 
+@extern uint32 __text_start;
+@extern uint32 __text_end;
+
+@extern uint32 __rodata_start;
+@extern uint32 __rodata_end;
+
+@extern uint32 __data_start;
+@extern uint32 __data_end;
+
+@extern uint32 __bss_start;
+@extern uint32 __bss_end;
+
+fn bool page_overlaps(uint32 page, uint32 start, uint32 end) {
+    return start < page + PAGE_SIZE && page < end;
+}
+
+fn uint32 direct_map_flags(uint32 physical) {
+    bool text = page_overlaps(physical, __text_start, __text_end);
+    bool rodata = page_overlaps(physical, __rodata_start, __rodata_end);
+    bool data = page_overlaps(physical, __data_start, __data_end);
+    bool bss = page_overlaps(physical, __bss_start, __bss_end);
+
+    mut uint32 flags = PTE_CACHEABLE;
+
+    if (text)
+        flags |= PTE_EXECUTABLE;
+
+    if (data || bss || (!text && !rodata))
+        flags |= PTE_WRITABLE;
+
+    return flags;
+}
+
+fn none build_direct_map() {
+    mut uint32 *directory = (uint32 *)page_table_ptr(kernel_space.directory_phys);
+
+    mut uint32 physical = KERNEL_DIRECT_MAP_PHYS_BASE;
+
+    while (physical < KERNEL_DIRECT_MAP_LIMIT) {
+        uint32 virtual_address = KERNEL_BASE + physical;
+        uint32 pde_index = directory_index(virtual_address);
+
+        if ((directory[pde_index] & PDE_PRESENT) != 0)
+            cpu::halt();
+
+        mut uint32 table_phys = 0;
+
+        match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
+            uint32 address: table_phys = address;
+            none: cpu::halt();
+        }
+
+        mem::set((none *)page_table_ptr(table_phys), 0, PAGE_SIZE);
+
+        mut uint32 *table = (uint32 *)page_table_ptr(table_phys);
+
+        mut uint32 index = table_index(virtual_address);
+
+        while (index < PAGE_ENTRY_COUNT && physical < KERNEL_DIRECT_MAP_LIMIT) {
+            table[index] = physical | direct_map_flags(physical) | PTE_PRESENT;
+
+            physical += PAGE_SIZE;
+            index += 1;
+        }
+
+        directory[pde_index] = table_phys | PDE_PRESENT;
+    }
+}
+
 @export
 fn none init() {
-    match (pmm::alloc()) {
+    if (kernel_space.directory_phys != 0)
+        cpu::halt();
+
+    vm_active = false;
+
+    match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
         none: cpu::halt();
 
         uint32 address: {
-            mem::set((none *)address, 0, PAGE_SIZE);
+            mem::set((none *)page_table_ptr(address), 0, PAGE_SIZE);
 
             kernel_space = {
                 .directory_phys = address,
@@ -545,8 +641,8 @@ fn none init() {
         }
     }
 
-    tlb_invalidate_all();
+    build_direct_map();
 
-    // set MTU_CURR_ASID to 0
-    io::write32(0x00010600, 0x10, 0);    
+    tlb_invalidate_all();
+    io::write32(0x00010600, 0x10, 0);
 }

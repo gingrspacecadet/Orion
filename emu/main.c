@@ -1,3 +1,4 @@
+#define X_OPCODES_IMPL
 #include <sys/mman.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -12,6 +13,8 @@
 #include "pit.h"
 #include "pcu.h"
 #include "mtu.h"
+
+#define BATCH_SIZE 1024
 
 static uint8_t *load_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
@@ -220,30 +223,34 @@ bool cpu_write8(Machine *machine, uint32_t addr, uint8_t value) {
     return true;
 }
 
-bool cpu_fetch32(Machine *machine, uint32_t address, uint32_t *value) {
+typedef struct {
+    bool success;
+    uint32_t value;
+} CpuFetchResult;
+
+CpuFetchResult cpu_fetch32(Machine *machine, uint32_t address) {
     if ((address % 4) != 0) {
         cpu_raise_exception(machine, MISALIGNED_PC, machine->cpu.pc + 4);
-        return false;
+        return (CpuFetchResult){.success = false};
     }
 
     uint32_t translated;
     MtuResult res = cpu_translate_noexcept(machine, address, INSTR_FETCH, &translated);
     if (res == MTU_MISS) {
         cpu_raise_exception(machine, ITLB_MISS, machine->cpu.pc + 4);
-        return false;
+        return (CpuFetchResult){.success = false};
     }
     if (res == MTU_PERM) {
         cpu_raise_exception(machine, PAGE_FAULT, machine->cpu.pc + 4);
-        return false;
+        return (CpuFetchResult){.success = false};
     }
 
-    *value = mmio_read32(&machine->mmio, translated);
-    return true;
+    return (CpuFetchResult){.success = true, .value = mmio_read32(&machine->mmio, translated)};
 }
 
 bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
+    fprintf(stderr, "Fault %d raised\n", vector);
     if (vector < 0x20 || vector == 0xFF) {
-        fprintf(stderr, "Fault %d raised\n", vector);
         fprintf(stderr, "Offending instruction at 0x%08X\n", machine->cpu.pc);
     }
     uint32_t flags = machine->cpu.flags;
@@ -302,8 +309,12 @@ static inline bool pop32(Machine *machine, uint32_t *v) {
 #define NEXT_INSTR machine->cpu.pc + 4
 
 bool step(Machine *machine) {
-    uint32_t word;
-    if (!cpu_fetch32(machine, machine->cpu.pc, &word)) return false;
+    CpuFetchResult res = cpu_fetch32(machine, machine->cpu.pc);
+    if (!res.success) return false;
+    uint32_t word = res.value;
+    if (machine->cpu.pc == 0x267E0) {
+        printf("r0 = %d\n", machine->cpu.r[0]);
+    }
 
     bool advance = true;
 
@@ -501,7 +512,8 @@ bool step(Machine *machine) {
         }
 
         case OP_NOP: {
-            // printf("NOP!\n");
+            printf("NOP!\n");
+            exit(2);
             break;
         }
 
@@ -602,7 +614,9 @@ int main(int argc, char **argv) {
     last_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
     while (machine.cpu.running) {
-        step(&machine);
+        for (int i = 0; i < BATCH_SIZE; i++) {
+            step(&machine);
+        }
 
         if (machine.icu.has_int && (machine.cpu.flags & FLAG_IE)) {
             uint8_t vector;

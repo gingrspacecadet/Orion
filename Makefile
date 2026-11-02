@@ -1,7 +1,7 @@
 .SECONDARY:
 
 CC := gcc
-CFLAGS := -ggdb -MMD -MP -Wall -Wextra -Werror -Wno-unused -Iinclude -std=gnu11
+CFLAGS := -O2 -ggdb -MMD -MP -Wall -Wextra -Werror -Wno-unused -Iinclude -std=gnu11
 LDFLAGS :=
 
 BUILD := build

@@ -38,7 +38,7 @@ opcodes[] = {
 };
 
 static void print_instr(uint32_t word) {
-    printf("%s ", opcode_names[OPCODE(word)]);
+    if (OPCODE(word) <= sizeof(opcode_names) / sizeof(opcode_names[0])) printf("%s ", opcode_names[OPCODE(word)]);
     switch (opcodes[OPCODE(word)].type) {
         case TYPE_A:
         case TYPE_M: {

@@ -47,7 +47,7 @@ Operand parse_operand(Source *source) {
         case TK_REF: {
             advance(source);
             out.mode = AM_REF;
-            strncpy(out.label, t.string, sizeof(t.string) - 1);
+            strncpy(out.label, t.string, sizeof(out.label));
             break;
         }
 
@@ -105,7 +105,7 @@ Operand parse_operand(Source *source) {
         case TK_MNEM: {
             advance(source);
             out.mode = AM_IDENT;
-            strncpy(out.label, t.string, sizeof(t.string) - 1);
+            strncpy(out.label, t.string, sizeof(out.label));
             break;
         }
 
@@ -127,7 +127,7 @@ Instr parse(Source *source) {
     switch (t.type) {
         case TK_LABEL: {
             out.is_label = true;
-            strncpy(out.name, t.string, sizeof(t.string) - 1);
+            strncpy(out.name, t.string, sizeof(out.name));
             break;
         }
 
@@ -135,7 +135,7 @@ Instr parse(Source *source) {
         case TK_DIRECTIVE: {
             out.is_directive = (t.type == TK_DIRECTIVE);
             uint8_t cap = 2;
-            strncpy(out.name, t.string, sizeof(t.string) - 1);
+            strncpy(out.name, t.string, sizeof(out.name));
             while (peek(source).type != TK_NEWLINE && peek(source).type != TK_EOF) {
                 if (!out.ops)
                     out.ops = malloc(sizeof(Operand) * cap);

@@ -2,7 +2,15 @@ module mem;
 
 @export
 fn none set(mut none *dest, uint8 value, uint32 length) {
-    for (mut uint32 i = 0; i < length; i += 1) {
+    uint32 fill = (uint32)value * 0x01010101;
+
+    uint32 words = length / 4;
+
+    for (mut uint32 i = 0; i < words; i += 1) {
+        ((mut uint32 *)dest)[i] = fill;
+    }
+
+    for (mut uint32 i = words * 4; i < length; i += 1) {
         ((mut uint8 *)dest)[i] = value;
     }
 }
