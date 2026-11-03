@@ -464,6 +464,20 @@ fn (uint32 | VmmError) refill() {
         }
     }
 
+    // ASID 0 is reserved for the kernel address space.
+    if (asid == 0) {
+        if (active_space.directory_phys != 0)
+            return VmmError::InvalidAsid;
+
+        if (kernel_space.directory_phys == 0)
+            return VmmError::InvalidAddressSpace;
+
+        match (kernel_space.lookup_phys(address)) {
+            PageEntry entry: return tlb_install(asid, address, entry);
+            none: return VmmError::NotMapped;
+        }
+    }
+
     if (active_space.directory_phys == 0)
         return VmmError::InvalidAddressSpace;
 
@@ -564,6 +578,9 @@ fn none tlb_invalidate_all() {
 @extern uint32 __bss_start;
 @extern uint32 __bss_end;
 
+@extern uint32 __exe_start;
+@extern uint32 __exe_end;
+
 fn bool page_overlaps(uint32 page, uint32 start, uint32 end) {
     return start < page + PAGE_SIZE && page < end;
 }
@@ -622,6 +639,16 @@ fn none build_direct_map() {
 }
 
 @export
+fn none enable_translation() {
+    if (kernel_space.directory_phys == 0 || vm_active)
+        cpu::halt();
+
+    cpu::enable_vm();
+
+    vm_active = true;
+}
+
+@export
 fn none init() {
     if (kernel_space.directory_phys != 0)
         cpu::halt();
@@ -642,6 +669,35 @@ fn none init() {
     }
 
     build_direct_map();
+
+    // identity map the kernel image.
+    mut uint32 page = __exe_start & PAGE_FRAME_MASK;
+    uint32 image_end = (__exe_end + PAGE_MASK) & PAGE_FRAME_MASK;
+
+    while (page < image_end) {
+        match (map_page(&kernel_space, page, page, direct_map_flags(page))) {
+            none: {}
+            _: cpu::halt();
+        }
+
+        page += PAGE_SIZE;
+    }
+
+    // identity map the system registers and IHVT.
+    match (map_page(&kernel_space, 0x00010000, 0x00010000, PTE_WRITABLE)) {
+        none: {}
+        _: cpu::halt();
+    }
+
+    // identity map the 64 KiB kernel stack.
+    for (mut uint32 i = 0; i < 16; i += 1) {
+        page = 0xFFFF0000 + i * PAGE_SIZE;
+
+        match (map_page(&kernel_space, page, page, PTE_WRITABLE | PTE_CACHEABLE)) {
+            none: {}
+            _: cpu::halt();
+        }
+    }
 
     tlb_invalidate_all();
     io::write32(0x00010600, 0x10, 0);

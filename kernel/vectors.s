@@ -1,7 +1,11 @@
 .section .text
 .global enable_ints
 enable_ints:
-    flagsw #0x3
+    flagsw #0x7
+    ret
+.global enable_vm
+enable_vm:
+    flagsw #0x6
     ret
 
 ; TODO: no need to save when coming from user mode

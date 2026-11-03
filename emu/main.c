@@ -251,7 +251,7 @@ CpuFetchResult cpu_fetch32(Machine *machine, uint32_t address) {
 bool cpu_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
     fprintf(stderr, "Fault %d raised\n", vector);
     if (vector < 0x20 || vector == 0xFF) {
-        fprintf(stderr, "Offending instruction at 0x%08X\n", machine->cpu.pc);
+        fprintf(stderr, "Offending instruction at 0x%08X\n", machine->cpu.pc);        
     }
     uint32_t flags = machine->cpu.flags;
     machine->cpu.flags &= ~FLAG_IE;

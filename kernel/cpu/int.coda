@@ -2,3 +2,6 @@ module cpu;
 
 @extern,export
 fn none enable_ints();
+
+@extern,export
+fn none enable_vm();

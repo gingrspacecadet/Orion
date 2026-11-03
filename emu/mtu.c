@@ -40,7 +40,7 @@ void mtu_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
     }
 }
 
-#define ERR(reason) do { mtu->fault_address = virtual_address; mtu->fault_status = (access & 0x3) | (((reason) & 0x7) << 2); return (reason); } while (0)
+#define ERR(reason) do { mtu->fault_address = virtual_address; mtu->fault_status = (access & 0x3) | ((((reason) - 1) & 0x7) << 2); return (reason); } while (0)
 
 MtuResult mtu_translate(Mtu *mtu, uint32_t virtual_address, MtuAccess access, bool user_mode, uint32_t *physical_address) {
     assert(mtu);

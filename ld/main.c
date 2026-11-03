@@ -616,14 +616,18 @@ static uint32_t calculate_image_base(LinkContext *ctx) {
     return lowest;
 }
 
-static uint32_t calculate_image_size(LinkContext *ctx) {
-    uint32_t total = 0;
+static uint32_t calculate_image_end(LinkContext *ctx) {
+    uint32_t end = 0;
+
     for (size_t i = 0; i < ctx->sections.len; i++) {
-        OutputSection section = ctx->sections.data[i];
-        total += section.memory_size;
+        OutputSection *section = &ctx->sections.data[i];
+        uint32_t section_end = section->address + section->memory_size;
+
+        if (section_end > end)
+            end = section_end;
     }
 
-    return total;
+    return end;
 }
 
 static bool create_section_boundary_symbols(LinkContext *ctx) {
@@ -655,7 +659,7 @@ static bool create_section_boundary_symbols(LinkContext *ctx) {
     if (!add_linker_symbol(ctx, "__exe_start", calculate_image_base(ctx)))
         return false;
 
-    if (!add_linker_symbol(ctx, "__exe_end", calculate_image_base(ctx) + calculate_image_size(ctx)))
+    if (!add_linker_symbol(ctx, "__exe_end", calculate_image_end(ctx)))
         return false;
 
     return true;
