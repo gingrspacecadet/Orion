@@ -14,7 +14,7 @@ IMG_TARGETS := boot kernel
 all: codac $(EXE_TARGETS) $(IMG_TARGETS)
 
 run: emu codac boot kernel
-	@$(BUILD)/emu $(BUILD)/boot.bin $(BUILD)/kernel.bin
+	@$(BUILD)/emu $(BUILD)/boot.oxe $(BUILD)/kernel.oxe
 
 clean:
 	rm -rf $(BUILD)
@@ -57,7 +57,7 @@ $$(BUILD)/$(1): $$($(1)_OBJ)
 
 endef
 
-define IMG_TEMPLATE
+define OXE_TEMPLATE
 
 $(1)_ASM_SRC := $$(shell find $(1)/ -type f -name '*.s' 2>/dev/null | LC_ALL=C sort)
 $(1)_CODA_SRC := $$(shell find $(1)/ -type f -name '*.coda' 2>/dev/null | LC_ALL=C sort)
@@ -65,16 +65,16 @@ $(1)_ASM_OBJ := $$(addprefix $$(BUILD)/frag/, $$($(1)_ASM_SRC:.s=.s.o))
 $(1)_CODA_OBJ := $$(addprefix $$(BUILD)/frag/, $$($(1)_CODA_SRC:.coda=.coda.o))
 $(1)_OBJ := $$($(1)_ASM_OBJ) $$($(1)_CODA_OBJ)
 
-$(1): $$(BUILD)/$(1).bin
+$(1): $$(BUILD)/$(1).oxe
 
-$$(BUILD)/$(1).bin: $$($(1)_OBJ) $(BUILD)/ld $(1)/$(1).ld
+$$(BUILD)/$(1).oxe: $$($(1)_OBJ) $(BUILD)/ld $(1)/$(1).ld
 	@mkdir -p "$$(dir $$@)"
-	$(BUILD)/ld $$($(1)_OBJ) -o $$@ -f -T $(1)/$(1).ld
+	$(BUILD)/ld $$($(1)_OBJ) -o $$@ -T $(1)/$(1).ld
 
 endef
 
 $(foreach t,$(EXE_TARGETS),$(eval $(call EXE_TEMPLATE,$(t))))
-$(foreach t,$(IMG_TARGETS),$(eval $(call IMG_TEMPLATE,$(t))))
+$(foreach t,$(IMG_TARGETS),$(eval $(call OXE_TEMPLATE,$(t))))
 
 TEST_SRC := $(shell find tests/ -type f -name '*.c' 2>/dev/null | LC_ALL=C sort)
 TEST_OBJ := $(addprefix $(BUILD)/frag/,$(TEST_SRC:.c=.c.o))

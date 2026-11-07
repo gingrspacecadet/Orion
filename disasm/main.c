@@ -20,7 +20,7 @@ static char *load_file(const char *path, size_t *out_len) {
     return buf;
 }
 
-#define X(NAME) #NAME,
+#define X(NAME, type) #NAME,
 const char *const opcode_names[] = {
     X_OPCODES
 };

@@ -5,7 +5,7 @@
 #include "obj.h"
 #include "isa.h"
 
-#define X(NAME) #NAME,
+#define X(NAME, type) #NAME,
 const char *const opcode_names[] = {
     X_OPCODES
 };
@@ -131,10 +131,31 @@ void print_exe(FILE *f) {
     exe_section_t sections[header.sections];
     fread(sections, sizeof(exe_section_t), header.sections, f);
 
+    exe_symbol_t symbols[header.symbols];
+    fread(symbols, sizeof(exe_symbol_t), header.symbols, f);
+
+    char string_pool[header.string_table_size];
+    fread(string_pool, sizeof(char), header.string_table_size, f);
+
     printf("== OrionExe v%d.%d.%d ==\n", (uint8_t)(header.version >> 24), (uint8_t)(header.version >> 16), (uint8_t)(header.version >> 8));
     printf("Entry    - 0x%08X\n", header.entry);
+    printf("Symbols  - %d\n", header.symbols);
     printf("Sections - %d\n", header.sections);
     putchar('\n');
+
+    if (header.version != 0x01010100) {
+        printf("Unsupported version!\n");
+        return;
+    }
+
+    for (uint32_t i = 0; i < header.symbols; i++) {
+        exe_symbol_t symbol = symbols[i];
+
+        printf("Symbol %d:\n", i + 1);
+        printf("  - name    = %s\n", &string_pool[symbol.name]);
+        printf("  - address = 0x%08X\n", symbol.address);
+        printf("  - flags   = %c%c%c\n", symbol.flags & FLAG_R ? 'r' : '-', symbol.flags & FLAG_W ? 'w' : '-', symbol.flags & FLAG_X ? 'x' : '-');
+    }
 
     for (uint32_t i = 0; i < header.sections; i++) {
         exe_section_t section = sections[i];

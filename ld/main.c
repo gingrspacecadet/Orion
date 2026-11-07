@@ -837,48 +837,192 @@ bool apply_relocations(LinkContext *ctx) {
 }
 
 bool write_executable(const LinkContext *ctx, const char *path, addr_t entry) {
-    assert(ctx != NULL); assert(path != NULL);
+    assert(ctx != NULL);
+    assert(path != NULL);
+
+    bool success = false;
 
     FILE *f __attribute__((cleanup(fclosep))) = fopen(path, "wb");
-    if (!f) return false;
+
+    da_type(exe_section_t) sections = {0};
+    da_type(exe_symbol_t) symbols = {0};
+    da_type(uint8_t) string_pool = {0};
+
+    da_init(&sections);
+    da_init(&symbols);
+    da_init(&string_pool);
+
+    if (!f)
+        goto done;
+
+    if (ctx->sections.len > UINT32_MAX)
+        goto done;
+
+    for (size_t i = 0; i < ctx->object_count; i++) {
+        const InputObject *obj = &ctx->objects[i];
+
+        if (i >= ctx->resolved_symbols.len)
+            goto done;
+
+        if (ctx->resolved_symbols.data[i].len != obj->symbols.len)
+            goto done;
+
+        for (size_t j = 0; j < obj->symbols.len; j++) {
+            obj_symbol_t sym = obj->symbols.data[j];
+
+            if (sym.section == 0)
+                continue;
+
+            ResolvedSymbol resolved = ctx->resolved_symbols.data[i].data[j];
+
+            if (!resolved.resolved)
+                goto done;
+
+            if (sym.name >= obj->string_pool.len)
+                goto done;
+
+            const char *name = (const char *)&obj->string_pool.data[sym.name];
+
+            size_t remaining = obj->string_pool.len - sym.name;
+            const char *terminator = memchr(name, '\0', remaining);
+
+            if (!terminator)
+                goto done;
+
+            size_t name_len = (size_t)(terminator - name) + 1;
+
+            if (string_pool.len > UINT32_MAX || name_len > UINT32_MAX - string_pool.len || name_len > SIZE_MAX - string_pool.len)
+                goto done;
+
+            exe_symbol_t exesym = {
+                .address = resolved.address,
+                .name = (uint32_t)string_pool.len,
+                .flags = sym.flags,
+            };
+
+            size_t old_len = string_pool.len;
+            da_resize(&string_pool, old_len + name_len);
+
+            memcpy(&string_pool.data[old_len], name, name_len);
+            da_push(&symbols, exesym);
+
+            if (symbols.len > UINT32_MAX)
+                goto done;
+        }
+    }
+
+    for (size_t i = 0; i < ctx->global_symbols.len; i++) {
+        const GlobalSymbol *sym = &ctx->global_symbols.data[i];
+
+        if (sym->object_index != SIZE_MAX)
+            continue;
+
+        if (!sym->name)
+            goto done;
+
+        size_t name_len = strlen(sym->name) + 1;
+
+        if (string_pool.len > UINT32_MAX || name_len > UINT32_MAX - string_pool.len || name_len > SIZE_MAX - string_pool.len)
+            goto done;
+
+        exe_symbol_t exesym = {
+            .address = sym->address,
+            .name = (uint32_t)string_pool.len,
+            .flags = SYMFLAG_GLOBAL,
+        };
+
+        size_t old_len = string_pool.len;
+        da_resize(&string_pool, old_len + name_len);
+
+        memcpy(&string_pool.data[old_len], sym->name, name_len);
+        da_push(&symbols, exesym);
+
+        if (symbols.len > UINT32_MAX)
+            goto done;
+    }
+
+    uint64_t total_offset = sizeof(exe_header_t)
+                          + (uint64_t)ctx->sections.len * sizeof(exe_section_t)
+                          + (uint64_t)symbols.len * sizeof(exe_symbol_t)
+                          + string_pool.len;
+
+    if (total_offset > UINT32_MAX)
+        goto done;
+
+    for (size_t i = 0; i < ctx->sections.len; i++) {
+        const OutputSection *section = &ctx->sections.data[i];
+
+        if (section->data.len > UINT32_MAX)
+            goto done;
+
+        if (section->data.len > section->memory_size)
+            goto done;
+
+        if (total_offset > UINT32_MAX)
+            goto done;
+
+        exe_section_t exesection = {
+            .address = section->address,
+            .offset = (uint32_t)total_offset,
+            .memory_size = section->memory_size,
+            .file_size = (uint32_t)section->data.len,
+            .align = section->align,
+            .flags = section->flags & (FLAG_R | FLAG_W | FLAG_X),
+        };
+
+        da_push(&sections, exesection);
+
+        total_offset += section->data.len;
+    }
+
+    if (total_offset > UINT32_MAX)
+        goto done;
 
     exe_header_t header = {
         .magic = EXE_MAGIC,
-        .version = 0x01000100,
+        .version = 0x01010100,
         .entry = entry,
-        .sections = ctx->sections.len,
+        .sections = (uint32_t)sections.len,
+        .symbols = (uint32_t)symbols.len,
+        .string_table_size = (uint32_t)string_pool.len,
     };
 
-    if (fwrite(&header, sizeof(exe_header_t), 1, f) != 1)
-        return false;
-    
-    uint64_t total_offset = sizeof(exe_header_t) + (uint64_t)ctx->sections.len * sizeof(exe_section_t);
-    for (size_t i = 0; i < ctx->sections.len; i++) {
-        OutputSection section = ctx->sections.data[i];
+    if (fwrite(&header, sizeof(header), 1, f) != 1)
+        goto done;
 
-        exe_section_t exesection = {
-            .address = section.address,
-            .align = section.align,
-            .file_size = section.data.len,
-            .flags = section.flags & (FLAG_R | FLAG_W | FLAG_X),
-            .memory_size = section.memory_size,
-            .offset = total_offset,
-        };
+    if (sections.len != 0 && fwrite(sections.data, sizeof(exe_section_t), sections.len, f) != sections.len)
+        goto done;
 
-        total_offset += section.data.len;
+    if (symbols.len != 0 && fwrite(symbols.data, sizeof(exe_symbol_t), symbols.len, f) != symbols.len)
+        goto done;
 
-        if (fwrite(&exesection, sizeof(exe_section_t), 1, f) != 1)
-            return false;
-    }
+    if (string_pool.len != 0 && fwrite(string_pool.data, 1, string_pool.len, f) != string_pool.len)
+        goto done;
 
     for (size_t i = 0; i < ctx->sections.len; i++) {
-        size_t len = ctx->sections.data[i].data.len;
+        const OutputSection *section = &ctx->sections.data[i];
 
-        if (len != 0 && fwrite(ctx->sections.data[i].data.data, 1, len, f) != len)
-            return false;
+        if (section->data.len != 0 && fwrite(section->data.data, 1, section->data.len, f) != section->data.len)
+            goto done;
     }
 
-    return true;
+    if (fflush(f) != 0)
+        goto done;
+
+    if (fclose(f) != 0) {
+        f = NULL;
+        goto done;
+    }
+
+    f = NULL;
+    success = true;
+
+done:
+    da_free(&sections);
+    da_free(&symbols);
+    da_free(&string_pool);
+
+    return success;
 }
 
 typedef struct {

@@ -1,53 +1,58 @@
 #ifndef ISA_H
 #define ISA_H
 
-#define X_OPCODES \
-    X(NOP) \
-    X(SUB) \
-    X(ADD) \
-    X(MUL) \
-    X(DIV) \
-    X(DIVU) \
-    X(SHL) \
-    X(SHR) \
-    X(ASHR) \
-    X(AND) \
-    X(OR) \
-    X(XOR) \
-    X(LUI) \
-    X(LDR) \
-    X(STR) \
-    X(LDRB) \
-    X(STRB) \
-    X(JMP) \
-    X(JMPR) \
-    X(JXX) \
-    X(CALL) \
-    X(CALLR) \
-    X(RET) \
-    X(FADD) \
-    X(FSUB) \
-    X(FMUL) \
-    X(FDIV) \
-    X(FCMP) \
-    X(ITOF) \
-    X(FTOI) \
-    X(XCHG) \
-    X(FENCE) \
-    X(RPC) \
-    X(FLAGS) \
-    X(HALT) \
-    X(SYSCALL) \
-    X(IRET) \
+#include <stddef.h>
+#include <stdarg.h>
 
-#define X(name) OP_##name,
+#define X_OPCODES \
+    X(NOP, TYPE_X) \
+    X(SUB, TYPE_A) \
+    X(ADD, TYPE_A) \
+    X(MUL, TYPE_A) \
+    X(DIV, TYPE_A) \
+    X(DIVU, TYPE_A) \
+    X(SHL, TYPE_A) \
+    X(SHR, TYPE_A) \
+    X(ASHR, TYPE_A) \
+    X(AND, TYPE_A) \
+    X(OR, TYPE_A) \
+    X(XOR, TYPE_A) \
+    X(LUI, TYPE_A) \
+    X(LDR, TYPE_M) \
+    X(STR, TYPE_M) \
+    X(LDRB, TYPE_M) \
+    X(STRB, TYPE_M) \
+    X(JMP, TYPE_J) \
+    X(JMPR, TYPE_I) \
+    X(JXX, TYPE_B) \
+    X(CALL, TYPE_J) \
+    X(CALLR, TYPE_I) \
+    X(RET, TYPE_X) \
+    X(FADD, TYPE_A) \
+    X(FSUB, TYPE_A) \
+    X(FMUL, TYPE_A) \
+    X(FDIV, TYPE_A) \
+    X(FCMP, TYPE_A) \
+    X(ITOF, TYPE_A) \
+    X(FTOI, TYPE_A) \
+    X(XCHG, TYPE_M) \
+    X(FENCE, TYPE_X) \
+    X(RPC, TYPE_S) \
+    X(FLAGS, TYPE_S) \
+    X(HALT, TYPE_X) \
+    X(SYSCALL, TYPE_X) \
+    X(IRET, TYPE_X) \
+    X(BRKPT, TYPE_X) \
+    X(END, TYPE_X) \
+
+#define X(name, type) OP_##name,
 typedef enum {
     X_OPCODES
 } Opcodes;
 #undef X
 
 #ifdef X_OPCODES_IMPL
-#define X(NAME) #NAME,
+#define X(name, type) #name,
 const char *const opcode_names[] = {
     X_OPCODES
 };

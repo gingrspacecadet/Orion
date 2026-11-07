@@ -7,8 +7,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include "debug.h"
 #include "mmio.h"
 #include "isa.h"
+#include "obj.h"
 #include "icu.h"
 #include "pit.h"
 #include "pcu.h"
@@ -67,10 +69,17 @@ typedef struct {
 } Cpu;
 
 typedef struct {
+    char *name;
+    uint32_t address;
+} DebugSymbol;
+
+typedef struct {
     Cpu cpu;
     Icu icu;
     Mmio mmio;
     Mtu mtu;
+
+    da_type(DebugSymbol) debug_symbols;
 } Machine;
 
 void cpu_reset(Cpu *cpu) {
@@ -312,9 +321,6 @@ bool step(Machine *machine) {
     CpuFetchResult res = cpu_fetch32(machine, machine->cpu.pc);
     if (!res.success) return false;
     uint32_t word = res.value;
-    if (machine->cpu.pc == 0x267E0) {
-        printf("r0 = %d\n", machine->cpu.r[0]);
-    }
 
     bool advance = true;
 
@@ -575,24 +581,145 @@ bool step(Machine *machine) {
     return true;
 }
 
+static bool debug_is_running(void *context) {
+    Machine *machine = context;
+    return machine->cpu.running;
+}
+
+static void debug_step(void *context) {
+    Machine *machine = context;
+    (void)step(machine);
+}
+
+static void debug_print_state(void *context) {
+    Machine *machine = context;
+
+    printf("PC    = 0x%08X\n", machine->cpu.pc);
+    printf("FLAGS = 0x%08X\n", machine->cpu.flags);
+
+    for (int i = 0; i < 16; i++) {
+        printf("R%02d   = 0x%08X\n", i, machine->cpu.r[i]);
+    }
+}
+
+static bool debug_resolve_symbol(void *context, const char *name, uint32_t *address) {
+    Machine *machine = context;
+
+    for (size_t i = 0; i < machine->debug_symbols.len; i++) {
+        DebugSymbol sym = machine->debug_symbols.data[i];
+        if (strcmp(sym.name, name) == 0) {
+            *address = sym.address;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void debug_list_symbols(void *context, const char *filter) {
+    Machine *machine = context;
+    
+    if (machine->debug_symbols.len == 0) {
+        printf("(no symbols)\n");
+        return;
+    }
+
+    bool found = false;
+    for (size_t i = 0; i < machine->debug_symbols.len; i++) {
+        DebugSymbol sym = machine->debug_symbols.data[i];
+        if (!filter || strstr(sym.name, filter)) {
+            printf("0x%08X  \"%s\"\n", sym.address, sym.name);
+            found = true;
+        }
+    }
+
+    if (!found)
+        printf("(no matching symbols)\n");
+}
+
+static uint32_t debug_pc(void *context) {
+    Machine *machine = context;
+    return machine->cpu.pc;
+}
+
+static bool debug_read(void *context, uint32_t addr, uint32_t *value) {
+    Machine *machine = context;
+
+    MtuResult res = cpu_read32_noexcept(machine, addr, value);
+    if (res != MTU_SUCCESS)
+        return false;
+
+    return true;
+}
+
+static void fclosep(FILE **f) {
+    if (f && *f) fclose(*f);
+}
+
+bool load_exe(Machine *machine, char *path) {
+    FILE *f __attribute__((cleanup(fclosep))) = fopen(path, "rb");
+    exe_header_t header;
+    fread(&header, sizeof(exe_header_t), 1, f);
+
+    if (header.magic != EXE_MAGIC) return false;
+    if (header.version != 0x01010100) return false;
+
+    exe_section_t sections[header.sections];
+    fread(sections, sizeof(exe_section_t), header.sections, f);
+
+    exe_symbol_t symbols[header.symbols];
+    fread(symbols, sizeof(exe_symbol_t), header.symbols, f);
+
+    char string_pool[header.string_table_size];
+    fread(string_pool, sizeof(char), header.string_table_size, f);
+
+    for (uint32_t i = 0; i < header.sections; i++) {
+        exe_section_t section = sections[i];
+
+        memset(&machine->mmio.mem[section.address + section.file_size], 0, section.memory_size - section.file_size);
+        long pos = ftell(f);
+        fseek(f, section.offset, SEEK_SET);
+        fread(&machine->mmio.mem[section.address], sizeof(uint8_t), section.file_size, f);
+        fseek(f, pos, SEEK_SET);
+    }
+
+    if (!machine->debug_symbols.data)
+        da_init(&machine->debug_symbols);
+
+    for (uint32_t i = 0; i < header.symbols; i++) {
+        exe_symbol_t symbol = symbols[i];
+
+        DebugSymbol dbgsym = {
+            .name = strdup(&string_pool[symbol.name]),
+            .address = symbol.address,
+        };
+
+        da_push(&machine->debug_symbols, dbgsym);
+    }
+
+    return true;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s image.bin\n", argv[0]);
         return 1;
     }
 
-    size_t imgsz;
-    uint8_t *img = load_file(argv[1], &imgsz);
-
     Machine machine = {0};
 
     mmio_init(&machine.mmio);
 
-    memcpy(machine.mmio.mem + BOOT, img, imgsz); // temporary!!
-
+    if (!load_exe(&machine, argv[1])) {
+        fprintf(stderr, "Failed to open file %s\n", argv[1]);
+        return 1;
+    }
+    
     if (argc == 3) {
-        img = load_file(argv[2], &imgsz);
-        memcpy(machine.mmio.mem + RAM, img, imgsz);
+        if (!load_exe(&machine, argv[2])) {
+            fprintf(stderr, "Failed to open file %s\n", argv[2]);
+            return 1;
+        }
     }
 
     cpu_reset(&machine.cpu);
@@ -608,14 +735,44 @@ int main(int argc, char **argv) {
     mmio_add_device(&machine.mmio, (Device){.base_addr = PCU, .size = 256, .state = &pcu, .read = pcu_read, .write = pcu_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = MTU, .size = 128, .state = &machine.mtu, .read = mtu_read, .write = mtu_write});
 
+    Debugger debug;
+    debug_init(&debug);
+
+    DebuggerTarget debug_target = {
+        .context = &machine,
+        .is_running = debug_is_running,
+        .step = debug_step,
+        .print_state = debug_print_state,
+        .resolve_symbol = debug_resolve_symbol,
+        .list_symbols = debug_list_symbols,
+        .pc = debug_pc,
+        .read = debug_read,
+    };
+
     uint64_t last_ns;
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     last_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
+    if (!debug_shell(&debug, &debug_target))
+        machine.cpu.running = false;
+
     while (machine.cpu.running) {
-        for (int i = 0; i < BATCH_SIZE; i++) {
-            step(&machine);
+        for (int i = 0; i < BATCH_SIZE && machine.cpu.running; i++) {
+            if (debug.breakpoints.len && debug_has_breakpoint(&debug, machine.cpu.pc)) {
+
+                printf("\nBreakpoint hit at 0x%08X\n", machine.cpu.pc);
+
+                if (!debug_shell(&debug, &debug_target)) {
+                    machine.cpu.running = false;
+                    break;
+                }
+            }
+
+            if (!machine.cpu.running)
+                break;
+
+            (void)step(&machine);
         }
 
         if (machine.icu.has_int && (machine.cpu.flags & FLAG_IE)) {
@@ -634,6 +791,8 @@ int main(int argc, char **argv) {
 
         timer_run_expired(&timer_pool);
     }
+
+    debug_destroy(&debug);
 
     for (int i = 0; i < 8; i++) {
         printf("R%02d = 0x%08X  ", i, machine.cpu.r[i]);

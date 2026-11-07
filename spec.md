@@ -188,6 +188,7 @@ For immediate comparisons, `rhs` is the zero-extended value `0..31`. For registe
 | `0x22` | `HALT` | X | Stops instruction execution until a deliverable interrupt. | Privilege violation; invalid encoding |
 | `0x23` | `SYSCALL` | X | Raises synchronous exception vector `0x08`. Return PC is `PC + 4`. | |
 | `0x24` | `IRET` | X | Restores the standard exception frame and returns. | Privilege violation; memory fault |
+| `0x25` | `BRKPT` | X | Pauses execution. | Raises `Breakpoint` exception |
 | `0x25..0x3F` | Reserved | -- | Invalid opcode. | Invalid instruction |
 
 ### Immediate interpretation
@@ -249,7 +250,8 @@ Fixed system-address decoding takes precedence over peripheral BAR mappings, inc
 | Arithmetic Fault | `0x09` | Integer division fault or invalid/out-of-range `FTOI`. |
 | Misaligned Data | `0x0A` | A word load, store, or `XCHG` uses an address not divisible by four. |
 | Privilege Violation | `0x0B` | User mode executes a privileged operation. |
-| Reserved | `0x0C..0x1F` | Reserved for future synchronous exceptions. |
+| Breakpoint | `0x0C` | For debuggers to pause execution. |
+| Reserved | `0x0D..0x1F` | Reserved for future synchronous exceptions. |
 | External Interrupt | `0x20..0xFE` | Hardware interrupt vector assigned by the ICU. |
 | Non-maskable Interrupt (NMI) | `0xFF` | Non-maskable interrupt. Ignores `IE` and may recursively nest. |
 

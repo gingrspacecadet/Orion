@@ -42,8 +42,10 @@ const char *const reloc_type_names[] = {
 extern const char *const reloc_type_names[];
 #endif
 
-#define OBJ_MAGIC 0x4F524E4F
-#define EXE_MAGIC 0x4F524E45
+#define OBJ_MAGIC   0x4F524E4F
+#define OBJ_VER     0x01000100
+#define EXE_MAGIC   0x4F524E45
+#define EXE_VER     0x01010100
 
 typedef struct {
     uint32_t magic; // "ORNO"
@@ -90,8 +92,10 @@ typedef struct {
     uint32_t version; // maj8 min8 isa8 pad8
     addr_t entry;
     uint32_t sections;
+    uint32_t symbols;
+    uint32_t string_table_size;
 } exe_header_t;
-static_assert(sizeof(exe_header_t) == 16, "exe_header_t layout changed");
+static_assert(sizeof(exe_header_t) == 24, "exe_header_t layout changed");
 
 typedef struct {
     addr_t address;
@@ -102,5 +106,12 @@ typedef struct {
     uint8_t flags; // RWX
 } exe_section_t;
 static_assert(sizeof(exe_section_t) == 24, "exe_section_t layout changed");
+
+typedef struct {
+    stroff_t name;
+    addr_t address;
+    uint8_t flags;
+} exe_symbol_t;
+static_assert(sizeof(exe_symbol_t) == 12, "exe_symbol_t layout changed");
 
 #endif
