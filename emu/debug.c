@@ -86,11 +86,42 @@ static bool parse_u32(const char *text, uint32_t *out) {
     return true;
 }
 
-static bool parse_location(const DebuggerTarget *target, const char *text, uint32_t *out) {
+static bool debug_resolve_symbol(const Machine *machine, const char *name, uint32_t *address) {
+    for (size_t i = 0; i < machine->debug_symbols.len; i++) {
+        DebugSymbol sym = machine->debug_symbols.data[i];
+        if (strcmp(sym.name, name) == 0) {
+            *address = sym.address;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void debug_list_symbols(Machine *machine, const char *filter) {    
+    if (machine->debug_symbols.len == 0) {
+        printf("(no symbols)\n");
+        return;
+    }
+
+    bool found = false;
+    for (size_t i = 0; i < machine->debug_symbols.len; i++) {
+        DebugSymbol sym = machine->debug_symbols.data[i];
+        if (!filter || strstr(sym.name, filter)) {
+            printf("0x%08X  \"%s\"\n", sym.address, sym.name);
+            found = true;
+        }
+    }
+
+    if (!found)
+        printf("(no matching symbols)\n");
+}
+
+static bool parse_location(const Machine *machine, const char *text, uint32_t *out) {
     if (parse_u32(text, out))
         return true;
 
-    return target->resolve_symbol && target->resolve_symbol(target->context, text, out);
+    return debug_resolve_symbol(machine, text, out);
 }
 
 static void debug_print_breakpoints(const Debugger *dbg) {
@@ -113,8 +144,26 @@ static void debug_help(void) {
     puts("quit | q                     Terminate the emulator");
 }
 
-bool debug_shell(Debugger *dbg, const DebuggerTarget *target) {
-    if (!dbg || !target || !target->is_running || !target->step || !target->print_state)
+static void debug_print_state(Machine *machine) {
+    printf("PC    = 0x%08X\n", machine->cpu.pc);
+    printf("FLAGS = 0x%08X\n", machine->cpu.flags);
+
+    for (int i = 0; i < 16; i++) {
+        printf("R%02d   = 0x%08X\n", i, machine->cpu.r[i]);
+    }
+}
+
+static bool debug_read(Machine *machine, uint32_t addr, uint32_t *value) {
+    MtuResult res = machine_read32_noexcept(machine, addr, value);
+    if (res != MTU_SUCCESS)
+        return false;
+
+    return true;
+}
+
+
+bool debug_shell(Debugger *dbg, Machine *machine) {
+    if (!dbg || !machine)
         return false;
 
     char line[INPUT_SIZE];
@@ -139,7 +188,7 @@ bool debug_shell(Debugger *dbg, const DebuggerTarget *target) {
             char *arg = strtok(NULL, " \t\r\n");
             uint32_t address;
 
-            if (!arg || !parse_location(target, arg, &address)) {
+            if (!arg || !parse_location(machine, arg, &address)) {
                 puts("invalid address or unknown symbol");
                 continue;
             }
@@ -181,41 +230,38 @@ bool debug_shell(Debugger *dbg, const DebuggerTarget *target) {
         }
 
         if (!strcmp(cmd, "step") || !strcmp(cmd, "s")) {
-            if (!target->is_running(target->context)) {
+            if (!machine->cpu.running) {
                 puts("CPU is halted");
                 continue;
             }
 
-            target->step(target->context);
-            target->print_state(target->context);
+            machine_step(machine);
+            debug_print_state(machine);
 
             continue;
         }
 
         if (!strcmp(cmd, "regs")) {
-            target->print_state(target->context);
+            debug_print_state(machine);
             continue;
         }
 
         if (!strcmp(cmd, "symbols")) {
             char *filter = strtok(NULL, " \t\r\n");
 
-            if (target->list_symbols)
-                target->list_symbols(target->context, filter);
-            else
-                puts("symbol listing is not connected");
+            debug_list_symbols(machine, filter);
 
             continue;
         }
 
-        if (!strcmp(cmd, "disasm")) {
+        if (!strcmp(cmd, "disasm") || !strcmp(cmd, "mem")) {
             char *arg1 = strtok(NULL, " \t\r\n");
             char *arg2 = strtok(NULL, " \t\r\n");
 
-            uint32_t address = target->pc(target->context);
+            uint32_t address = machine->cpu.pc;
             uint32_t count = 8;
             
-            if (arg1 && !parse_location(target, arg1, &address)) {
+            if (arg1 && !parse_location(machine, arg1, &address)) {
                 puts("invalid address or unknown symbol");
                 continue;
             }
@@ -227,18 +273,22 @@ bool debug_shell(Debugger *dbg, const DebuggerTarget *target) {
 
             for (uint32_t i = 0; i < count; i++) {
                 uint32_t word;
-                if (!target->read(target->context, address + i * sizeof(uint32_t), &word)) {
+                if (!debug_read(machine, address + i * sizeof(uint32_t), &word)) {
                     puts("failed to read data");
                     continue;
                 }
 
-                char buffer[INPUT_SIZE];
-                if (!disasm_fmt(word, target->pc(target->context), buffer, sizeof(buffer))) {
-                    puts("failed to disassemble");
-                    continue;
-                }
+                if (!strcmp(cmd, "disasm")) {
+                    char buffer[INPUT_SIZE];
+                    if (!disasm_fmt(word, machine->cpu.pc, buffer, sizeof(buffer))) {
+                        puts("failed to disassemble");
+                        continue;
+                    }
 
-                printf("%08" PRIX32 " %s\n", address + i * (uint32_t)sizeof(uint32_t), buffer);
+                    printf("%08" PRIX32 " %s\n", address + i * (uint32_t)sizeof(uint32_t), buffer);
+                } else {
+                    printf("%08" PRIX32 " 0x%08X\n", address + i * (uint32_t)sizeof(uint32_t), word);
+                }
             }
 
             continue;
