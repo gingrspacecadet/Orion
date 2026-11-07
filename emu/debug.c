@@ -161,6 +161,16 @@ static bool debug_read(Machine *machine, uint32_t addr, uint32_t *value) {
     return true;
 }
 
+static void print_tlb_entry(Machine *machine, uint32_t index) {
+    uint32_t tlb_hi = machine->mtu.tlb_entries[index] >> 32;
+    uint32_t tlb_lo = machine->mtu.tlb_entries[index];
+
+    uint32_t vpn = (tlb_hi >> 12) & 0xFFFFF;
+    uint32_t asid = (tlb_hi >> 2) & 0x3FF;
+    uint32_t pfn = (tlb_lo >> 12) & 0xFFFFF;
+
+    printf("entry %d - Valid = %s, ASID = %d, VPN = 0x%04X, PFN = 0x%04X\n", index, (tlb_hi & 1) ? "true" : "false", asid, vpn, pfn);
+}
 
 bool debug_shell(Debugger *dbg, Machine *machine) {
     if (!dbg || !machine)
@@ -288,6 +298,31 @@ bool debug_shell(Debugger *dbg, Machine *machine) {
                     printf("%08" PRIX32 " %s\n", address + i * (uint32_t)sizeof(uint32_t), buffer);
                 } else {
                     printf("%08" PRIX32 " 0x%08X\n", address + i * (uint32_t)sizeof(uint32_t), word);
+                }
+            }
+
+            continue;
+        }
+
+        if (!strcmp(cmd, "tlb")) {
+            char *arg = strtok(NULL, " \t\r\n");
+
+            if (arg) {
+                uint32_t entry;
+                if (!parse_u32(arg, &entry)) {
+                    puts("invalid entry number");
+                    continue;
+                }
+    
+                if (entry > 32) {
+                    puts("invalid entry number");
+                    continue;
+                }
+
+                print_tlb_entry(machine, entry);
+            } else {
+                for (size_t i = 0; i < 32; i++) {
+                    print_tlb_entry(machine, i);
                 }
             }
 
