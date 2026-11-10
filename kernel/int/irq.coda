@@ -1,0 +1,64 @@
+module int::irq;
+
+include io;
+
+type Handler = fn none ();
+
+type Mapping = struct {
+    Handler handler;
+    uint8 irq;
+    uint8 vector;
+};
+
+mut Mapping[256] mapping;
+
+uint32 ICU_ADDR = 0x10400;
+
+@export
+fn none init() {
+    // mask all IRQs
+    io::write32(ICU_ADDR, 0x08, 0xFFFFFFFF);
+}
+
+@export
+fn none register(Handler handler, uint8 irq, uint8 vector) {
+    mapping[irq] = {
+        .handler = handler,
+        .irq = irq,
+        .vector = vector,
+    };
+    io::write8(ICU_ADDR, 0x2C + irq, vector);
+}
+
+@export
+fn none enable(uint8 number) {
+    mut uint32 mask = io::read32(ICU_ADDR, 0x08);
+    mask &= ~(1 << number);
+    io::write32(ICU_ADDR, 0x08, mask);
+}
+
+@export
+fn none disable(uint8 number) {
+    mut uint32 mask = io::read32(ICU_ADDR, 0x08);
+    mask |= (1 << number);
+    io::write32(ICU_ADDR, 0x08, mask);
+}
+
+@export
+fn none dispatch(uint8 vector) {
+    for (mut uint8 i = 0; i < 256; i += 1) {
+        if (mapping[i].vector == vector) {
+            if (mapping[i].handler) {
+                mapping[i].handler();
+                eoi(mapping[i].irq);
+            }
+            else
+                return;
+        }
+    }
+}
+
+@export
+fn none eoi(uint8 number) {
+    io::write32(ICU_ADDR, 0x4C, number);
+}

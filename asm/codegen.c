@@ -441,6 +441,7 @@ const OpConfig opcodes[] = {
     {"strb", TYPE_M, OP_STRB},
     {"jmp", TYPE_J, OP_JMP},
     {"call", TYPE_J, OP_CALL},
+    {"callr", TYPE_I, OP_CALLR},
     {"jmpr", TYPE_I, OP_JMPR},
     {"jeq", TYPE_B, OP_JXX},
     {"jne", TYPE_B, OP_JXX},

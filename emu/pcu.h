@@ -19,6 +19,7 @@ typedef struct {
 typedef struct {
     Descriptor table[PCU_MAX_DEV_COUNT];
     size_t device_count;
+    Mmio *mmio;
 } Pcu;
 
 void pcu_add_device(Pcu *pcu, Descriptor device);

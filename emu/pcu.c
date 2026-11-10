@@ -15,9 +15,9 @@ uint32_t pcu_read(void *state, uint32_t offset, uint8_t size) {
     if (size != 4)
         return 0;
 
-    Descriptor device = pcu->table[offset / sizeof(Descriptor)];
+    Descriptor device = pcu->table[offset / 16];
 
-    switch (offset % sizeof(Descriptor)) {
+    switch (offset % 16) {
         case PCU_DEV_ID: return device.id;
         case PCU_DEV_BAR: return device.base_address;
         case PCU_DEV_SIZE: return device.size;
@@ -37,14 +37,15 @@ void pcu_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
     if (size != 4)
         return;
 
-    Descriptor *device = &pcu->table[offset / sizeof(Descriptor)];
+    Descriptor *device = &pcu->table[offset / 16];
 
-    switch (offset % sizeof(Descriptor)) {
+    switch (offset % 16) {
         case PCU_DEV_BAR: {
             if (value % device->size != 0) return;      // not aligned
             if (value + device->size < value) return;   // wraps address space
             device->base_address = value;
             device->device->base_addr = value;
+            mmio_rebuild_page_map(pcu->mmio);
             return;
         }
 

@@ -1,18 +1,15 @@
 module int::ihvt;
 
 include int::timer : timer;
+include int::irq : irq;
 include vmm;
 include cpu;
 include io;
 
 @export
 fn none int_handler(uint8 num, mut uint32 *frame) {
-    if (num == 0x20) {
-        timer::tick();
-        io::write32(0x00010500, 0x14, 1); // acknowledge interrupt
-        io::write32(0x00010400, 0x4C, 0); // EOI
-
-        return;
+    if (num > 0x20) {
+        irq::dispatch(num);
     } else if (num == 0x05 || num == 0x06) {
         match (vmm::refill()) {
             uint32: frame[0] -= 4;
@@ -20,9 +17,9 @@ fn none int_handler(uint8 num, mut uint32 *frame) {
         }
 
         return;
+    } else {
+        cpu::halt();
     }
-
-    cpu::halt();
 }
 
 @extern none *__ihvt_start;

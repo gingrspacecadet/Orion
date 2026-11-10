@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
     TimerPool timer_pool = {0};
     pit_init(&pit, &timer_pool, icu_get_irq(&machine.icu, 0));
     pit.ctrl |= 1 | 3 | 7;
-    Pcu pcu = {0};
+    Pcu pcu = {.mmio = &machine.mmio};
 
     mmio_add_device(&machine.mmio, (Device){.base_addr = ICU, .size = 80, .state = &machine.icu, .read = icu_read, .write = icu_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = PIT, .size = 24, .state = &pit, .read = pit_read, .write = pit_write});

@@ -1,8 +1,15 @@
 module int::timer;
 
 include io;
+include int::irq : irq;
 
 mut uint32 ticks;
+
+fn none pit_irq_handler() {
+    tick();
+    io::write32(0x00010500, 0x14, 1); // acknowledge interrupt
+    io::write32(0x00010400, 0x4C, 0); // EOI
+}
 
 @export
 fn none init() {
@@ -18,6 +25,13 @@ fn none init() {
     io::write32(pit, 0x14, 1); // acknowledge any previous interrupts
 
     io::write32(pit, 0x00, 0b111); // ENABLE | AUTORELOAD | INT_ENABLE
+
+    // set the IRQ0 callback
+    irq::enable(0);
+    irq::register(fn none () {
+        tick();
+        io::write32(0x00010500, 0x14, 1); // acknowledge interrupt
+    }, 0, 0x20);
 }
 
 @export

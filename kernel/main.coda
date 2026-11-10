@@ -4,6 +4,7 @@ include cpu;
 include mem;
 include pmm;
 include vmm;
+include pcu;
 
 @extern none *__bss_start;
 @extern none *__bss_end;
@@ -17,6 +18,9 @@ fn uint32 main() {
     clear_bss();
 
     pmm::init();
+
+    pcu::init();
+
     vmm::init();
     ihvt::init();
     timer::init();
