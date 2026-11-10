@@ -10,7 +10,7 @@ type Mapping = struct {
     uint8 vector;
 };
 
-mut Mapping[256] mapping;
+mut Mapping[32] mapping;
 
 uint32 ICU_ADDR = 0x10400;
 
@@ -46,18 +46,19 @@ fn none disable(uint8 number) {
 
 @export
 fn none dispatch(uint8 vector) {
-    for (mut uint8 i = 0; i < 256; i += 1) {
-        if (mapping[i].vector == vector) {
-            if (mapping[i].handler) {
-                mapping[i].handler();
-                eoi(mapping[i].irq);
-            }
-            else
-                return;
+    for (mut uint32 i = 0; i < 32; i += 1) {
+        if (mapping[i].vector != vector)
+            continue;
+
+        if (mapping[i].handler) {
+            mapping[i].handler();
+            eoi(mapping[i].irq);
+            return;
         }
+
+        return;
     }
 }
-
 @export
 fn none eoi(uint8 number) {
     io::write32(ICU_ADDR, 0x4C, number);
