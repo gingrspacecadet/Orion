@@ -28,7 +28,6 @@ fn uint32 main() {
     vmm::enable_translation();
     cpu::enable_ints();
 
-    // while (timer_ticks < 500) {}
-    // cpu::halt();
+    while (timer::get_ticks() < 5) {}
     return 67;
 }

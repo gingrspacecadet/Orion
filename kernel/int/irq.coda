@@ -33,14 +33,14 @@ fn none register(Handler handler, uint8 irq, uint8 vector) {
 @export
 fn none enable(uint8 number) {
     mut uint32 mask = io::read32(ICU_ADDR, 0x08);
-    mask &= ~(1 << number);
+    mask &= ~((uint32)1 << number);
     io::write32(ICU_ADDR, 0x08, mask);
 }
 
 @export
 fn none disable(uint8 number) {
     mut uint32 mask = io::read32(ICU_ADDR, 0x08);
-    mask |= (1 << number);
+    mask |= ((uint32)1 << number);
     io::write32(ICU_ADDR, 0x08, mask);
 }
 

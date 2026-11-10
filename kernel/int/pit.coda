@@ -2,7 +2,8 @@ module int::timer;
 
 include io;
 include int::irq : irq;
-
+include cpu;
+@export
 mut uint32 ticks;
 
 fn none pit_irq_handler() {
@@ -37,4 +38,9 @@ fn none init() {
 @export
 fn none tick() {
     ticks += 1;
+}
+
+@export
+fn uint32 get_ticks() {
+    return ticks;
 }
