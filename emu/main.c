@@ -102,8 +102,10 @@ int main(int argc, char **argv) {
     mmio_add_device(&machine.mmio, (Device){.base_addr = PIT, .size = 24, .state = &pit, .read = pit_read, .write = pit_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = PCU, .size = 256, .state = &pcu, .read = pcu_read, .write = pcu_write});
     mmio_add_device(&machine.mmio, (Device){.base_addr = MTU, .size = 128, .state = &machine.mtu, .read = mtu_read, .write = mtu_write});
-    
-    pcu_add_device(&pcu, (Descriptor){.id = 0x12305010, .size = 1, .device = &(Device){.size = 1, .write = uart_write}, .irq = (IrqLine){.pin = UINT32_MAX}});
+
+    mmio_add_device(&machine.mmio, (Device){.size = 1, .write = uart_write});
+
+    pcu_add_device(&pcu, (Descriptor){.id = 0x12305010, .size = 1, .device = &machine.mmio.devices[machine.mmio.device_count - 1], .irq = (IrqLine){.pin = UINT32_MAX}});
 
     Debugger debug;
     debug_init(&debug);
@@ -150,6 +152,8 @@ int main(int argc, char **argv) {
 
         timer_run_expired(&timer_pool);
     }
+
+    printf("CPU halted at 0x%08X\n", machine.cpu.pc);
 
     debug_destroy(&debug);
 

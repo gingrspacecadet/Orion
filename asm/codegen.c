@@ -249,7 +249,16 @@ static bool handle_align(Codegen *builder, const Instr *i) {
     obj_section_t *section = active_section(builder);
     REQUIRE(i, section != NULL, "no active section");
 
+    REQUIRE(i, (uint64_t)requested <= UINT32_MAX,
+        ".align exceeds the object format's alignment range");
+
     size_t alignment = (size_t)requested;
+    REQUIRE(i, (alignment & (alignment - 1)) == 0,
+        ".align must be a power of two");
+
+    if (alignment > section->align)
+        section->align = (uint32_t)alignment;
+
     size_t padding = (alignment - section->size % alignment) % alignment;
 
     for (size_t n = 0; n < padding; n++)

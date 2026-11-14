@@ -3,16 +3,36 @@ module drivers::uart;
 include pcu;
 include io;
 
-pcu::Device mut *uart;
+mut uint32 base;
 
 @export
-fn none uart_init() {
+fn bool init() {
     pcu::Device *? dev = pcu::find_device(0x12305010);
-    if (dev == null) return;
-    uart = (pcu::Device *)dev;
+    
+    if (dev == null) return false;
+    if (dev.bar == 0 || dev.size < 1) return false;
+    
+    base = dev.bar;
+
+    return true;
 }
 
 @export
 fn none putc(uint8 c) {
-    io::write8(uart.bar, 0, c);
+    if (base == 0)
+        return;
+    
+    io::write8(base, 0, c);
+}
+
+@export
+fn none puts(uint8[] s) {
+    if (base == 0)
+        return;
+
+    uint32 length = (uint32)s.len;
+
+    for (mut uint32 i = 0; i < length; i += 1) {
+        putc(s.ptr[i]);
+    }
 }

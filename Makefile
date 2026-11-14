@@ -67,7 +67,7 @@ $(1)_OBJ := $$($(1)_ASM_OBJ) $$($(1)_CODA_OBJ)
 
 $(1): $$(BUILD)/$(1).oxe
 
-$$(BUILD)/$(1).oxe: $$($(1)_OBJ) $(BUILD)/ld $(1)/$(1).ld
+$$(BUILD)/$(1).oxe: $$($(1)_OBJ) $(BUILD)/ld $(1)/$(1).ld $(CODAC)
 	@mkdir -p "$$(dir $$@)"
 	$(BUILD)/ld $$($(1)_OBJ) -o $$@ -T $(1)/$(1).ld
 

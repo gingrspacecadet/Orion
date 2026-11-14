@@ -117,6 +117,9 @@ Token lex(Source *source) {
                     size_t i = 0;
 
                     if (is_ref) advance(source);
+                    if (is_ref && peek(source) == '.') {
+                        t.string[i++] = consume(source);
+                    }
 
                     while (peek(source) != '\0' && peek(source) != '\n' && (isalnum(peek(source)) || peek(source) == '_')) {
                         if (i < sizeof(t.string) - 1) t.string[i++] = peek(source);

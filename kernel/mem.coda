@@ -4,13 +4,24 @@ module mem;
 fn none set(mut none *dest, uint8 value, uint32 length) {
     uint32 fill = (uint32)value * 0x01010101;
 
-    uint32 words = length / 4;
+    mut uint32 offset = 0;
 
-    for (mut uint32 i = 0; i < words; i += 1) {
-        ((mut uint32 *)dest)[i] = fill;
+    // Align the destination before performing word stores
+    while (offset < length && (((uint32)dest + offset) & 3) != 0) {
+        ((mut uint8 *)dest)[offset] = value;
+        offset += 1;
     }
 
-    for (mut uint32 i = words * 4; i < length; i += 1) {
+    uint32 words = (length - offset) / 4;
+    mut uint32 *word_dest =
+        (mut uint32 *)((mut uint8 *)dest + offset);
+
+    for (mut uint32 i = 0; i < words; i += 1) {
+        word_dest[i] = fill;
+    }
+
+    offset += words * 4;
+    for (mut uint32 i = offset; i < length; i += 1) {
         ((mut uint8 *)dest)[i] = value;
     }
 }

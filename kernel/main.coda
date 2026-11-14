@@ -34,8 +34,11 @@ fn uint32 main() {
         *t = 0x69;
     }
 
-    uart::putc('A');
-    uart::putc('\n');
+    uart::init();
+
+    // uart::putc('A');
+    // uart::putc('\n');
+    uart::puts("Hello, world!\n");
 
     if (t != null) {
         return *t;
