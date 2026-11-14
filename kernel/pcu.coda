@@ -4,6 +4,7 @@ include io;
 
 uint32 PCU_ADDR = 0x10800;
 
+@export
 type Device = struct {
     uint32 id;
     uint32 bar;
@@ -69,4 +70,14 @@ fn none assign_bars() {
 fn none init() {
     enumerate();
     assign_bars();
+}
+
+@export
+fn Device *? find_device(uint32 id) {
+    for (mut uint8 i = 0; i < 16; i += 1) {
+        if (devices[i].id == id)
+            return (Device*?)&devices[i];
+    }
+
+    return null;
 }

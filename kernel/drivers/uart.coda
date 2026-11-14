@@ -1,0 +1,18 @@
+module drivers::uart;
+
+include pcu;
+include io;
+
+pcu::Device mut *uart;
+
+@export
+fn none uart_init() {
+    pcu::Device *? dev = pcu::find_device(0x12305010);
+    if (dev == null) return;
+    uart = (pcu::Device *)dev;
+}
+
+@export
+fn none putc(uint8 c) {
+    io::write8(uart.bar, 0, c);
+}

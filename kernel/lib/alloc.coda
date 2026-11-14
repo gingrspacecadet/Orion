@@ -1,0 +1,366 @@
+module lib::alloc;
+
+include pmm;
+include vmm;
+include cpu;
+
+type Block = struct {
+    uint32 size;
+    uint32 previous_size;
+
+    mut Block *? free_previous;
+    mut Block *? free_next;
+
+    uint32 flags;
+};
+
+uint32 HEAP_BASE  = 0xD0000000;
+uint32 HEAP_LIMIT = 0xE0000000;
+
+uint32 PAGE_SIZE = 4096;
+uint32 HEAP_ALIGNMENT = 8;
+
+uint32 BLOCK_USED = 0;
+uint32 BLOCK_FREE = 1;
+
+uint32 BLOCK_HEADER_SIZE = (#sizeof(Block) + HEAP_ALIGNMENT - 1) & ~(HEAP_ALIGNMENT - 1);
+
+uint32 BLOCK_MIN_SIZE = BLOCK_HEADER_SIZE + HEAP_ALIGNMENT;
+
+mut Block mut *? free_head;
+mut uint32 heap_start;
+mut uint32 heap_end;
+mut uint32 heap_last;
+
+fn uint32 align_size(uint32 size) {
+    return (size + HEAP_ALIGNMENT - 1) & ~(HEAP_ALIGNMENT - 1);
+}
+
+fn none insert_free(mut Block *block) {
+    block.flags = BLOCK_FREE;
+    block.free_previous = null;
+    block.free_next = free_head;
+
+    if (free_head) {
+        free_head.free_previous = (mut Block *?)block;
+    }
+
+    free_head = (mut Block mut *?)block;
+}
+
+fn none remove_free(mut Block *block) {
+    if (block.free_previous) {
+        block.free_previous.free_next = block.free_next;
+    } else {
+        free_head = block.free_next;
+    }
+
+    if (block.free_next) {
+        block.free_next.free_previous = block.free_previous;
+    }
+
+    block.free_previous = null;
+    block.free_next = null;
+}
+
+fn Block *? find_free(uint32 size) {
+    mut Block mut *? block = free_head;
+
+    while (block) {
+        if (block.size >= size) {
+            return block;
+        }
+
+        block = block.free_next;
+    }
+
+    return null;
+}
+
+fn none rollback_growth(uint32 virtual_address, uint32 mapped_pages) {
+    for (mut uint32 i = 0; i < mapped_pages; i += 1) {
+        uint32 address = virtual_address + i * PAGE_SIZE;
+        mut uint32 physical = 0;
+
+        match (vmm::kernel_unmap_physical(address)) {
+            uint32 frame: physical = frame;
+            _: cpu::halt();
+        }
+
+        match (pmm::free(physical)) {
+            none: {}
+            _: cpu::halt();
+        }
+    }
+}
+
+fn uint8 map_growth(uint32 virtual_address, uint32 size) {
+    if (size == 0)
+        return 0;
+
+    if ((virtual_address & (PAGE_SIZE - 1)) != 0 ||
+        (size & (PAGE_SIZE - 1)) != 0)
+        return 0;
+
+    if (virtual_address < HEAP_BASE ||
+        virtual_address >= HEAP_LIMIT ||
+        size > HEAP_LIMIT - virtual_address)
+        return 0;
+
+    uint32 page_count = size / PAGE_SIZE;
+    uint32 flags = vmm::PTE_WRITABLE | vmm::PTE_CACHEABLE;// Writable | Cacheable
+
+    mut uint32 mapped_pages = 0;
+
+    while (mapped_pages < page_count) {
+        mut uint32 physical = 0;
+
+        // Allocate an individual physical page.
+        match (pmm::alloc()) {
+            uint32 address: physical = address;
+
+            none: {
+                rollback_growth(virtual_address, mapped_pages);
+                return 0;
+            }
+        }
+
+        uint32 target = virtual_address + mapped_pages * PAGE_SIZE;
+
+        // Map it into the heap.
+        match (vmm::kernel_map(target, physical, flags)) {
+            none: {
+                mapped_pages += 1;
+            }
+
+            _: {
+                // The failed mapping did not consume this physical page.
+                match (pmm::free(physical)) {
+                    none: {}
+                    _: cpu::halt();
+                }
+
+                rollback_growth(virtual_address, mapped_pages);
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+fn uint8 grow(uint32 required) {
+    if (required > 0xFFFFF000) {
+        return 0;
+    }
+
+    uint32 size = (required + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+    if (size > HEAP_LIMIT - heap_end) {
+        return 0;
+    }
+
+    uint32 old_end = heap_end;
+
+    if (map_growth(old_end, size) == 0) {
+        return 0;
+    }
+
+    // Extend the last block if it is already free
+    if (heap_last != 0) {
+        mut Block *last = (Block *)heap_last;
+
+        if (last.flags == BLOCK_FREE) {
+            remove_free(last);
+            last.size += size;
+            insert_free(last);
+
+            heap_end = old_end + size;
+            return 1;
+        }
+    }
+
+    // Otherwise create a new free block
+    mut Block *block = (Block *)old_end;
+
+    block.size = size;
+    block.previous_size = 0;
+
+    if (heap_last != 0) {
+        Block *last = (Block *)heap_last;
+        block.previous_size = last.size;
+    }
+
+    block.flags = BLOCK_FREE;
+    block.free_previous = null;
+    block.free_next = null;
+
+    heap_end = old_end + size;
+    heap_last = old_end;
+
+    insert_free(block);
+
+    return 1;
+}
+
+@export
+fn none init() {
+    free_head = null;
+
+    heap_start = HEAP_BASE;
+    heap_end = HEAP_BASE;
+    heap_last = 0;
+
+    // Backing pages are allocated lazily by grow()
+}
+
+@export
+fn none *? alloc(uint32 size) {
+    if (size == 0) {
+        return null;
+    }
+
+    // Check alignment and header-size arithmetic for overflow
+    if (size > 0xFFFFFFF8) {
+        return null;
+    }
+
+    uint32 payload_size = align_size(size);
+
+    if (payload_size > 0xFFFFFFFF - BLOCK_HEADER_SIZE) {
+        return null;
+    }
+
+    uint32 total_size = BLOCK_HEADER_SIZE + payload_size;
+
+    mut Block mut *? block = find_free(total_size);
+
+    if (block == null) {
+        if (grow(total_size) == 0) {
+            return null;
+        }
+
+        block = find_free(total_size);
+    }
+
+    if (block == null) {
+        return null;
+    }
+
+    remove_free((mut Block mut *)block);
+
+    uint32 original_size = block.size;
+    uint32 remaining = original_size - total_size;
+
+    // Split if the remainder can hold a header and payload
+    if (remaining >= BLOCK_MIN_SIZE) {
+        block.size = total_size;
+
+        mut Block *remainder = (Block *)((uint8 *)block + total_size);
+
+        remainder.size = remaining;
+        remainder.previous_size = total_size;
+        remainder.flags = BLOCK_FREE;
+        remainder.free_previous = null;
+        remainder.free_next = null;
+
+        uint32 next_address = (uint32)((uint8 *)remainder + remaining);
+
+        if (next_address < heap_end) {
+            mut Block *next = (Block *)next_address;
+            next.previous_size = remaining;
+        } else {
+            heap_last = (uint32)remainder;
+        }
+
+        insert_free(remainder);
+    }
+
+    block.flags = BLOCK_USED;
+
+    return (none *?)((uint8 *)block + BLOCK_HEADER_SIZE);
+}
+
+@export
+fn none *? zalloc(uint32 size) {
+    none *? ptr = alloc(size);
+
+    if (ptr == null) {
+        return null;
+    }
+
+    mut uint8 *bytes = (uint8 *)ptr;
+
+    for (mut uint32 i = 0; i < size; i += 1) {
+        bytes[i] = 0;
+    }
+
+    return ptr;
+}
+
+@export
+fn none free(none *ptr) {
+    uint32 address = (uint32)ptr;
+
+    // Basic range and alignment validation
+    if (address < heap_start + BLOCK_HEADER_SIZE || address >= heap_end || (address & (HEAP_ALIGNMENT - 1)) != 0) {
+        return;
+    }
+
+    mut Block mut *block = (Block *)((uint8 *)ptr - BLOCK_HEADER_SIZE);
+
+    mut uint32 block_address = (uint32)block;
+
+    if (block.flags != BLOCK_USED || block.size < BLOCK_MIN_SIZE || block.size > heap_end - block_address) {
+        // TODO: replace with a kernel panic/assert in debug builds
+        return;
+    }
+
+    // Coalesce with the preceding block
+    if (block.previous_size != 0 && block.previous_size <= block_address - heap_start) {
+
+        mut Block *previous = (Block *)((uint8 *)block - block.previous_size);
+
+        if (previous.flags == BLOCK_FREE) {
+            remove_free(previous);
+
+            previous.size += block.size;
+
+            if (heap_last == block_address) {
+                heap_last = (uint32)previous;
+            }
+
+            block = previous;
+        }
+    }
+
+    // Coalesce with the following block
+    block_address = (uint32)block;
+    mut uint32 next_address = block_address + block.size;
+
+    if (next_address < heap_end) {
+        mut Block *next = (Block *)next_address;
+
+        if (next.flags == BLOCK_FREE) {
+            remove_free(next);
+
+            block.size += next.size;
+
+            if (heap_last == next_address) {
+                heap_last = block_address;
+            }
+        }
+    } else {
+        heap_last = block_address;
+    }
+
+    // Update the following block's backward link
+    next_address = block_address + block.size;
+
+    if (next_address < heap_end) {
+        mut Block *next = (Block *)next_address;
+        next.previous_size = block.size;
+    }
+
+    insert_free(block);
+}

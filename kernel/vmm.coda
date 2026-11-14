@@ -17,8 +17,10 @@ uint32 PAGE_FRAME_MASK = 0xFFFFF000;
 uint32 PDE_PRESENT = 0x01;
 
 uint32 PTE_EXECUTABLE = 0x01;
+@export
 uint32 PTE_CACHEABLE = 0x02;
 uint32 PTE_USER = 0x04;
+@export
 uint32 PTE_WRITABLE = 0x08;
 uint32 PTE_PRESENT = 0x10;
 
@@ -320,6 +322,20 @@ fn (PageEntry | none) unmap_page(mut AddressSpace *space, uint32 virtual_address
         return;
 
     table[index] = 0;
+    
+    mut bool empty = true;
+    for (mut uint32 i = 0; i < PAGE_ENTRY_COUNT; i += 1) {
+        if ((table[i] & PTE_PRESENT) != 0) {
+            empty = false;
+            break;
+        }
+    }
+
+    if (empty) {
+        directory[directory_index(virtual_address)] = 0;
+
+        pmm::free(PageEntry.frame(pde));
+    }
 
     return (PageEntry)pte;
 }
@@ -363,6 +379,33 @@ fn (PageEntry | VmmError) kernel_unmap(uint32 virtual_address) {
         }
 
         none: return VmmError::NotMapped;
+    }
+}
+
+@export
+fn (uint32 | VmmError) kernel_unmap_physical(uint32 virtual_address) {
+    match (kernel_unmap(virtual_address)) {
+        PageEntry entry: return PageEntry.frame(entry);
+        VmmError error: return error;
+    }
+}
+
+@export
+fn bool kernel_unmap_checked(uint32 virtual_address, uint32 physical_address) {
+    if (virtual_address < KERNEL_BASE || kernel_space.directory_phys == 0 || kernel_space.asid != 0 || (virtual_address & PAGE_MASK) != 0)
+        return false;
+
+    match (kernel_space.lookup(virtual_address)) {
+        PageEntry mapped: {
+            if (PageEntry.frame(mapped) != physical_address)
+                return false;
+        }
+        none: return false;
+    }
+
+    match (kernel_unmap(virtual_address)) {
+        PageEntry entry: return PageEntry.frame(entry) == physical_address;
+        _: return false;
     }
 }
 

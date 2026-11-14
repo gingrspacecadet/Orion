@@ -5,6 +5,8 @@ include mem;
 include pmm;
 include vmm;
 include pcu;
+include lib::alloc : alloc;
+include drivers::uart : uart;
 
 @extern none *__bss_start;
 @extern none *__bss_end;
@@ -18,16 +20,26 @@ fn uint32 main() {
     clear_bss();
 
     pmm::init();
-
     pcu::init();
-
     vmm::init();
+    alloc::init();
     ihvt::init();
     timer::init();
 
     vmm::enable_translation();
     cpu::enable_ints();
 
-    while (timer::get_ticks() < 100) {}
-    return 67;
+    mut uint32 *? t = (uint32 *?)alloc::alloc(#sizeof(uint32));
+    if (t != null) {
+        *t = 0x69;
+    }
+
+    uart::putc('A');
+    uart::putc('\n');
+
+    if (t != null) {
+        return *t;
+    } else {
+        return 0x42;
+    }
 }
