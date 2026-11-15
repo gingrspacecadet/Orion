@@ -84,12 +84,12 @@ fn none rollback_growth(uint32 virtual_address, uint32 mapped_pages) {
 
         match (vmm::kernel_unmap_physical(address)) {
             uint32 frame: physical = frame;
-            _: cpu::halt();
+            _: panic("Failed to unmap page");
         }
 
         match (pmm::free(physical)) {
             none: {}
-            _: cpu::halt();
+            _: panic("Failed to free page");
         }
     }
 }
@@ -137,7 +137,7 @@ fn uint8 map_growth(uint32 virtual_address, uint32 size) {
                 // The failed mapping did not consume this physical page.
                 match (pmm::free(physical)) {
                     none: {}
-                    _: cpu::halt();
+                    _: panic("Failed to free page");
                 }
 
                 rollback_growth(virtual_address, mapped_pages);

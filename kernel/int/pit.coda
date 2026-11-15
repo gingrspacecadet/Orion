@@ -8,18 +8,18 @@ mut uint32 ticks;
 
 fn none pit_irq_handler() {
     tick();
-    io::write32(0x00010500, 0x14, 1); // acknowledge interrupt
-    io::write32(0x00010400, 0x4C, 0); // EOI
+    io::write32((uint32 *)0x00010500, 0x14, 1); // acknowledge interrupt
+    io::write32((uint32 *)0x00010400, 0x4C, 0); // EOI
 }
 
 @export
 fn none init() {
     // pit has irq 0, vector 0x20
-    uint32 icu = 0x00010400;
+    uint32 *icu = (uint32 *)0x00010400;
     io::write8(icu, 0x2C, 0x20);
     io::write32(icu, 0x08, (uint32)~1);
 
-    uint32 pit = 0x00010500;
+    uint32 *pit = (uint32 *)0x00010500;
     io::write32(pit, 0x00, 0); // Disable timer
     io::write32(pit, 0x04, 10_000_000); // 10ms
     io::write32(pit, 0x08, 0);
@@ -31,7 +31,7 @@ fn none init() {
     irq::enable(0);
     irq::register(fn none () {
         tick();
-        io::write32(0x00010500, 0x14, 1); // acknowledge interrupt
+        io::write32((uint32 *)0x00010500, 0x14, 1); // acknowledge interrupt
     }, 0, 0x20);
 }
 

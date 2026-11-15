@@ -3,6 +3,7 @@
 CC := gcc
 CFLAGS := -O2 -ggdb -MMD -MP -Wall -Wextra -Werror -Wno-unused -Iinclude -std=gnu11
 LDFLAGS :=
+CODAFLAGS := --target orion
 
 BUILD := build
 
@@ -35,7 +36,7 @@ $(BUILD)/frag/%.s.o: %.s $(BUILD)/asm
 
 $(BUILD)/frag/%.coda.s: %.coda
 	@mkdir -p "$(dir $@)"
-	$(CODAC) --target orion $< -o $@
+	$(CODAC) $(CODAFLAGS) $< -o $@ $(if $(wildcard $(firstword $(subst /, ,$<))),--include prelude:_)
 
 $(BUILD)/frag/%.coda.o: $(BUILD)/frag/%.coda.s $(BUILD)/asm
 	@mkdir -p "$(dir $@)"

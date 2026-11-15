@@ -22,7 +22,7 @@ fn none putc(uint8 c) {
     if (base == 0)
         return;
     
-    io::write8(base, 0, c);
+    io::write8((uint32 *)base, 0, c);
 }
 
 @export

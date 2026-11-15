@@ -4,6 +4,7 @@ include pmm;
 include mem;
 include cpu;
 include io;
+include prelude : _;
 
 uint32 PAGE_SIZE = 4096;
 uint32 PAGE_SHIFT = 12;
@@ -44,10 +45,8 @@ mut AddressSpace kernel_space;
 mut bool vm_active = false;
 
 fn mut uint32 *page_table_ptr(uint32 physical, bool force_physical = false) {
-    if (physical < KERNEL_DIRECT_MAP_PHYS_BASE ||
-        (physical & PAGE_MASK) != 0 ||
-        physical >= KERNEL_DIRECT_MAP_LIMIT)
-        cpu::halt();
+    if (physical < KERNEL_DIRECT_MAP_PHYS_BASE || (physical & PAGE_MASK) != 0 || physical >= KERNEL_DIRECT_MAP_LIMIT)
+        panic("Cannot access page table");
 
     if (vm_active && !force_physical)
         return (uint32 *)(KERNEL_BASE + physical);
@@ -267,9 +266,9 @@ fn none tlb_invalidate_page(uint32 virtual_address) {
     uint32 vpn = virtual_address & PAGE_FRAME_MASK;
 
     for (mut uint32 i = 0; i < 32; i += 1) {
-        mtu[1] = i;
+        io::write32(mtu, 1, i);
 
-        uint32 hi = mtu[2];
+        uint32 hi = io::read32(mtu, 2);
 
         if ((hi & 1) == 0)
             continue;
@@ -277,7 +276,7 @@ fn none tlb_invalidate_page(uint32 virtual_address) {
         if ((hi & PAGE_FRAME_MASK) != vpn)
             continue;
 
-        mtu[2] = hi & ~1;
+        io::write32(mtu, 2, hi & ~1);
     }
 }
 
@@ -287,9 +286,9 @@ fn none tlb_invalidate(uint32 asid, uint32 virtual_address) {
     uint32 vpn = virtual_address & PAGE_FRAME_MASK;
 
     for (mut uint32 i = 0; i < 32; i += 1) {
-        mtu[1] = i;
+        io::write32(mtu, 1, i);
 
-        uint32 hi = mtu[2];
+        uint32 hi = io::read32(mtu, 2);
 
         if ((hi & 1) == 0)
             continue;
@@ -301,7 +300,7 @@ fn none tlb_invalidate(uint32 asid, uint32 virtual_address) {
             continue;
 
         // clear the valid bit.
-        mtu[2] = hi & ~1;
+        io::write32(mtu, 2, hi & ~1);
     }
 }
 
@@ -413,9 +412,9 @@ fn none tlb_invalidate_asid(uint32 asid) {
     mut uint32 *mtu = (mut uint32 *)0x00010600;
 
     for (mut uint32 i = 0; i < 32; i += 1) {
-        mtu[1] = i;
+        io::write32(mtu, 1, i);
 
-        uint32 hi = mtu[2];
+        uint32 hi = io::read32(mtu, 2);
 
         if ((hi & 1) == 0)
             continue;
@@ -425,7 +424,7 @@ fn none tlb_invalidate_asid(uint32 asid) {
         if (entry_asid != asid)
             continue;
 
-        mtu[2] = hi & ~1;
+        io::write32(mtu, 2, hi & ~1);
     }
 }
 
@@ -448,14 +447,10 @@ fn (uint32 | VmmError) tlb_install(uint32 asid, uint32 virtual_address, PageEntr
 
     uint32 lo = entry & PTE_TLB_MASK;
 
-    // select the replacement slot,
-    // invalidate the old entry,
-    // write the physical frame and permissions, and
-    // commit the new entry by setting V last.
-    mtu[1] = slot;
-    mtu[2] = 0;
-    mtu[3] = lo;
-    mtu[2] = hi;
+    io::write32(mtu, 0x04, slot);
+    io::write32(mtu, 0x08, 0);
+    io::write32(mtu, 0x0C, lo);
+    io::write32(mtu, 0x08, hi);
 
     tlb_next_slot = (slot + 1) & 31;
 
@@ -467,25 +462,25 @@ mut AddressSpace active_space;
 @export
 fn none activate(AddressSpace space) {
     if (space.directory_phys == 0 || space.asid == 0 || space.asid >= ASID_COUNT || !asid_is_allocated(space.asid))
-        cpu::halt();
+        panic("Cannot activate invalid address space");
 
     if (active_space.directory_phys != 0) {
         if (active_space.asid == space.asid && active_space.directory_phys != space.directory_phys)
-            cpu::halt();
+            panic("Cannot reactivate current address space");
 
         if (active_space.directory_phys == space.directory_phys && active_space.asid != space.asid)
-            cpu::halt();
+            panic("Cannot reactivate current address space");
     }
 
     active_space = space;
-    io::write32(0x00010600, 0x10, space.asid);
+    io::write32((uint32 *)0x00010600, 0x10, space.asid);
 }
 
 @export
 fn (uint32 | VmmError) refill() {
-    uint32 address = io::read32(0x00010600, 0x00);
-    uint32 status  = io::read32(0x00010600, 0x14);
-    uint32 asid    = io::read32(0x00010600, 0x10);
+    uint32 address = io::read32((uint32 *)0x00010600, 0x00);
+    uint32 status  = io::read32((uint32 *)0x00010600, 0x14);
+    uint32 asid    = io::read32((uint32 *)0x00010600, 0x10);
 
     if ((status & 0x1C) != 0)
         return VmmError::InvalidFault;
@@ -604,8 +599,8 @@ fn (none | AsidError) release_asid(uint32 id) {
 
 fn none tlb_invalidate_all() {
     for (mut uint32 i = 0; i < 32; i += 1) {
-        io::write32(0x00010600, 0x04, i);
-        io::write32(0x00010600, 0x08, 0);
+        io::write32((uint32 *)0x00010600, 0x04, i);
+        io::write32((uint32 *)0x00010600, 0x08, 0);
     }
 }
 
@@ -655,13 +650,13 @@ fn none build_direct_map() {
         uint32 pde_index = directory_index(virtual_address);
 
         if ((directory[pde_index] & PDE_PRESENT) != 0)
-            cpu::halt();
+            panic("Cannot access non-present page");
 
         mut uint32 table_phys = 0;
 
         match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
             uint32 address: table_phys = address;
-            none: cpu::halt();
+            none: panic("Failed to map address table");
         }
 
         mem::set((none *)page_table_ptr(table_phys), 0, PAGE_SIZE);
@@ -684,7 +679,7 @@ fn none build_direct_map() {
 @export
 fn none enable_translation() {
     if (kernel_space.directory_phys == 0 || vm_active)
-        cpu::halt();
+        panic("Cannot enable translation with uninitialised kernel space");
 
     cpu::enable_vm();
 
@@ -694,12 +689,12 @@ fn none enable_translation() {
 @export
 fn none init() {
     if (kernel_space.directory_phys != 0)
-        cpu::halt();
+        panic("Cannot re-initialise vmm subsystem");
 
     vm_active = false;
 
     match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
-        none: cpu::halt();
+        none: panic("Failed to allocate kernel space directory");
 
         uint32 address: {
             mem::set((none *)page_table_ptr(address), 0, PAGE_SIZE);
@@ -720,7 +715,7 @@ fn none init() {
     while (page < image_end) {
         match (map_page(&kernel_space, page, page, direct_map_flags(page))) {
             none: {}
-            _: cpu::halt();
+            _: panic("Failed to map kernel image");
         }
 
         page += PAGE_SIZE;
@@ -729,7 +724,7 @@ fn none init() {
     // identity map the system registers and IHVT.
     match (map_page(&kernel_space, 0x00010000, 0x00010000, PTE_WRITABLE)) {
         none: {}
-        _: cpu::halt();
+        _: panic("Failed to map system registers");
     }
 
     // identity map the 64 KiB kernel stack.
@@ -738,10 +733,10 @@ fn none init() {
 
         match (map_page(&kernel_space, page, page, PTE_WRITABLE | PTE_CACHEABLE)) {
             none: {}
-            _: cpu::halt();
+            _: panic("Failed to map the kernel stack");
         }
     }
 
     tlb_invalidate_all();
-    io::write32(0x00010600, 0x10, 0);
+    io::write32((uint32 *)0x00010600, 0x10, 0);
 }

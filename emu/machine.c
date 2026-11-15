@@ -443,7 +443,7 @@ MachineFetchResult machine_fetch32(Machine *machine, uint32_t address) {
 }
 
 bool machine_raise_exception(Machine *machine, uint8_t vector, uint32_t return_pc) {
-    if (vector < 0x20 || vector == 0xFF) {
+    if ((vector < 0x20 || vector == 0xFF) && !(vector == 5 || vector == 6)) {
         fprintf(stderr, "Fault %d raised\n", vector);
         fprintf(stderr, "Offending instruction at 0x%08X\n", machine->cpu.pc);        
     }

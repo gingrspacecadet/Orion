@@ -1,0 +1,4 @@
+module prelude;
+
+@export
+include lib : _;

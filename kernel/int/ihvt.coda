@@ -13,12 +13,12 @@ fn none int_handler(uint8 num, mut uint32 *frame) {
     } else if (num == 0x05 || num == 0x06) {
         match (vmm::refill()) {
             uint32: frame[0] -= 4;
-            _: cpu::halt();
+            _: panic("Unmapped page fault");
         }
 
         return;
     } else {
-        cpu::halt();
+        panic("Unhandled exception");
     }
 }
 

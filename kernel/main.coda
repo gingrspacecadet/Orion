@@ -19,8 +19,9 @@ fn none clear_bss() {
 fn uint32 main() {
     clear_bss();
 
-    pmm::init();
     pcu::init();
+    uart::init();
+    pmm::init();
     vmm::init();
     alloc::init();
     ihvt::init();
@@ -34,11 +35,7 @@ fn uint32 main() {
         *t = 0x69;
     }
 
-    uart::init();
-
-    // uart::putc('A');
-    // uart::putc('\n');
-    uart::puts("Hello, world!\n");
+    panic("Hello, bob!");
 
     if (t != null) {
         return *t;
