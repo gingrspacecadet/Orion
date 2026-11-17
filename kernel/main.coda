@@ -7,6 +7,7 @@ include vmm;
 include pcu;
 include lib::alloc : alloc;
 include drivers::uart : uart;
+include proc;
 
 @extern none *__bss_start;
 @extern none *__bss_end;
@@ -35,7 +36,10 @@ fn uint32 main() {
         *t = 0x69;
     }
 
-    panic("Hello, bob!");
+    uart::puts("Hello, bob!\n");
+
+    proc::Process p = .create().unwrap();
+    // p.load().unwrap();
 
     if (t != null) {
         return *t;

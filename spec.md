@@ -228,9 +228,9 @@ The CPU reset state is deliberately minimal. Before the first instruction fetch:
 - `PC = 0x00001000` (beginning of Boot ROM).
 - `FLAGS = 0x00000002` (`PRV=1`, `IE=0`, `VM=0`, `TM=0`).
 
-All other state that can be left unspecified is unspecified at reset, including the general-purpose registers in both banks, both stack pointers, RAM contents, TLB entries, the current ASID, interrupt-controller state, timer state, peripheral state, and peripheral BAR values. Firmware must initialize every item it relies on.
+All other state that can be left unspecified is unspecified at reset, including the general-purpose registers in both banks, both stack pointers, RAM contents, TLB entries, the current ASID, interrupt-controller state, timer state, peripheral state, and peripheral BAR values. Firmware must initialise every item it relies on.
 
-Fixed system-address decoding takes precedence over peripheral BAR mappings, including at reset. Firmware must initialize `KSR.SP` before code that may take an exception; configure the IHVT and ICU; mask and acknowledge interrupt sources; initialize the MTU and invalidate every TLB entry before enabling `VM`; initialize RAM, stacks, and page tables; configure or unmap BARs; and only then enable the facilities it needs. Implementations must ensure enough private CPU state is initialized to fetch and execute from the reset vector.
+Fixed system-address decoding takes precedence over peripheral BAR mappings, including at reset. Firmware must initialise `KSR.SP` before code that may take an exception; configure the IHVT and ICU; mask and acknowledge interrupt sources; initialise the MTU and invalidate every TLB entry before enabling `VM`; initialise RAM, stacks, and page tables; configure or unmap BARs; and only then enable the facilities it needs. Implementations must ensure enough private CPU state is initialised to fetch and execute from the reset vector.
 
 ---
 
@@ -363,7 +363,7 @@ The IRQ-line field uses the formerly reserved descriptor word so the kernel can 
 
 Implemented BAR component sizes are nonzero powers of two. A nonzero BAR base must be aligned to its component size and the region must not wrap the 32-bit physical address space. A BAR may not overlap a fixed system region or another active BAR. The kernel may place a BAR anywhere else in physical address space, including over the nominal RAM range. While mapped, the device owns that range and the underlying RAM is unavailable; after unmapping, RAM is accessible again if present. The PCU rejects invalid assignments and leaves the previous valid mapping unchanged. A zero BAR unmaps the device.
 
-Fixed system-address decoding takes precedence over BAR decoding, including during reset and firmware initialization. The kernel must not allocate or rely on RAM underneath an active BAR.
+Fixed system-address decoding takes precedence over BAR decoding, including during reset and firmware initialisation. The kernel must not allocate or rely on RAM underneath an active BAR.
 
 ### PCU Device Class IDs
 
@@ -477,7 +477,7 @@ Setting `V=1` commits the entry. Clearing `V` invalidates it. To flush the TLB, 
 
 A TLB miss occurs when translation is enabled and no valid entry matches the requested `VPN` and `ASID`. Instruction-fetch misses raise vector `0x05`; data misses raise vector `0x06`. A valid entry whose permissions deny the access raises Page Fault vector `0x07` instead. The hardware does not refill the TLB automatically.
 
-On a TLB miss, hardware saves the normal exception frame, enters kernel mode, disables maskable interrupts, and sets `TM=1`. While `TM=1`, instruction fetches and all CPU data accesses use physical addresses directly. The refill handler must be at a physical address and the kernel stack used by the handler must be physically accessible; the base design can use an identity-addressed kernel stack in RAM. Firmware and the OS must initialize this stack before enabling virtual memory.
+On a TLB miss, hardware saves the normal exception frame, enters kernel mode, disables maskable interrupts, and sets `TM=1`. While `TM=1`, instruction fetches and all CPU data accesses use physical addresses directly. The refill handler must be at a physical address and the kernel stack used by the handler must be physically accessible; the base design can use an identity-addressed kernel stack in RAM. Firmware and the OS must initialise this stack before enabling virtual memory.
 
 The handler reads `MTU_FAULT_ADDR`, `MTU_FAULT_STATUS`, and `MTU_CURR_ASID`, obtains or constructs the mapping, installs a TLB entry, subtracts four from the saved return PC, and executes `IRET`. Subtracting four is required for instruction-fetch and data misses because the standard synchronous exception convention saves the address after the faulting instruction even though it did not complete. `IRET` restores the pre-miss `FLAGS`, including the former `TM` value.
 
@@ -546,8 +546,10 @@ Lyra's shader ISA, resource model, pipeline, synchronisation, rasterisation, and
 
 ### Calling convention
 
-- Argument registers: `R0..R3`
-- Return register: `R0`
+- Arguments are passed as a stream of 32-bit words in parameter order. Each value is split into consecutive words, least-significant word first; aggregate values are passed by value. Each argument occupies `ceil(size / 4)` words, with no padding inserted between arguments.
+- The first four argument words are passed in `R0..R3`. Remaining words are passed on the stack, with the first stack-passed word at `[SP + 0]` immediately before the call.
+- Results of at most four words are returned in `R0..R3`, with the least-significant word in `R0`. Unused result registers are unspecified. This includes 64-bit scalar results in `R0..R1` and aggregate results up to 16 bytes in `R0..R3`.
+- An aggregate result larger than 16 bytes is returned indirectly. The caller allocates writable storage for the result and passes its address as a hidden first argument in `R0`. The callee writes exactly the result object's bytes to that storage before returning; it does not return the aggregate in registers. Explicit argument words are shifted by one register/word: they begin in `R1`, continue through `R3`, and then spill to the stack.
 - Callee-saved: `R4..R11`
 - Caller-saved/temporaries: `R12..R14`
 
@@ -557,14 +559,15 @@ Lyra's shader ISA, resource model, pipeline, synchronisation, rasterisation, and
 - `SP` points to the next free byte.
 - Word stack operations require 4-byte alignment.
 - Stack is 8-byte aligned immediately before a `CALL` or `CALLR`; after the return address is pushed, the callee initially observes `SP % 8 == 4`.
-- Extra arguments are placed on the stack right-to-left.
+- Stack-passed argument words are laid out in argument order at increasing addresses. The caller reserves enough space, including any padding needed to preserve 8-byte alignment, before the call.
+- When an indirect aggregate result is used, the hidden result pointer occupies the first argument word and counts toward the four argument registers. Stack-passed explicit arguments therefore begin after the first four words of the combined hidden-pointer and explicit-argument sequence.
 - Caller cleans up stack-passed arguments after return.
 
 `CALL` and `CALLR` push `PC + 4`. `RET` pops the saved PC. `PUSH` and `POP`, if provided by an assembler, are pseudo-instructions rather than dedicated CPU opcodes.
 
 ### Function prologue and epilogue
 
-A conventional prologue saves any used callee-saved registers and allocates local storage. Local-size allocation is rounded as needed to maintain the required alignment at call sites.
+A conventional prologue saves any used callee-saved registers and allocates local storage. Local-size allocation is rounded as needed to maintain the required alignment at call sites. A callee using indirect aggregate return preserves the hidden result pointer in its frame for use by every return path. With the standard `R11` frame-pointer layout, `[R11 + 0]` holds the previous `R11`, `[R11 + 4]` holds the return address, and `[R11 + 8]` is the first stack-passed argument word.
 
 The epilogue restores callee-saved registers and executes `RET`.
 
@@ -574,5 +577,5 @@ The epilogue restores callee-saved registers and executes `RET`.
 
 - This document defines the current Orion revision. Backwards compatibility between revisions is not required.
 - Fixed system registers are always decoded ahead of peripheral BAR mappings.
-- Firmware initializes state that is unspecified at reset before relying on it.
+- Firmware initialises state that is unspecified at reset before relying on it.
 - Lyra's detailed graphics architecture remains in `gpu/`; the device register block above is the CPU-visible interface for this revision.

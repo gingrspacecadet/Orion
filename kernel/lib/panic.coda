@@ -3,7 +3,7 @@ module lib;
 include cpu;
 include drivers::uart : uart;
 
-@export
+@export,noreturn
 fn none panic(uint8[] msg) {
     uart::puts("Kernel Panic: ");
     uart::puts(msg);

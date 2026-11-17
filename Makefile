@@ -36,7 +36,7 @@ $(BUILD)/frag/%.s.o: %.s $(BUILD)/asm
 
 $(BUILD)/frag/%.coda.s: %.coda
 	@mkdir -p "$(dir $@)"
-	$(CODAC) $(CODAFLAGS) $< -o $@ $(if $(wildcard $(firstword $(subst /, ,$<))),--include prelude:_)
+	$(CODAC) $(CODAFLAGS) $< -o $@ -I $(firstword $(subst /, ,$<)) $(if $(wildcard $(firstword $(subst /, ,$<))),--include prelude:_)
 
 $(BUILD)/frag/%.coda.o: $(BUILD)/frag/%.coda.s $(BUILD)/asm
 	@mkdir -p "$(dir $@)"

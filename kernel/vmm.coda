@@ -6,6 +6,7 @@ include cpu;
 include io;
 include prelude : _;
 
+@export
 uint32 PAGE_SIZE = 4096;
 uint32 PAGE_SHIFT = 12;
 uint32 PAGE_MASK = 0xFFF;
@@ -17,9 +18,11 @@ uint32 PAGE_FRAME_MASK = 0xFFFFF000;
 
 uint32 PDE_PRESENT = 0x01;
 
+@export
 uint32 PTE_EXECUTABLE = 0x01;
 @export
 uint32 PTE_CACHEABLE = 0x02;
+@export
 uint32 PTE_USER = 0x04;
 @export
 uint32 PTE_WRITABLE = 0x08;
@@ -35,7 +38,9 @@ type AddressSpace = struct {
     uint32 asid;
 };
 
+@export
 uint32 KERNEL_BASE = 0xC0000000;
+@export
 uint32 KERNEL_DIRECT_MAP_LIMIT = 0x01000000;
 uint32 KERNEL_PDE_INDEX = 768;
 uint32 KERNEL_DIRECT_MAP_PHYS_BASE = 0x00020000;
@@ -100,6 +105,7 @@ fn (PageEntry | none) AddressSpace.lookup_phys(AddressSpace space, uint32 addres
     return space.lookup_impl(address, true);
 }
 
+@export
 fn (AddressSpace | none) AddressSpace.create() {
     match (pmm::alloc_below(KERNEL_DIRECT_MAP_LIMIT)) {
         uint32 address: {
@@ -124,6 +130,7 @@ fn (AddressSpace | none) AddressSpace.create() {
     }
 }
 
+@export
 type VmmError = enum {
     OutOfMemory,
     MisalignedAddress,
@@ -137,6 +144,7 @@ type VmmError = enum {
     InvalidAsid,
     InvalidFault,
     InvalidVirtualAddress,
+    ReservedVirtualAddress,
 };
 
 @export
@@ -243,6 +251,15 @@ fn (none | VmmError) map_page(mut AddressSpace *space, uint32 virtual_address, u
 fn (none | VmmError) AddressSpace.map(mut AddressSpace *space, uint32 virtual_address, uint32 physical_address, uint32 flags) {
     if (virtual_address >= KERNEL_BASE)
         return VmmError::InvalidVirtualAddress;
+
+    // Kernel identity mappings are shared by every address space. Do not
+    // allow a user address space to install a private mapping over one.
+    if ((virtual_address & PAGE_MASK) == 0 && kernel_space.directory_phys != 0) {
+        match (kernel_space.lookup_phys(virtual_address)) {
+            PageEntry _: return VmmError::ReservedVirtualAddress;
+            none: {}
+        }
+    }
 
     return map_page(space, virtual_address, physical_address, flags);
 }
@@ -357,6 +374,14 @@ fn (PageEntry | VmmError) AddressSpace.unmap(mut AddressSpace *space, uint32 vir
         }
 
         none: return VmmError::NotMapped;
+    }
+}
+
+@export
+fn (uint32 | VmmError) AddressSpace.unmap_physical(mut AddressSpace *space, uint32 virtual_address) {
+    match (AddressSpace.unmap(space, virtual_address)) {
+        PageEntry entry: return PageEntry.frame(entry);
+        VmmError error: return error;
     }
 }
 
@@ -524,7 +549,24 @@ fn (uint32 | VmmError) refill() {
 
     match (active_space.lookup_phys(address)) {
         PageEntry entry: return tlb_install(asid, address, entry);
-        none: return VmmError::NotMapped;
+        none: {
+            // Kernel identity mappings below KERNEL_BASE are shared with
+            // every address space. Install them under the current ASID so
+            // supervisor code can execute while a process is active
+            if (kernel_space.directory_phys == 0)
+                return VmmError::InvalidAddressSpace;
+
+            match (kernel_space.lookup_phys(address)) {
+                PageEntry entry: {
+                    // Shared kernel mappings must never grant user access
+                    if ((entry & PTE_USER) != 0)
+                        return VmmError::InvalidFlags;
+
+                    return tlb_install(asid, address, entry);
+                }
+                none: return VmmError::NotMapped;
+            }
+        }
     }
 }
 
