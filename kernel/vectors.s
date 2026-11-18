@@ -3,10 +3,17 @@
 enable_ints:
     flagsw #0x7
     ret
+
 .global enable_vm
 enable_vm:
     flagsw #0x6
     ret
+
+.global enter_user
+enter_user:
+    push r1
+    push r0
+    iret
 
 ; TODO: no need to save when coming from user mode
 __int_common:

@@ -2,7 +2,11 @@ module proc;
 
 include vmm;
 include pmm;
+include io;
 include lib::alloc : lib;
+
+@extern
+fn none enter_user(uint32 pc, uint32 flags);
 
 type ProcessState = enum {
     Created,
@@ -231,4 +235,28 @@ fn (none | ProcessError) Process.load(mut Process *process, uint8[] program, uin
     process.state = ProcessState::Ready;
 
     return;
+}
+
+@export
+fn none Process.start(mut Process *process) {
+    if (process.state != ProcessState::Ready)
+        panic("Cannot start a process that is not ready");
+
+    uint32 pc = process.user_context.pc;
+    uint32 flags = process.user_context.flags;
+
+    // Restore the inactive user register bank before changing ASIDs
+    mut uint32 *mtu = (mut uint32 *)0x00010600;
+
+    for (mut uint32 i = 0; i < 16; i += 1) {
+        io::write32(mtu, 0x40 + i * 4, process.user_context.registers[i]);
+    }
+
+    process.state = ProcessState::Running;
+
+    vmm::activate(process.address_space);
+
+    enter_user(pc, flags);
+
+    panic("User-mode entry unexpectedly returned");
 }

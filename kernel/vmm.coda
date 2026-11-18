@@ -44,6 +44,10 @@ uint32 KERNEL_BASE = 0xC0000000;
 uint32 KERNEL_DIRECT_MAP_LIMIT = 0x01000000;
 uint32 KERNEL_PDE_INDEX = 768;
 uint32 KERNEL_DIRECT_MAP_PHYS_BASE = 0x00020000;
+uint32 KERNEL_STACK_BASE = 0xFFFF0000;
+uint32 KERNEL_STACK_PAGE_COUNT = 16;
+uint32 TLB_RESERVED_SLOT_COUNT = KERNEL_STACK_PAGE_COUNT;
+uint32 TLB_DYNAMIC_FIRST_SLOT = TLB_RESERVED_SLOT_COUNT;
 
 mut AddressSpace kernel_space;
 
@@ -255,7 +259,7 @@ fn (none | VmmError) AddressSpace.map(mut AddressSpace *space, uint32 virtual_ad
     // Kernel identity mappings are shared by every address space. Do not
     // allow a user address space to install a private mapping over one.
     if ((virtual_address & PAGE_MASK) == 0 && kernel_space.directory_phys != 0) {
-        match (kernel_space.lookup_phys(virtual_address)) {
+        match (kernel_space.lookup(virtual_address)) {
             PageEntry _: return VmmError::ReservedVirtualAddress;
             none: {}
         }
@@ -386,6 +390,14 @@ fn (uint32 | VmmError) AddressSpace.unmap_physical(mut AddressSpace *space, uint
 }
 
 @export
+fn (uint32 | VmmError) AddressSpace.lookup_entry(AddressSpace space, uint32 virtual_address) {
+    match (space.lookup(virtual_address)) {
+        PageEntry entry: return (uint32)entry;
+        none: return VmmError::NotMapped;
+    }
+}
+
+@export
 fn (PageEntry | VmmError) kernel_unmap(uint32 virtual_address) {
     if (virtual_address < KERNEL_BASE)
         return VmmError::InvalidVirtualAddress;
@@ -453,18 +465,10 @@ fn none tlb_invalidate_asid(uint32 asid) {
     }
 }
 
-mut uint32 tlb_next_slot = 0;
+mut uint32 tlb_next_slot = TLB_DYNAMIC_FIRST_SLOT;
 
-fn (uint32 | VmmError) tlb_install(uint32 asid, uint32 virtual_address, PageEntry entry) {
-    if (asid > 0x3FF)
-        return VmmError::InvalidAsid;
-
-    if ((entry & PTE_PRESENT) == 0)
-        return VmmError::NotMapped;
-
+fn none tlb_write_slot(uint32 slot, uint32 asid, uint32 virtual_address, PageEntry entry) {
     mut uint32 *mtu = (mut uint32 *)0x00010600;
-
-    uint32 slot = tlb_next_slot;
 
     uint32 hi = (virtual_address & PAGE_FRAME_MASK)
               | (asid << 2)
@@ -476,8 +480,44 @@ fn (uint32 | VmmError) tlb_install(uint32 asid, uint32 virtual_address, PageEntr
     io::write32(mtu, 0x08, 0);
     io::write32(mtu, 0x0C, lo);
     io::write32(mtu, 0x08, hi);
+}
 
-    tlb_next_slot = (slot + 1) & 31;
+fn none tlb_reserve_kernel_stack(uint32 asid) {
+    if (asid >= ASID_COUNT)
+        panic("Invalid ASID for kernel stack reservation");
+
+    for (mut uint32 i = 0; i < KERNEL_STACK_PAGE_COUNT; i += 1) {
+        uint32 address = KERNEL_STACK_BASE + i * PAGE_SIZE;
+
+        match (kernel_space.lookup(address)) {
+            PageEntry entry: {
+                if ((entry & PTE_PRESENT) == 0 ||
+                    (entry & PTE_WRITABLE) == 0 ||
+                    (entry & PTE_USER) != 0)
+                    panic("Invalid kernel-stack mapping");
+
+                tlb_write_slot(i, asid, address, entry);
+            }
+
+            none: panic("Kernel-stack page is not mapped");
+        }
+    }
+}
+
+fn (uint32 | VmmError) tlb_install(uint32 asid, uint32 virtual_address, PageEntry entry) {
+    if (asid > 0x3FF)
+        return VmmError::InvalidAsid;
+
+    if ((entry & PTE_PRESENT) == 0)
+        return VmmError::NotMapped;
+
+    uint32 slot = tlb_next_slot;
+
+    tlb_write_slot(slot, asid, virtual_address, entry);
+
+    tlb_next_slot += 1;
+    if (tlb_next_slot == 32)
+        tlb_next_slot = TLB_DYNAMIC_FIRST_SLOT;
 
     return slot;
 }
@@ -496,6 +536,8 @@ fn none activate(AddressSpace space) {
         if (active_space.directory_phys == space.directory_phys && active_space.asid != space.asid)
             panic("Cannot reactivate current address space");
     }
+
+    tlb_reserve_kernel_stack(space.asid);
 
     active_space = space;
     io::write32((uint32 *)0x00010600, 0x10, space.asid);
@@ -770,8 +812,8 @@ fn none init() {
     }
 
     // identity map the 64 KiB kernel stack.
-    for (mut uint32 i = 0; i < 16; i += 1) {
-        page = 0xFFFF0000 + i * PAGE_SIZE;
+    for (mut uint32 i = 0; i < KERNEL_STACK_PAGE_COUNT; i += 1) {
+        page = KERNEL_STACK_BASE + i * PAGE_SIZE;
 
         match (map_page(&kernel_space, page, page, PTE_WRITABLE | PTE_CACHEABLE)) {
             none: {}
@@ -780,5 +822,6 @@ fn none init() {
     }
 
     tlb_invalidate_all();
+    tlb_reserve_kernel_stack(0);
     io::write32((uint32 *)0x00010600, 0x10, 0);
 }

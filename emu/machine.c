@@ -307,6 +307,12 @@ bool machine_step(Machine *machine) {
             break;
         }
 
+        case OP_SYSCALL: {
+            machine_raise_exception(machine, SYSCALL, NEXT_INSTR);
+            advance = false;
+            break;
+        }
+
         default: {
             fprintf(stderr, "Unknown opcode 0x%X!\n", OPCODE(word));
             exit(1);

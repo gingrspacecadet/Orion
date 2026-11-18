@@ -2,6 +2,7 @@ module int::ihvt;
 
 include int::timer : timer;
 include int::irq : irq;
+include drivers::uart : uart;
 include vmm;
 include cpu;
 include io;
@@ -15,11 +16,13 @@ fn none int_handler(uint8 num, mut uint32 *frame) {
             uint32: frame[0] -= 4;
             _: panic("Unmapped page fault");
         }
-
-        return;
+    } else if (num == 0x08) {
+        uart::puts("User syscall reached\n");
     } else {
         panic("Unhandled exception");
     }
+
+    return;
 }
 
 @extern none *__ihvt_start;

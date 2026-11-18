@@ -16,6 +16,25 @@ fn none clear_bss() {
     mem::set(__bss_start, 0, __bss_end - __bss_start);
 }
 
+fn none print_hex(uint32 value) {
+    for (mut uint32 i = 0; i < 8; i += 1) {
+        uint32 nibble = (value >> (28 - i * 4)) & 0xF;
+
+        if (nibble < 10)
+            uart::putc((uint8)('0' + nibble));
+        else
+            uart::putc((uint8)('A' + nibble - 10));
+    }
+}
+
+@extern uint32 __exe_end;
+
+uint32[3] user_words = {
+    0x080000A8,
+    0x8C000000,
+    0x47FFFFFF,
+};
+
 @export
 fn uint32 main() {
     clear_bss();
@@ -29,21 +48,29 @@ fn uint32 main() {
     timer::init();
 
     vmm::enable_translation();
-    cpu::enable_ints();
-
-    mut uint32 *? t = (uint32 *?)alloc::alloc(#sizeof(uint32));
-    if (t != null) {
-        *t = 0x69;
-    }
 
     uart::puts("Hello, bob!\n");
 
-    proc::Process p = .create().unwrap();
-    // p.load().unwrap();
+    uart::puts("Creating process\n");
+    mut proc::Process process = proc::Process.create().unwrap();
 
-    if (t != null) {
-        return *t;
-    } else {
-        return 0x42;
-    }
+    uint8[] user_image = {
+        .len = 12,
+        .ptr = (uint8 *)&user_words[0],
+    };
+
+    uart::puts("Loading process\n");
+    uart::puts("Image pointer: 0x");
+    print_hex((uint32)user_image.ptr);
+
+    uart::puts("\nKernel image end: 0x");
+    print_hex(__exe_end);
+
+    uart::putc('\n');
+    process.load(user_image, 0).unwrap();
+
+    uart::puts("Starting first user process\n");
+    process.start();
+
+    return 0;
 }
