@@ -8,6 +8,7 @@ include pcu;
 include lib::alloc : alloc;
 include drivers::uart : uart;
 include proc;
+include proc::sched;
 
 @extern none *__bss_start;
 @extern none *__bss_end;
@@ -51,26 +52,30 @@ fn uint32 main() {
 
     uart::puts("Hello, bob!\n");
 
-    uart::puts("Creating process\n");
-    mut proc::Process process = proc::Process.create().unwrap();
+    uart::puts("Creating processes\n");
+
+    mut proc::Process first = proc::Process.create().unwrap();
+    mut proc::Process second = proc::Process.create().unwrap();
 
     uint8[] user_image = {
         .len = 12,
         .ptr = (uint8 *)&user_words[0],
     };
 
-    uart::puts("Loading process\n");
-    uart::puts("Image pointer: 0x");
-    print_hex((uint32)user_image.ptr);
+    uart::puts("Loading first process\n");
+    first.load(user_image, 0).unwrap();
 
-    uart::puts("\nKernel image end: 0x");
-    print_hex(__exe_end);
+    uart::puts("Loading second process\n");
+    second.load(user_image, 0).unwrap();
 
-    uart::putc('\n');
-    process.load(user_image, 0).unwrap();
+    if (!proc::sched::add(&first))
+        panic("Failed to register first process");
 
-    uart::puts("Starting first user process\n");
-    process.start();
+    if (!proc::sched::add(&second))
+        panic("Failed to register second process");
+
+    uart::puts("Starting scheduler\n");
+    proc::sched::start();
 
     return 0;
 }

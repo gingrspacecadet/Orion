@@ -8,6 +8,7 @@ include lib::alloc : lib;
 @extern
 fn none enter_user(uint32 pc, uint32 flags);
 
+@export
 type ProcessState = enum {
     Created,
     Ready,

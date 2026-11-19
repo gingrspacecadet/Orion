@@ -1,0 +1,113 @@
+module proc::sched;
+
+include proc : _;
+include io;
+include vmm;
+
+mut Process[16] processes;
+mut uint32 count = 0;
+mut uint32 current_proc = 0;
+mut bool active = false;
+
+@export
+fn bool add(mut Process *process) {
+    if (active || count >= 16)
+        return false;
+
+    if (process.state != ProcessState::Ready)
+        return false;
+
+    for (mut uint32 i = 0; i < count; i += 1) {
+        if (processes[i].pid == process.pid)
+            return false;
+    }
+
+    processes[count] = *process;
+    count += 1;
+    return true;
+}
+
+@export
+fn none schedule(mut uint32 *frame) {
+    if (!active || count == 0)
+        panic("Scheduler is not active");
+
+    mut Process *current = &processes[current_proc];
+
+    if (current.state != ProcessState::Running)
+        panic("Current process is not running");
+
+    mut uint32 *mtu = (mut uint32 *)0x10600;
+
+    for (mut uint32 i = 0; i < 16; i += 1) {
+        current.user_context.registers[i] = io::read32(mtu, 0x40 + i * 4);
+    }
+
+    current.user_context.pc = frame[0];
+    current.user_context.flags = frame[1];
+
+    current.state = ProcessState::Ready;
+
+    mut uint32 next_index = current_proc;
+    mut bool found = false;
+
+    for (mut uint32 step = 1; step <= count; step += 1) {
+        mut uint32 candidate = current_proc + step;
+
+        if (candidate >= count)
+            candidate -= count;
+
+        if (processes[candidate].state == ProcessState::Ready) {
+            next_index = candidate;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        panic("No runnable processes");
+
+    mut Process *next = &processes[next_index];
+
+    for (mut uint32 i = 0; i < 16; i += 1) {
+        io::write32(mtu, 0x40 + i * 4, next.user_context.registers[i]);
+    }
+
+    frame[0] = next.user_context.pc;
+    frame[1] = next.user_context.flags;
+
+    vmm::activate(next.address_space);
+
+    next.state = ProcessState::Running;
+    current_proc = next_index;
+}
+
+@export
+fn none start() {
+    if (active)
+        panic("Scheduler already active");
+
+    if (count == 0)
+        panic("No processes registered");
+
+    mut uint32 first = 0;
+    mut bool found = false;
+
+    for (mut uint32 i = 0; i < count; i += 1) {
+        if (processes[i].state == ProcessState::Ready) {
+            first = i;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        panic("No ready processes");
+
+    current_proc = first;
+    active = true;
+
+    processes[current_proc].start();
+
+    panic("Initial process unexpectedly returned");
+}
