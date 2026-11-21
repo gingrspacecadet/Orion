@@ -111,3 +111,8 @@ fn none start() {
 
     panic("Initial process unexpectedly returned");
 }
+
+@export
+fn Process *get_active() {
+    return &processes[current_proc];
+}

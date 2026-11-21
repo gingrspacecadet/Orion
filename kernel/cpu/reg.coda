@@ -1,0 +1,17 @@
+module cpu;
+
+include io;
+
+@export
+fn uint32 get_user_reg(uint8 id) {
+    mut uint32 *mtu = (mut uint32 *)0x10600;
+
+    return io::read32(mtu, 0x40 + id * 4);
+}
+
+@export
+fn none set_user_reg(uint8 id, uint32 val) {
+    mut uint32 *mtu = (mut uint32 *)0x10600;
+
+    io::write32(mtu, 0x40 + id * 4, val);
+}

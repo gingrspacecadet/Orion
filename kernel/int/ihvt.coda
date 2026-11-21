@@ -7,6 +7,7 @@ include vmm;
 include cpu;
 include io;
 include proc::sched : sched;
+include syscall;
 
 @export
 fn none int_handler(uint8 num, mut uint32 *frame) {
@@ -20,6 +21,7 @@ fn none int_handler(uint8 num, mut uint32 *frame) {
     } else if (num == 0x08) {
         uart::puts("User syscall reached\n");
         sched::schedule(frame);
+        // syscall::dispatch(frame);
     } else {
         panic("Unhandled exception");
     }

@@ -1,0 +1,38 @@
+module syscall;
+
+include cpu;
+include proc::sched : sched;
+include proc;
+include drivers::uart : uart;
+
+fn none print_hex(uint32 value) {
+    for (mut uint32 i = 0; i < 8; i += 1) {
+        uint32 nibble = (value >> (28 - i * 4)) & 0xF;
+
+        if (nibble < 10)
+            uart::putc((uint8)('0' + nibble));
+        else
+            uart::putc((uint8)('A' + nibble - 10));
+    }
+}
+
+@export
+fn none dispatch(mut uint32 *frame) {
+    uint32 num = cpu::get_user_reg(0);
+
+    uart::puts("Received syscall ");
+    print_hex(num);
+    uart::putc('\n');
+
+    if (num == 0) {
+        sched::schedule(frame);
+    } else if (num == 1) {
+        mut proc::Process *p = sched::get_active();
+        p.exit_code = cpu::get_user_reg(1);
+        p.state = proc::ProcessState::Exited;
+        sched::schedule(frame);
+    } 
+    // else if (num == 2) {
+    //     uart::puts({.ptr = (uint8 *)cpu::get_user_reg(1), .len = cpu::get_user_reg(2)});
+    // }
+}
