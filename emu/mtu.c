@@ -7,6 +7,9 @@ uint32_t mtu_read(void *state, uint32_t offset, uint8_t size) {
 
     Mtu *mtu = state;
 
+    if (offset >= 0x40 && offset <= 0x7C)
+        return mtu->usr[(offset - 0x40) / 4];
+
     switch (offset) {
         case MTU_FAULT_ADDR: return mtu->fault_address;
         case MTU_CONFIG: return mtu->selected_entry;
@@ -22,6 +25,11 @@ void mtu_write(void *state, uint32_t offset, uint32_t value, uint8_t size) {
     if (size != 4) return;
 
     Mtu *mtu = state;
+
+    if (offset >= 0x40 && offset <= 0x7C) {
+        mtu->usr[(offset - 0x40) / 4] = value;
+        return;
+    }
 
     switch (offset) {
         case MTU_CONFIG: mtu->selected_entry = value & 0x1F; break;

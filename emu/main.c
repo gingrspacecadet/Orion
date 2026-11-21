@@ -91,6 +91,7 @@ int main(int argc, char **argv) {
     }
 
     cpu_reset(&machine.cpu);
+    machine.mtu.usr = machine.cpu.usr;
     machine.icu = (Icu){0};
     Pit pit = {0};
     TimerPool timer_pool = {0};

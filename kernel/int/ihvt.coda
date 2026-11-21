@@ -16,12 +16,34 @@ fn none int_handler(uint8 num, mut uint32 *frame) {
     } else if (num == 0x05 || num == 0x06) {
         match (vmm::refill()) {
             uint32: frame[0] -= 4;
-            _: panic("Unmapped page fault");
+            vmm::VmmError error: {
+                mut uint32 *mtu = (mut uint32 *)0x10600;
+
+                uart::puts("TLB refill failed\n");
+
+                uart::puts("Error: ");
+                uart::putx((uint32)error);
+
+                uart::puts("\nAddress: ");
+                uart::putx(io::read32(mtu, 0x00));
+
+                uart::puts("\nStatus: ");
+                uart::putx(io::read32(mtu, 0x14));
+
+                uart::puts("\nASID: ");
+                uart::putx(io::read32(mtu, 0x10));
+
+                uart::puts("\nFaulting PC: ");
+                uart::putx(frame[0] - 4);
+
+                uart::putc('\n');
+                panic("Unmapped page fault");
+            }
         }
     } else if (num == 0x08) {
         uart::puts("User syscall reached\n");
-        sched::schedule(frame);
-        // syscall::dispatch(frame);
+        // sched::schedule(frame);
+        syscall::dispatch(frame);
     } else {
         panic("Unhandled exception");
     }

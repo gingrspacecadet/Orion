@@ -46,8 +46,7 @@ uint32 KERNEL_PDE_INDEX = 768;
 uint32 KERNEL_DIRECT_MAP_PHYS_BASE = 0x00020000;
 uint32 KERNEL_STACK_BASE = 0xFFFF0000;
 uint32 KERNEL_STACK_PAGE_COUNT = 16;
-uint32 TLB_RESERVED_SLOT_COUNT = KERNEL_STACK_PAGE_COUNT;
-uint32 TLB_DYNAMIC_FIRST_SLOT = TLB_RESERVED_SLOT_COUNT;
+uint32 TLB_DYNAMIC_FIRST_SLOT = 0;
 
 mut AddressSpace kernel_space;
 
@@ -537,8 +536,6 @@ fn none activate(AddressSpace space) {
             panic("Cannot reactivate current address space");
     }
 
-    tlb_reserve_kernel_stack(space.asid);
-
     active_space = space;
     io::write32((uint32 *)0x00010600, 0x10, space.asid);
 }
@@ -571,9 +568,6 @@ fn (uint32 | VmmError) refill() {
 
     // ASID 0 is reserved for the kernel address space.
     if (asid == 0) {
-        if (active_space.directory_phys != 0)
-            return VmmError::InvalidAsid;
-
         if (kernel_space.directory_phys == 0)
             return VmmError::InvalidAddressSpace;
 
@@ -822,6 +816,5 @@ fn none init() {
     }
 
     tlb_invalidate_all();
-    tlb_reserve_kernel_stack(0);
     io::write32((uint32 *)0x00010600, 0x10, 0);
 }

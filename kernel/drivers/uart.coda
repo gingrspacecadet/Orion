@@ -36,3 +36,15 @@ fn none puts(uint8[] s) {
         putc(s.ptr[i]);
     }
 }
+
+@export
+fn none putx(uint32 value) {
+    for (mut uint32 i = 0; i < 8; i += 1) {
+        uint32 nibble = (value >> (28 - i * 4)) & 0xF;
+
+        if (nibble < 10)
+            putc((uint8)('0' + nibble));
+        else
+            putc((uint8)('A' + nibble - 10));
+    }
+}

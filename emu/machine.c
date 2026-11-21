@@ -41,9 +41,15 @@ static inline uint32_t arithmetic_rhs(Machine *machine, uint32_t word) {
 #define set_reg_bank(cpu) \
     cpu.r = (cpu.flags & FLAG_PRV) ? cpu.ksr : cpu.usr;
 
-static inline bool push32(Machine *machine, uint32_t v) {
-    R(RSP) -= 4;
-    return machine_write32(machine, R(RSP), v);
+static inline bool push32(Machine *machine, uint32_t value) {
+    Register *sp = &machine->cpu.r[RSP];
+    uint32_t new_sp = *sp - 4;
+
+    if (!machine_write32(machine, new_sp, value))
+        return false;
+
+    *sp = new_sp;
+    return true;
 }
 
 static inline bool pop32(Machine *machine, uint32_t *v) {
@@ -62,6 +68,7 @@ bool machine_step(Machine *machine) {
     uint32_t word = res.value;
 
     bool advance = true;
+    uint32_t instruction_pc = machine->cpu.pc;
 
     switch (OPCODE(word)) {
         case OP_ADD: {
@@ -193,7 +200,7 @@ bool machine_step(Machine *machine) {
 
         case OP_CALL: {
             int32_t target = machine->cpu.pc + 4 + sign_extend_26(J_DISPLACEMENT(word)) * 4;
-            push32(machine, machine->cpu.pc + 4);
+            if (!push32(machine, machine->cpu.pc + 4)) return false;
             machine->cpu.pc = target;
             advance = false;
             break;
@@ -205,7 +212,7 @@ bool machine_step(Machine *machine) {
                 return false;
             }
 
-            push32(machine, machine->cpu.pc + 4);
+            if (!push32(machine, machine->cpu.pc + 4)) return false;
 
             machine->cpu.pc = R(I_RN(word));
             advance = false;
@@ -292,20 +299,41 @@ bool machine_step(Machine *machine) {
             break;
         }
 
-        case OP_IRET: {
-            if ((machine->cpu.flags & FLAG_PRV) == 0) {
-                machine_raise_exception(machine, PRIV_VIOLATION, NEXT_INSTR);
-                return false;
-            }
+        // case OP_IRET: {
+        //     if ((machine->cpu.flags & FLAG_PRV) == 0) {
+        //         machine_raise_exception(machine, PRIV_VIOLATION, NEXT_INSTR);
+        //         return false;
+        //     }
 
-            if (!pop32(machine, &machine->cpu.pc)) return false;
-            if (!pop32(machine, &machine->cpu.flags)) return false;
-            set_reg_bank(machine->cpu);
+        //     if (!pop32(machine, &machine->cpu.pc)) return false;
+        //     if (!pop32(machine, &machine->cpu.flags)) return false;
+        //     set_reg_bank(machine->cpu);
 
-            advance = false;
+        //     advance = false;
 
-            break;
-        }
+        //     break;
+        // }
+
+case OP_IRET: {
+    if ((machine->cpu.flags & FLAG_PRV) == 0) {
+        machine_raise_exception(machine, PRIV_VIOLATION, NEXT_INSTR);
+        return false;
+    }
+
+    uint32_t stack = R(RSP);
+    uint32_t restored_pc;
+    uint32_t restored_flags;
+
+    if (!pop32(machine, &restored_pc)) return false;
+    if (!pop32(machine, &restored_flags)) return false;
+
+    machine->cpu.pc = restored_pc;
+    machine->cpu.flags = restored_flags;
+    set_reg_bank(machine->cpu);
+
+    advance = false;
+    break;
+}
 
         case OP_SYSCALL: {
             machine_raise_exception(machine, SYSCALL, NEXT_INSTR);
@@ -322,6 +350,30 @@ bool machine_step(Machine *machine) {
     }
 
     if (advance) machine->cpu.pc += 4;
+if (machine->cpu.pc == 0) {
+    fprintf(stderr,
+        "PC BECAME ZERO\n"
+        "Instruction: %08X\n"
+        "Word:        %08X\n"
+        "Opcode:      %u\n"
+        "FLAGS:       %08X\n"
+        "ASID:        %u\n"
+        "KSP:         %08X\n"
+        "USP:         %08X\n"
+        "R11:         %08X\n"
+        "R14:         %08X\n"
+        "R15:         %08X\n",
+        instruction_pc,
+        word,
+        OPCODE(word),
+        machine->cpu.flags,
+        machine->mtu.current_asid,
+        machine->cpu.ksr[15],
+        machine->cpu.usr[15],
+        machine->cpu.r[11],
+        machine->cpu.r[14],
+        machine->cpu.r[15]);
+}
 
     return true;
 }
@@ -437,6 +489,16 @@ MachineFetchResult machine_fetch32(Machine *machine, uint32_t address) {
     uint32_t translated;
     MtuResult res = machine_translate_noexcept(machine, address, INSTR_FETCH, &translated);
     if (res == MTU_MISS) {
+if (address == 0) {
+    fprintf(stderr,
+        "FETCH ZERO: PC=%08X FLAGS=%08X ASID=%u "
+        "KSP=%08X USP=%08X\n",
+        machine->cpu.pc,
+        machine->cpu.flags,
+        machine->mtu.current_asid,
+        machine->cpu.ksr[15],
+        machine->cpu.usr[15]);
+}
         machine_raise_exception(machine, ITLB_MISS, machine->cpu.pc + 4);
         return (MachineFetchResult){.success = false};
     }

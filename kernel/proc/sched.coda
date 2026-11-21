@@ -1,5 +1,7 @@
 module proc::sched;
 
+include drivers::uart : uart;
+
 include proc : _;
 include io;
 include vmm;
@@ -46,7 +48,8 @@ fn none schedule(mut uint32 *frame) {
     current.user_context.pc = frame[0];
     current.user_context.flags = frame[1];
 
-    current.state = ProcessState::Ready;
+    if (current.state == ProcessState::Running)
+        current.state = ProcessState::Ready;
 
     mut uint32 next_index = current_proc;
     mut bool found = false;

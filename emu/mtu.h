@@ -10,6 +10,7 @@ typedef struct {
     uint32_t current_asid;
     uint32_t fault_address;
     uint32_t fault_status;
+    uint32_t *usr;
 } Mtu;
 
 uint32_t mtu_read(void *state, uint32_t offset, uint8_t size);
