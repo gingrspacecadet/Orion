@@ -36,20 +36,24 @@ fn none schedule(mut uint32 *frame) {
 
     mut Process *current = &processes[current_proc];
 
-    if (current.state != ProcessState::Running)
+    bool exiting = current.state == ProcessState::Exited;
+
+    if (current.state != ProcessState::Running && !exiting)
         panic("Current process is not running");
 
     mut uint32 *mtu = (mut uint32 *)0x10600;
 
-    for (mut uint32 i = 0; i < 16; i += 1) {
-        current.user_context.registers[i] = io::read32(mtu, 0x40 + i * 4);
-    }
+    if (!exiting) {
+        for (mut uint32 i = 0; i < 16; i += 1) {
+            current.user_context.registers[i] =
+                io::read32(mtu, 0x40 + i * 4);
+        }
 
-    current.user_context.pc = frame[0];
-    current.user_context.flags = frame[1];
+        current.user_context.pc = frame[0];
+        current.user_context.flags = frame[1];
 
-    if (current.state == ProcessState::Running)
         current.state = ProcessState::Ready;
+    }
 
     mut uint32 next_index = current_proc;
     mut bool found = false;
@@ -83,6 +87,9 @@ fn none schedule(mut uint32 *frame) {
 
     next.state = ProcessState::Running;
     current_proc = next_index;
+
+    if (exiting)
+        current.destroy();
 }
 
 @export

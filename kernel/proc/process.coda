@@ -109,7 +109,6 @@ fn none free_user_frame(uint32 physical_address) {
     }
 }
 
-
 fn none release_user_pages(mut Process *process, uint32 virtual_base, uint32 page_count) {
     for (mut uint32 i = 0; i < page_count; i += 1) {
         uint32 address = virtual_base + i * vmm::PAGE_SIZE;
@@ -260,4 +259,10 @@ fn none Process.start(mut Process *process) {
     enter_user(pc, flags);
 
     panic("User-mode entry unexpectedly returned");
+}
+
+@export
+fn none Process.destroy(mut Process *process) {
+    release_user_pages(process, USER_PROGRAM_BASE, process.program_page_count);
+    release_user_pages(process, USER_STACK_BASE, process.stack_page_count);
 }
