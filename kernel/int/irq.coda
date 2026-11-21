@@ -2,7 +2,7 @@ module int::irq;
 
 include io;
 
-type Handler = fn none ();
+type Handler = fn none (mut uint32 *);
 
 type Mapping = struct {
     Handler handler;
@@ -45,13 +45,13 @@ fn none disable(uint8 number) {
 }
 
 @export
-fn none dispatch(uint8 vector) {
+fn none dispatch(uint8 vector, mut uint32 *frame) {
     for (mut uint32 i = 0; i < 32; i += 1) {
         if (mapping[i].vector != vector)
             continue;
 
         if (mapping[i].handler) {
-            mapping[i].handler();
+            mapping[i].handler(frame);
             eoi(mapping[i].irq);
             return;
         }

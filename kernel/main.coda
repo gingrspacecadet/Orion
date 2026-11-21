@@ -31,7 +31,7 @@ fn none print_hex(uint32 value) {
 @extern uint32 __exe_end;
 
 uint32[3] user_words = {
-    0x08000004,
+    0x080000A8,
     0x8C000000,
     0x47FFFFFF,
 };

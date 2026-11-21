@@ -229,7 +229,7 @@ fn (none | ProcessError) Process.load(mut Process *process, uint8[] program, uin
     process.user_context.registers[15] = USER_STACK_TOP;
     process.user_context.pc = USER_PROGRAM_BASE + entry_point;
 
-    process.user_context.flags = 0x04;
+    process.user_context.flags = 0x05;
 
     process.exit_code = 0;
     process.state = ProcessState::Ready;

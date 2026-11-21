@@ -3,6 +3,8 @@ module int::timer;
 include io;
 include int::irq : irq;
 include cpu;
+include proc::sched : sched;
+
 @export
 mut uint32 ticks;
 
@@ -28,11 +30,13 @@ fn none init() {
     io::write32(pit, 0x00, 0b111); // ENABLE | AUTORELOAD | INT_ENABLE
 
     // set the IRQ0 callback
-    irq::enable(0);
-    irq::register(fn none () {
+    irq::register(fn none (mut uint32 *frame) {
         tick();
         io::write32((uint32 *)0x00010500, 0x14, 1); // acknowledge interrupt
+        
+        sched::schedule(frame);
     }, 0, 0x20);
+    irq::enable(0);
 }
 
 @export

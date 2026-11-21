@@ -32,7 +32,8 @@ fn bool add(mut Process *process) {
 @export
 fn none schedule(mut uint32 *frame) {
     if (!active || count == 0)
-        panic("Scheduler is not active");
+        // panic("Scheduler is not active");
+        return;
 
     mut Process *current = &processes[current_proc];
 
