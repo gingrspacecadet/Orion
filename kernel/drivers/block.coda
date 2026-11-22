@@ -1,0 +1,25 @@
+module drivers::block;
+
+include pcu;
+include io;
+
+mut uint32 base;
+mut uint8 irq;
+
+@export
+fn bool init() {
+    pcu::Device *? dev = pcu::find_device(0x12301010);
+
+    if (dev == null) return false;
+    if (dev.bar == 0 || dev.size != 32) return false;
+
+    base = dev.bar;
+    irq = dev.irq;
+
+    return true;
+}
+
+@export
+fn none read(uint32 lba, uint32 count, mut uint8[] buffer) {
+    
+}

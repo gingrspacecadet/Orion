@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
     Blkdev image = {
         .mmio = &machine.mmio,
         .timer_pool = &timer_pool,
-        .irq = (IrqLine){.pin = UINT32_MAX, .icu = &machine.icu},
+        .irq = icu_get_irq(&machine.icu, 0)},
     };
     
     if (argc == 4) {
