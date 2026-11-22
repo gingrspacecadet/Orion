@@ -22,8 +22,5 @@ fn none dispatch(mut uint32 *frame) {
         sched::schedule(frame);
     } else if (num == 2) {
         uart::puts({.ptr = (uint8 *)cpu::get_user_reg(1), .len = cpu::get_user_reg(2)});
-    } else {
-        // temporary
-        sched::schedule(frame);
     }
 }

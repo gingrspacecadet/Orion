@@ -154,4 +154,15 @@ typedef enum {
 #define MTU_CURR_ASID       0x10
 #define MTU_FAULT_STATUS    0x14
 
+#define BLKDEV_STATUS           0x00
+#define BLKDEV_COMMAND          0x04
+#define BLKDEV_LBA              0x08
+#define BLKDEV_MEM_ADDR         0x0C
+#define BLKDEV_SECTOR_COUNT     0x10
+#define BLKDEV_INTERRUPT_ACK    0x14
+
+#define BLKDEV_STATUS_BUSY          1u << 0
+#define BLKDEV_STATUS_ERROR         1u << 1
+#define BLKDEV_STATUS_IRQ_PENDING   1u << 2
+
 #endif
