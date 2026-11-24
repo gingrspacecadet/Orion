@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (argc == 3) {
+    if (argc >= 3) {
         if (!load_exe(&machine, argv[2])) {
             fprintf(stderr, "Failed to open file %s\n", argv[2]);
             return 1;
@@ -103,14 +103,18 @@ int main(int argc, char **argv) {
     Blkdev image = {
         .mmio = &machine.mmio,
         .timer_pool = &timer_pool,
-        .irq = icu_get_irq(&machine.icu, 0)},
+        .irq = icu_get_irq(&machine.icu, 1),
     };
+
+    bool image_ready = false;
     
     if (argc == 4) {
         if (!blkdev_init(&image, argv[3])) {
-            fprintf(stderr, "Failed to open file %s\n", argv[2]);
+            fprintf(stderr, "Failed to opeen file %s\n", argv[3]);
             return 1;
         }
+
+        image_ready = true;
     }
 
     mmio_add_device(&machine.mmio, (Device){.base_addr = ICU, .size = 80, .state = &machine.icu, .read = icu_read, .write = icu_write});
@@ -121,9 +125,11 @@ int main(int argc, char **argv) {
     mmio_add_device(&machine.mmio, (Device){.size = 1, .write = uart_write});
     pcu_add_device(&pcu, (Descriptor){.id = 0x12305010, .size = 1, .device = &machine.mmio.devices[machine.mmio.device_count - 1], .irq = (IrqLine){.pin = UINT32_MAX}});
 
-    mmio_add_device(&machine.mmio, (Device){.size = 1, .write = blkdev_write, .read = blkdev_read, .state = &image});
-    pcu_add_device(&pcu, (Descriptor){.id = 0x12301010, .size = 32, .device = &machine.mmio.devices[machine.mmio.device_count - 1], .irq = image.irq});
-
+    if (image_ready) {
+        mmio_add_device(&machine.mmio, (Device){.size = 32, .write = blkdev_write, .read = blkdev_read, .state = &image});
+        pcu_add_device(&pcu, (Descriptor){.id = 0x12301010, .size = 32, .device = &machine.mmio.devices[machine.mmio.device_count - 1], .irq = image.irq});
+    }
+    
     Debugger debug;
     debug_init(&debug);
 

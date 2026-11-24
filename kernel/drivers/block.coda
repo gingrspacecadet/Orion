@@ -2,24 +2,259 @@ module drivers::block;
 
 include pcu;
 include io;
+include pmm;
+include vmm;
+include int::irq : irq_ctl;
+
+uint32 REG_STATUS       = 0x00;
+uint32 REG_COMMAND      = 0x04;
+uint32 REG_LBA          = 0x08;
+uint32 REG_MEM_ADDR     = 0x0C;
+uint32 REG_SECTOR_COUNT = 0x10;
+uint32 REG_INTERRUPT_ACK = 0x14;
+
+uint32 STATUS_BUSY        = 1 << 0;
+uint32 STATUS_ERROR       = 1 << 1;
+uint32 STATUS_IRQ_PENDING = 1 << 2;
+
+uint32 COMMAND_READ  = 1;
+uint32 COMMAND_WRITE = 2;
+
+uint32 SECTOR_SIZE = 512;
+
+uint32 DMA_PAGE_COUNT = 16;
+uint32 DMA_MAX_SECTORS = 128;
+
+uint32 DMA_VIRTUAL_BASE = 0xE0000000;
+uint32 BAR_VIRTUAL_BASE = 0xF0000000;
+
+uint32 POLL_LIMIT = 10_000_000;
 
 mut uint32 base;
 mut uint8 irq;
 
+mut uint32 bar_physical;
+mut uint32 dma_physical;
+
+mut bool initialised;
+mut bool in_flight;
+
+@export
+type BlockError = enum {
+    NotInitialised,
+    InvalidCount,
+    InvalidBuffer,
+    RequestTooLarge,
+    LbaOverflow,
+    Busy,
+    Timeout,
+    DeviceError,
+};
+
+fn none release_dma_pages(uint32 physical, uint32 mapped_pages) {
+    for (mut uint32 i = 0; i < mapped_pages; i += 1) {
+        uint32 virtual_address =
+            DMA_VIRTUAL_BASE + i * vmm::PAGE_SIZE;
+
+        uint32 expected_physical =
+            physical + i * vmm::PAGE_SIZE;
+
+        match (vmm::kernel_unmap_physical(virtual_address)) {
+            uint32 actual: {
+                if (actual != expected_physical)
+                    panic("Unexpected DMA physical mapping");
+            }
+
+            _: panic("Failed to unmap DMA page");
+        }
+    }
+
+    match (pmm::free_pages(physical, DMA_PAGE_COUNT)) {
+        none: {}
+        _: panic("Failed to free DMA pages");
+    }
+}
+
+fn none release_bar(uint32 physical) {
+    match (vmm::kernel_unmap_physical(BAR_VIRTUAL_BASE)) {
+        uint32 actual: {
+            if (actual != physical)
+                panic("Unexpected block BAR mapping");
+        }
+
+        _: panic("Failed to unmap block BAR");
+    }
+}
+
 @export
 fn bool init() {
+    if (initialised)
+        return true;
+
     pcu::Device *? dev = pcu::find_device(0x12301010);
 
-    if (dev == null) return false;
-    if (dev.bar == 0 || dev.size != 32) return false;
+    if (dev == null)
+        return false;
 
-    base = dev.bar;
-    irq = dev.irq;
+    if (dev.bar == 0 || dev.size != 32)
+        return false;
+
+    if (dev.irq == 0 || dev.irq >= 32)
+        return false;
+
+    uint32 bar_page = dev.bar & ~(vmm::PAGE_SIZE - 1);
+    uint32 bar_offset = dev.bar & (vmm::PAGE_SIZE - 1);
+
+    if (bar_page == 0 || bar_offset + dev.size > vmm::PAGE_SIZE)
+        return false;
+
+    match (vmm::kernel_map(BAR_VIRTUAL_BASE, bar_page, vmm::PTE_WRITABLE)) {
+        none: {}
+        _: return false;
+    }
+
+    // Allocate a physically contiguous DMA region.
+    mut uint32 dma_address = 0;
+
+    match (pmm::alloc_pages(DMA_PAGE_COUNT)) {
+        uint32 address: dma_address = address;
+
+        none: {
+            release_bar(bar_page);
+            return false;
+        }
+    }
+
+    // Map the contiguous physical allocation into kernel virtual memory.
+    mut uint32 mapped_pages = 0;
+
+    while (mapped_pages < DMA_PAGE_COUNT) {
+        uint32 virtual_address =
+            DMA_VIRTUAL_BASE + mapped_pages * vmm::PAGE_SIZE;
+
+        uint32 physical_address =
+            dma_address + mapped_pages * vmm::PAGE_SIZE;
+
+        match (vmm::kernel_map(virtual_address, physical_address, vmm::PTE_WRITABLE | vmm::PTE_CACHEABLE)) {
+            none: {
+                mapped_pages += 1;
+            }
+
+            _: {
+                release_dma_pages(dma_address, mapped_pages);
+                release_bar(bar_page);
+                return false;
+            }
+        }
+    }
+
+    base = BAR_VIRTUAL_BASE + bar_offset;
+    irq = (uint8)dev.irq;
+
+    bar_physical = bar_page;
+    dma_physical = dma_address;
+
+    irq_ctl::disable(irq);
+
+    in_flight = false;
+    initialised = true;
 
     return true;
 }
 
 @export
-fn none read(uint32 lba, uint32 count, mut uint8[] buffer) {
-    
+fn (none | BlockError) read(uint32 lba, uint32 count, mut uint8[] buffer) {
+    if (!initialised)
+        return BlockError::NotInitialised;
+
+    if (count == 0)
+        return BlockError::InvalidCount;
+
+    if (count > buffer.len / SECTOR_SIZE)
+        return BlockError::InvalidBuffer;
+
+    if (count > DMA_MAX_SECTORS)
+        return BlockError::RequestTooLarge;
+
+    if (count - 1 > 0xFFFFFFFF - lba)
+        return BlockError::LbaOverflow;
+
+    if (in_flight)
+        return BlockError::Busy;
+
+    in_flight = true;
+
+    mut uint32 *regs = (mut uint32 *)base;
+
+    if ((io::read32(regs, REG_STATUS) & STATUS_BUSY) != 0) {
+        in_flight = false;
+        return BlockError::Busy;
+    }
+
+    io::write32(regs, REG_INTERRUPT_ACK, 1);
+
+    io::write32(regs, REG_LBA, lba);
+    io::write32(regs, REG_MEM_ADDR, dma_physical);
+    io::write32(regs, REG_SECTOR_COUNT, count);
+
+    io::write32(regs, REG_COMMAND, COMMAND_READ);
+
+    mut uint32 status = io::read32(regs, REG_STATUS);
+    mut uint32 polls = 0;
+
+    while ((status & STATUS_BUSY) != 0) {
+        if (polls >= POLL_LIMIT) {
+            in_flight = false;
+            return BlockError::Timeout;
+        }
+
+        polls += 1;
+        status = io::read32(regs, REG_STATUS);
+    }
+
+    io::write32(regs, REG_INTERRUPT_ACK, 1);
+
+    if ((status & STATUS_ERROR) != 0) {
+        in_flight = false;
+        return BlockError::DeviceError;
+    }
+
+    mut uint8 *dma = (mut uint8 *)DMA_VIRTUAL_BASE;
+    uint32 byte_count = count * SECTOR_SIZE;
+
+    for (mut uint32 i = 0; i < byte_count; i += 1) {
+        buffer[i] = dma[i];
+    }
+
+    in_flight = false;
+    return;
+}
+
+@export
+fn bool deinit() {
+    if (!initialised)
+        return true;
+
+    if (in_flight)
+        return false;
+
+    mut uint32 *regs = (mut uint32 *)base;
+
+    if ((io::read32(regs, REG_STATUS) & STATUS_BUSY) != 0)
+        return false;
+
+    io::write32(regs, REG_INTERRUPT_ACK, 1);
+    irq_ctl::disable(irq);
+
+    release_dma_pages(dma_physical, DMA_PAGE_COUNT);
+    release_bar(bar_physical);
+
+    base = 0;
+    irq = 0;
+    bar_physical = 0;
+    dma_physical = 0;
+
+    initialised = false;
+
+    return true;
 }

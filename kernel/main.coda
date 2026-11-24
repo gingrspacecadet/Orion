@@ -7,6 +7,7 @@ include vmm;
 include pcu;
 include lib::alloc : alloc;
 include drivers::uart : uart;
+include drivers::block : block;
 include proc;
 include proc::sched;
 
@@ -50,7 +51,17 @@ fn uint32 main() {
 
     vmm::enable_translation();
 
+    if (!block::init())
+        panic("Failed to initialise block device");
+
     uart::puts("Hello, bob!\n");
+
+    uart::puts("Disk driver test\n");
+
+    mut uint8[512] buffer;
+    block::read(0, 1, buffer);
+    uart::puts((uint8[]){.ptr = buffer.ptr, .len = 16});
+    uart::puts("\nDisk driver test complete\n");
 
     uart::puts("Creating processes\n");
 

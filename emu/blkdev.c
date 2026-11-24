@@ -1,4 +1,5 @@
 #include <sys/stat.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
@@ -109,7 +110,7 @@ static bool blkdev_transfer_read(Blkdev *blkdev) {
     uint8_t *buffer = malloc(length);
     if (!buffer) return false;
 
-    if (pread_exact(blkdev->image_fd, buffer, length, offset) != (ssize_t)length) {
+    if (!pread_exact(blkdev->image_fd, buffer, length, offset)) {
         free(buffer);
         return false;
     }
@@ -127,7 +128,7 @@ static bool blkdev_transfer_write(Blkdev *blkdev) {
     uint64_t offset = blkdev->active_lba * UINT64_C(512);
     uint64_t length = blkdev->active_sector_count * UINT64_C(512);
 
-    if (pwrite_exact(blkdev->image_fd, &blkdev->mmio->mem[blkdev->active_mem_addr], length, offset) != (ssize_t)length) return false;
+    if (!pwrite_exact(blkdev->image_fd, &blkdev->mmio->mem[blkdev->active_mem_addr], length, offset)) return false;
 
     return true;
 }
@@ -242,8 +243,10 @@ bool blkdev_init(Blkdev *blkdev, const char *image_path) {
         return false;
 
     int fd = open(image_path, O_RDWR);
-    if (fd < 0)
+    if (fd < 0) {
+        fprintf(stderr, "%s: %s\n", __func__, strerror(errno));
         return false;
+    }
 
     struct stat st;
 

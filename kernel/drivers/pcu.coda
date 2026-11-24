@@ -16,14 +16,16 @@ mut Device[16] devices;
 
 fn none enumerate() {
     for (mut uint8 i = 0; i < 16; i += 1) {
-        uint32 id = io::read32((uint32 *)PCU_ADDR + i * 16, 0x00);
+        uint32 descriptor = PCU_ADDR + (uint32)i * 16;
+
+        uint32 id = io::read32((uint32 *)descriptor, 0x00);
         
         if (id == 0)
             continue;
 
-        uint32 bar = io::read32((uint32 *)PCU_ADDR + i * 16, 0x04);
-        uint32 size = io::read32((uint32 *)PCU_ADDR + i * 16, 0x08);
-        uint32 irq = io::read32((uint32 *)PCU_ADDR + i * 16, 0x0C);
+        uint32 bar = io::read32((uint32 *)descriptor, 0x04);
+        uint32 size = io::read32((uint32 *)descriptor, 0x08);
+        uint32 irq = io::read32((uint32 *)descriptor, 0x0C);
 
         if (size == 0 || ((size & (size - 1)) != 0))
             continue;
@@ -54,10 +56,12 @@ fn none assign_bars() {
             continue;
         }
 
-        io::write32((uint32 *)PCU_ADDR + i * 16, 0x04, target_addr);
+        uint32 descriptor = PCU_ADDR + (uint32)i * 16;
+
+        io::write32((uint32 *)descriptor, 0x04, target_addr);
 
         // check to see if write was successful
-        if (io::read32((uint32 *)PCU_ADDR + i * 16, 0x04) != target_addr) {
+        if (io::read32((uint32 *)descriptor, 0x04) != target_addr) {
             // error
             continue;
         }

@@ -15,7 +15,7 @@ IMG_TARGETS := boot kernel
 all: codac $(EXE_TARGETS) $(IMG_TARGETS)
 
 run: emu codac boot kernel
-	@$(BUILD)/emu $(BUILD)/boot.oxe $(BUILD)/kernel.oxe
+	@$(BUILD)/emu $(BUILD)/boot.oxe $(BUILD)/kernel.oxe image.bin
 
 clean:
 	rm -rf $(BUILD)
