@@ -113,7 +113,6 @@ fn bool init() {
         _: return false;
     }
 
-    // Allocate a physically contiguous DMA region.
     mut uint32 dma_address = 0;
 
     match (pmm::alloc_pages(DMA_PAGE_COUNT)) {
@@ -125,7 +124,6 @@ fn bool init() {
         }
     }
 
-    // Map the contiguous physical allocation into kernel virtual memory.
     mut uint32 mapped_pages = 0;
 
     while (mapped_pages < DMA_PAGE_COUNT) {

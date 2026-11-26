@@ -9,7 +9,6 @@
 #include "blkdev.h"
 #include "isa.h"
 
-
 static bool pread_exact(int fd, void *buffer, size_t length, off_t offset) {
     uint8_t *p = buffer;
 

@@ -159,21 +159,22 @@ int main(int argc, char **argv) {
             machine_step(&machine);
         }
 
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+
+        timer_pool.virtual_time += now_ns - last_ns;
+        last_ns = now_ns;
+
+        timer_run_expired(&timer_pool);
+
         if (machine.icu.has_int && (machine.cpu.flags & FLAG_IE)) {
             uint8_t vector;
-            
+
             if (icu_accept_irq(&machine.icu, &vector) != -1) {
                 machine_raise_exception(&machine, vector, machine.cpu.pc);
                 continue;
             }
         }
-
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        uint64_t now_ns = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-        timer_pool.virtual_time += now_ns - last_ns;
-        last_ns = now_ns;
-
-        timer_run_expired(&timer_pool);
     }
 
     printf("CPU halted at 0x%08X\n", machine.cpu.pc);
