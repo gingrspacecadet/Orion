@@ -504,6 +504,7 @@ The controller is a configurable PCU peripheral. All register offsets are relati
 | `0x0C` | `MEM_ADDR` | RW | 32-bit physical RAM address for DMA. |
 | `0x10` | `SECTOR_COUNT` | RW | Number of consecutive 512-byte sectors to transfer. |
 | `0x14` | `INTERRUPT_ACK` | WO | Writing any value clears the completion/error interrupt condition. |
+| `0x18` | `CAPACITY` | RO | The total amount of sectors the disk has. |
 
 A transfer moves `SECTOR_COUNT * 512` bytes between disk and physical RAM beginning at `MEM_ADDR`. Device DMA uses physical addresses and does not consult the CPU TLB. Before starting, the controller validates that the full DMA range is RAM, does not wrap the 32-bit address space, and does not overlap MMIO or an active BAR. Invalid transfers fail without partial DMA. DMA cannot access CPU MMIO registers.
 

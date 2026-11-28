@@ -6,12 +6,13 @@ include pmm;
 include vmm;
 include int::irq : irq_ctl;
 
-uint32 REG_STATUS       = 0x00;
-uint32 REG_COMMAND      = 0x04;
-uint32 REG_LBA          = 0x08;
-uint32 REG_MEM_ADDR     = 0x0C;
-uint32 REG_SECTOR_COUNT = 0x10;
-uint32 REG_INTERRUPT_ACK = 0x14;
+uint32 REG_STATUS           = 0x00;
+uint32 REG_COMMAND          = 0x04;
+uint32 REG_LBA              = 0x08;
+uint32 REG_MEM_ADDR         = 0x0C;
+uint32 REG_SECTOR_COUNT     = 0x10;
+uint32 REG_INTERRUPT_ACK    = 0x14;
+uint32 REG_CAPACITY         = 0x18;
 
 uint32 STATUS_BUSY        = 1 << 0;
 uint32 STATUS_ERROR       = 1 << 1;
@@ -39,13 +40,14 @@ mut uint32 dma_physical;
 mut bool initialised;
 mut bool in_flight;
 
+mut uint32 capacity;
+
 @export
 type BlockError = enum {
     NotInitialised,
     InvalidCount,
     InvalidBuffer,
     RequestTooLarge,
-    LbaOverflow,
     Busy,
     Timeout,
     DeviceError,
@@ -157,6 +159,8 @@ fn bool init() {
     in_flight = false;
     initialised = true;
 
+    capacity = io::read32((mut uint32 *)base, REG_CAPACITY);
+
     return true;
 }
 
@@ -164,6 +168,9 @@ fn bool init() {
 fn (none | BlockError) read(uint32 lba, uint32 count, mut uint8[] buffer) {
     if (!initialised)
         return BlockError::NotInitialised;
+
+    if (lba >= capacity || count > capacity - lba)
+        return BlockError::RequestTooLarge;
 
     if (count == 0)
         return BlockError::InvalidCount;
@@ -173,9 +180,6 @@ fn (none | BlockError) read(uint32 lba, uint32 count, mut uint8[] buffer) {
 
     if (count > DMA_MAX_SECTORS)
         return BlockError::RequestTooLarge;
-
-    if (count - 1 > 0xFFFFFFFF - lba)
-        return BlockError::LbaOverflow;
 
     if (in_flight)
         return BlockError::Busy;
@@ -229,6 +233,74 @@ fn (none | BlockError) read(uint32 lba, uint32 count, mut uint8[] buffer) {
 }
 
 @export
+fn (none | BlockError) write(uint32 lba, uint32 count, uint8[] buffer) {
+    if (!initialised)
+        return BlockError::NotInitialised;
+
+    if (lba >= capacity || count > capacity - lba)
+        return BlockError::RequestTooLarge;
+
+    if (count == 0)
+        return BlockError::InvalidCount;
+
+    if (count > buffer.len / SECTOR_SIZE)
+        return BlockError::InvalidBuffer;
+
+    if (count > DMA_MAX_SECTORS)
+        return BlockError::RequestTooLarge;
+
+    if (in_flight)
+        return BlockError::Busy;
+
+    in_flight = true;
+
+    mut uint32 *regs = (mut uint32 *)base;
+
+    if ((io::read32(regs, REG_STATUS) & STATUS_BUSY) != 0) {
+        in_flight = false;
+        return BlockError::Busy;
+    }
+
+    io::write32(regs, REG_INTERRUPT_ACK, 1);
+
+    io::write32(regs, REG_LBA, lba);
+    io::write32(regs, REG_MEM_ADDR, dma_physical);
+    io::write32(regs, REG_SECTOR_COUNT, count);
+
+    mut uint8 *dma = (mut uint8 *)DMA_VIRTUAL_BASE;
+    uint32 byte_count = count * SECTOR_SIZE;
+
+    for (mut uint32 i = 0; i < byte_count; i += 1) {
+        dma[i] = buffer[i];
+    }
+
+    io::write32(regs, REG_COMMAND, COMMAND_WRITE);
+
+    mut uint32 status = io::read32(regs, REG_STATUS);
+    mut uint32 polls = 0;
+
+    while ((status & STATUS_BUSY) != 0) {
+        if (polls >= POLL_LIMIT) {
+            in_flight = false;
+            return BlockError::Timeout;
+        }
+
+        polls += 1;
+        status = io::read32(regs, REG_STATUS);
+    }
+
+    io::write32(regs, REG_INTERRUPT_ACK, 1);
+
+    if ((status & STATUS_ERROR) != 0) {
+        in_flight = false;
+        return BlockError::DeviceError;
+    }
+
+    in_flight = false;
+    return;
+}
+
+@export
 fn bool deinit() {
     if (!initialised)
         return true;
@@ -255,4 +327,9 @@ fn bool deinit() {
     initialised = false;
 
     return true;
+}
+
+@export
+fn uint32 get_capacity() {
+    return capacity;
 }

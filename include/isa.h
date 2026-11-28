@@ -160,6 +160,7 @@ typedef enum {
 #define BLKDEV_MEM_ADDR         0x0C
 #define BLKDEV_SECTOR_COUNT     0x10
 #define BLKDEV_INTERRUPT_ACK    0x14
+#define BLKDEV_CAPACITY         0x18
 
 #define BLKDEV_STATUS_BUSY          1u << 0
 #define BLKDEV_STATUS_ERROR         1u << 1

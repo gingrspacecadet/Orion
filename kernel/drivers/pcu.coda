@@ -67,6 +67,8 @@ fn none assign_bars() {
         }
 
         devices[i].bar = target_addr;
+
+        addr = target_addr + dev.size;
     }
 }
 

@@ -59,8 +59,10 @@ fn uint32 main() {
     uart::puts("Disk driver test\n");
 
     mut uint8[512] buffer;
+    mem::copy(buffer.ptr, (none*)"Hello from kernel!".ptr, 18);
+    block::write(0, 1, buffer);
     block::read(0, 1, buffer);
-    uart::puts((uint8[]){.ptr = buffer.ptr, .len = 16});
+    uart::puts((uint8[]){.ptr = buffer.ptr, .len = 18});
     uart::puts("\nDisk driver test complete\n");
 
     uart::puts("Creating processes\n");

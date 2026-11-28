@@ -143,6 +143,7 @@ uint32_t blkdev_read(void *state, uint32_t offset, uint8_t size) {
         case BLKDEV_LBA: return blkdev->lba;
         case BLKDEV_MEM_ADDR: return blkdev->mem_addr;
         case BLKDEV_SECTOR_COUNT: return blkdev->sector_count;
+        case BLKDEV_CAPACITY: return blkdev->image_size / 512;
     }
 
     return 0;
